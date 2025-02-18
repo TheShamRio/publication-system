@@ -54,3 +54,4 @@ class Achievement(db.Model):
             achievement = Achievement(user_id=user_id, badge='10_publications')
             db.session.add(achievement)
             db.session.commit()
+            db.session.commit()
