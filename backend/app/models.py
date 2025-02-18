@@ -1,12 +1,13 @@
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 from .extensions import db
+from flask_login import UserMixin
 
-class User(db.Model):
+class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
     publications = db.relationship('Publication', backref='author', lazy=True)
-    password_hash = db.Column(db.String(128))
+    password_hash = db.Column(db.Text)
     role = db.Column(db.String(20), default='teacher')
 
     def set_password(self, password):
@@ -14,6 +15,20 @@ class User(db.Model):
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
+    
+		  # Flask-Login methods
+    def is_active(self):
+        return True  # Всегда активный пользователь, измените, если нужны проверки
+
+    def is_authenticated(self):
+        return True
+
+    def is_anonymous(self):
+        return False
+    
+		    # Flask-Login methods
+    def get_id(self):
+        return str(self.id)  # Flask-Login требует строковый идентификатор
 
 class Publication(db.Model):
     id = db.Column(db.Integer, primary_key=True)
