@@ -9,108 +9,180 @@ from .analytics import get_publications_by_year
 from flask import current_app
 from werkzeug.utils import secure_filename
 import os
-
-
+from flask_login import login_required, current_user
+import logging
+from datetime import datetime
+import bibtexparser
 
 bp = Blueprint('api', __name__)
 
-	
 @bp.route('/publications', methods=['GET'])
+@login_required
 def get_publications():
-    publications = Publication.query.all()
+    publications = Publication.query.filter_by(user_id=current_user.id).all()
     return jsonify([{
         'id': pub.id,
         'title': pub.title,
-        'year': pub.year
+        'year': pub.year,
+        'authors': pub.authors,  # Добавим другие поля, если нужны
+        'type': pub.type,
+        'status': pub.status,
+        'file_url': pub.file_url
     } for pub in publications])
 
 
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 @bp.route('/publications/upload-file', methods=['POST'])
 @login_required
 def upload_file():
-    # Проверяем, передан ли файл в запросе
+    logger.debug(f"User attempting upload: {current_user.username if current_user.is_authenticated else 'Not authenticated'}")
+    
     if 'file' not in request.files:
-        return jsonify({"error": "No file provided"}), 400
+        return jsonify({"error": "Не предоставлен файл"}), 400
 
     file = request.files['file']
 
     if file.filename == '':
-        return jsonify({"error": "No file selected"}), 400
+        return jsonify({"error": "Не выбран файл"}), 400
 
-    # Проверяем, разрешено ли расширение
-    if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-        file.save(file_path)
-        
-        # Получаем дополнительные данные из формы (метаданные публикации)
-        # Можно передавать их через form-data
-        title = request.form.get('title', 'Untitled')
-        authors = request.form.get('authors', 'Unknown')
-        year = request.form.get('year', 2023)
-        pub_type = request.form.get('type', 'article')
-        
-        # Создаем объект Publication и сохраняем в БД
-        publication = Publication(
-            title=title,
-            authors=authors,
-            year=int(year),
-            type=pub_type,
-            file_url=file_path,
-            status='draft',
-            user_id=current_user.id
-        )
-        db.session.add(publication)
-        db.session.commit()
-        
-        return jsonify({"message": "Publication created with file", "id": publication.id}), 201
-    else:
-        return jsonify({"error": "File type not allowed"}), 400
+    if not file or not allowed_file(file.filename):
+        return jsonify({"error": "Тип файла не разрешен. Разрешены только PDF и DOCX"}), 400
 
-@bp.route('/publications/upload-bibtex', methods=['POST'])
-def upload_bibtex():
-    if 'file' not in request.files:
-        return jsonify({"error": "No file uploaded"}), 400
+    title = request.form.get('title', '').strip()
+    authors = request.form.get('authors', '').strip()
+    year_str = request.form.get('year', '')
 
-    file = request.files['file']
-    if file.filename == '':
-        return jsonify({"error": "Empty filename"}), 400
+    if not title or not authors or not year_str:
+        return jsonify({"error": "Все поля (название, авторы, год) должны быть заполнены"}), 400
 
-    bibtex_str = file.read().decode('utf-8')
-    parser = bibtexparser.bparser.BibTexParser(common_strings=True)
-    bib_database = bibtexparser.loads(bibtex_str, parser=parser)
+    try:
+        year = int(year_str)
+        if year < 1900 or year > datetime.now().year:
+            return jsonify({"error": f"Год должен быть в пределах 1900–{datetime.now().year}"}), 400
+    except ValueError:
+        return jsonify({"error": "Год должен быть числом"}), 400
 
-    for entry in bib_database.entries:
-        publication = Publication(
-            title=entry.get('title', 'Untitled'),
-            authors=entry.get('author', 'Unknown'),
-            year=int(entry.get('year', 2023)),
-            type=entry.get('ENTRYTYPE', 'article'),
-            status='draft'
-        )
-        db.session.add(publication)
+    pub_type = request.form.get('type', 'article')
+    if pub_type not in ['article', 'monograph', 'conference']:
+        return jsonify({"error": "Недопустимый тип публикации"}), 400
 
+    filename = secure_filename(file.filename)
+    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+    file.save(file_path)
+    
+    publication = Publication(
+        title=title,
+        authors=authors,
+        year=year,
+        type=pub_type,
+        file_url=file_path,
+        status='draft',
+        user_id=current_user.id
+    )
+    db.session.add(publication)
     db.session.commit()
-    return jsonify({"message": f"Uploaded {len(bib_database.entries)} publications"}), 201
+    
+    return jsonify({"message": "Публикация успешно создана", "id": publication.id}), 201
+
+def allowed_file(filename):
+    with current_app.app_context():
+        return '.' in filename and \
+            filename.rsplit('.', 1)[1].lower() in current_app.config['ALLOWED_EXTENSIONS']
+@bp.route('/publications/upload-bibtex', methods=['POST'])
+@login_required
+def upload_bibtex():
+    logger.debug(f"User attempting BibTeX upload: {current_user.username}")
+    
+    if 'file' not in request.files:
+        return jsonify({"error": "Не загружен файл"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "Не выбран файл"}), 400
+
+    if not file or not allowed_file(file.filename):
+        return jsonify({"error": "Тип файла не разрешен. Разрешены только файлы .bib"}), 400
+
+    try:
+        bibtex_str = file.read().decode('utf-8')
+        parser = bibtexparser.bparser.BibTexParser(common_strings=True)
+        bib_database = bibtexparser.loads(bibtex_str, parser=parser)
+
+        publications_count = 0
+        for entry in bib_database.entries:
+            title = entry.get('title', 'Untitled')
+            authors = entry.get('author', 'Unknown')
+            year_str = entry.get('year', '2023')
+            
+            try:
+                year = int(year_str)
+                if year < 1900 or year > datetime.now().year:
+                    return jsonify({"error": f"Недопустимый год в записи: {year_str}. Должно быть 1900–{datetime.now().year}"}), 400
+            except (ValueError, TypeError):
+                return jsonify({"error": f"Год в записи должен быть числом: {year_str}"}), 400
+
+            entry_type = entry.get('ENTRYTYPE', 'article').lower()
+            if entry_type not in ['article', 'book', 'inproceedings']:
+                entry_type = 'article'  # По умолчанию статья, если тип неизвестен
+
+            publication = Publication(
+                title=title,
+                authors=authors,
+                year=year,
+                type=entry_type,
+                status='draft',
+                user_id=current_user.id  # Связываем с текущим пользователем
+            )
+            db.session.add(publication)
+            publications_count += 1
+
+        db.session.commit()
+        return jsonify({"message": f"Загружено {publications_count} публикаций"}), 201
+    except Exception as e:
+        logger.error(f"Error parsing BibTeX: {str(e)}")
+        return jsonify({"error": "Ошибка парсинга BibTeX. Проверьте файл и повторите попытку."}), 400
+
+def allowed_file(filename):
+    with current_app.app_context():
+        return '.' in filename and \
+            filename.rsplit('.', 1)[1].lower() in current_app.config['ALLOWED_EXTENSIONS']
+
+from flask_login import login_required, current_user
 
 @bp.route('/register', methods=['POST'])
 def register():
     data = request.json
-    user = User(username=data['username'])
-    user.set_password(data['password'])
+    if User.query.filter_by(username=data['username']).first():
+        return jsonify({"error": "Пользователь с таким именем уже существует"}), 400
+
+    user = User(
+        username=data['username'],
+        last_name=data.get('last_name'),  # По умолчанию None, если не указано
+        first_name=data.get('first_name'),
+        middle_name=data.get('middle_name')
+    )
+    user.set_password(data['password'])  # Используем метод set_password
     db.session.add(user)
     db.session.commit()
-    return jsonify({"message": "User created"}), 201
+    return jsonify({"message": "Пользователь зарегистрирован", "user": {
+        "id": user.id,
+        "username": user.username,
+        "last_name": user.last_name,
+        "first_name": user.first_name,
+        "middle_name": user.middle_name
+    }}), 201
 
 @bp.route('/login', methods=['POST'])
 def login():
     data = request.json
+    print(f"Received login attempt for username: {data['username']}")  # Отладка
     user = User.query.filter_by(username=data['username']).first()
     if user and user.check_password(data['password']):
         login_user(user)
-        return jsonify({"message": "Logged in"})
-    return jsonify({"error": "Invalid credentials"}), 401
+        return jsonify({"message": "Вход выполнен"})
+    return jsonify({"error": "Неверные учетные данные"}), 401
 
 @bp.route('/logout')
 def logout():
@@ -132,48 +204,73 @@ def admin_stats():
     # Логика для админ-панели
     return jsonify({"total_publications": Publication.query.count()})
 
-@bp.route('/analytics/yearly')
-def yearly_analytics():
-    data = get_publications_by_year()
-    return jsonify([{"year": year, "count": count} for year, count in data])
+from sqlalchemy import func
 
-def allowed_file(filename):
-    with current_app.app_context():
-        return '.' in filename and \
-            filename.rsplit('.', 1)[1].lower() in current_app.config['ALLOWED_EXTENSIONS']
-    
+@bp.route('/analytics/yearly', methods=['GET'])
+@login_required
+def get_yearly_analytics():
+    yearly_stats = db.session.query(
+        Publication.year,
+        func.count(Publication.id)
+    ).filter(Publication.user_id == current_user.id)\
+      .group_by(Publication.year)\
+      .all()
+    return jsonify([{
+        'year': year,
+        'count': count
+    } for year, count in yearly_stats])
+
+from flask_login import login_required, current_user
 
 @bp.route('/publications/<int:pub_id>', methods=['PUT'])
 @login_required
 def update_publication(pub_id):
     publication = Publication.query.get_or_404(pub_id)
-    
-    # Проверяем, что текущий пользователь является автором публикации
     if publication.user_id != current_user.id:
-        return jsonify({"error": "Access denied"}), 403
+        return jsonify({"error": "У вас нет прав на редактирование этой публикации"}), 403
 
     data = request.json
     publication.title = data.get('title', publication.title)
     publication.authors = data.get('authors', publication.authors)
-    publication.year = int(data.get('year', publication.year))
+    publication.year = data.get('year', publication.year)
     publication.type = data.get('type', publication.type)
     publication.status = data.get('status', publication.status)
-    
-    db.session.commit()
-    return jsonify({"message": "Publication updated"})
+
+    try:
+        db.session.commit()
+        return jsonify({"message": "Публикация успешно отредактирована", "publication": {
+            "id": publication.id,
+            "title": publication.title,
+            "authors": publication.authors,
+            "year": publication.year,
+            "type": publication.type,
+            "status": publication.status
+        }}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Ошибка при редактировании публикации. Попробуйте позже."}), 500
+
+from flask_login import login_required, current_user
 
 @bp.route('/publications/<int:pub_id>', methods=['DELETE'])
 @login_required
 def delete_publication(pub_id):
     publication = Publication.query.get_or_404(pub_id)
-    
-    # Проверяем, что текущий пользователь является автором публикации
+    # Проверяем, принадлежит ли публикация текущему пользователю
     if publication.user_id != current_user.id:
-        return jsonify({"error": "Access denied"}), 403
-
-    db.session.delete(publication)
-    db.session.commit()
-    return jsonify({"message": "Publication deleted"})
+        return jsonify({"error": "У вас нет прав на удаление этой публикации"}), 403
+    
+    try:
+        # Удаляем файл, если он существует
+        if publication.file_url and os.path.exists(publication.file_url):
+            os.remove(publication.file_url)
+        
+        db.session.delete(publication)
+        db.session.commit()
+        return jsonify({"message": "Публикация успешно удалена"}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Ошибка при удалении публикации. Попробуйте позже."}), 500
 
 
 @bp.route('/publications/search', methods=['GET'])
@@ -205,3 +302,14 @@ def search_publications():
     } for pub in publications]
 
     return jsonify(results)
+
+@bp.route('/user', methods=['GET'])
+@login_required
+def get_user():
+    return jsonify({
+        "id": current_user.id,
+        "username": current_user.username,
+        "last_name": current_user.last_name,
+        "first_name": current_user.first_name,
+        "middle_name": current_user.middle_name
+    })

@@ -9,14 +9,17 @@ class User(db.Model, UserMixin):
     publications = db.relationship('Publication', backref='author', lazy=True)
     password_hash = db.Column(db.Text)
     role = db.Column(db.String(20), default='teacher')
-
+    last_name = db.Column(db.String(100), nullable=True)  # Фамилия
+    first_name = db.Column(db.String(100), nullable=True)  # Имя
+    middle_name = db.Column(db.String(100), nullable=True)  # Отчество
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
     
-		  # Flask-Login methods
+        # Flask-Login methods
     def is_active(self):
         return True  # Всегда активный пользователь, измените, если нужны проверки
 
