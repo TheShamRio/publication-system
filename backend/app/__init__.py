@@ -1,4 +1,4 @@
-from flask import Flask
+from flask import Flask, send_from_directory
 from .extensions import db, migrate, login_manager  
 from .models import User
 import os
@@ -21,10 +21,15 @@ def create_app():
     from .routes import bp
     app.register_blueprint(bp, url_prefix='/api')
 
+    @app.route('/uploads/<path:filename>')
+    def download_file(filename):
+        return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
+
     with app.app_context():
         db.create_all()
 
     return app
+
 
 @login_manager.user_loader
 def load_user(user_id):

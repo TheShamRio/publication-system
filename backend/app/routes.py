@@ -13,8 +13,98 @@ from flask_login import login_required, current_user
 import logging
 from datetime import datetime
 import bibtexparser
-
 bp = Blueprint('api', __name__)
+from werkzeug.security import generate_password_hash, check_password_hash
+from flask_login import login_required, current_user
+from bibtexparser import bibdatabase  # Импортируем bibdatabase
+from bibtexparser import bwriter  # Импортируем writer
+
+@bp.route('/publications/export-bibtex', methods=['GET'])
+@login_required
+def export_bibtex():
+    publications = Publication.query.filter_by(user_id=current_user.id).all()
+    if not publications:
+        return jsonify({"error": "Нет публикаций для выгрузки"}), 404
+
+    bib_database = bibdatabase.BibDatabase()  # Используем bibdatabase.BibDatabase
+    entries = []
+
+    for pub in publications:
+        entry = {
+            'ENTRYTYPE': pub.type,  # Тип публикации (article, monograph, conference)
+            'ID': f"{pub.title.replace(' ', '_')}_{pub.year}",  # Уникальный ID
+            'title': pub.title,
+            'author': pub.authors,
+            'year': str(pub.year),
+        }
+        if pub.file_url:
+            entry['file'] = pub.file_url  # Опционально, путь к файлу
+        if pub.status:
+            entry['note'] = pub.status  # Статус как заметка
+        entries.append(entry)
+
+    bib_database.entries = entries
+    writer_instance = bwriter.BibTexWriter()  # Используем bibtexparser.writer.BibTexWriter
+    bibtex_str = bibtexparser.dumps(bib_database, writer_instance)
+
+    from flask import make_response
+    response = make_response(bibtex_str)
+    response.headers['Content-Disposition'] = 'attachment; filename=publications.bib'
+    response.mimetype = 'application/x-bibtex'
+    return response
+@bp.route('/user/password', methods=['PUT'])
+@login_required
+def update_user_password():
+    data = request.json
+    if not data or not all(key in data for key in ['current_password', 'new_password']):
+        return jsonify({"error": "Отсутствуют обязательные поля (текущий и новый пароль)"}), 400
+
+    if not check_password_hash(current_user.password_hash, data['current_password']):
+        return jsonify({"error": "Неверный текущий пароль"}), 400
+
+    current_user.set_password(data['new_password'])
+    try:
+        db.session.commit()
+        return jsonify({"message": "Пароль успешно обновлен"}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": "Ошибка при обновлении пароля. Попробуйте позже."}), 500
+
+@bp.route('/publications/<int:pub_id>/attach-file', methods=['POST'])
+@login_required
+def attach_file_to_publication(pub_id):
+    publication = Publication.query.get_or_404(pub_id)
+    if publication.user_id != current_user.id:
+        return jsonify({"error": "У вас нет прав на изменение этой публикации"}), 403
+
+    if 'file' not in request.files:
+        return jsonify({"error": "Не предоставлен файл"}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({"error": "Не выбран файл"}), 400
+
+    if not file or not allowed_file(file.filename):
+        return jsonify({"error": "Тип файла не разрешен. Разрешены только PDF и DOCX"}), 400
+
+    filename = secure_filename(file.filename)
+    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+    file.save(file_path)
+
+    publication.file_url = os.path.join('uploads', filename)  # Сохраняем относительный путь
+    db.session.commit()
+    return jsonify({"message": "Файл успешно прикреплен", "publication": {
+        "id": publication.id,
+        "title": publication.title,
+        "file_url": publication.file_url,
+        "type": publication.type_ru,
+        "status": publication.status_ru
+    }}), 200
+
+def allowed_file(filename):
+    with current_app.app_context():
+        return '.' in filename and \
+            filename.rsplit('.', 1)[1].lower() in current_app.config['ALLOWED_EXTENSIONS']
 
 @bp.route('/publications', methods=['GET'])
 @login_required
@@ -313,3 +403,33 @@ def get_user():
         "first_name": current_user.first_name,
         "middle_name": current_user.middle_name
     })
+
+@bp.route('/user', methods=['PUT'])
+@login_required
+def update_user():
+    logger.debug(f"Received PUT request for /user with data: {request.json}")
+    data = request.json
+    if not data or not all(key in data for key in ['last_name', 'first_name', 'middle_name']):
+        return jsonify({"error": "Отсутствуют обязательные поля"}), 400
+
+    current_user.last_name = data['last_name'].strip() if data['last_name'] else None
+    current_user.first_name = data['first_name'].strip() if data['first_name'] else None
+    current_user.middle_name = data['middle_name'].strip() if data['middle_name'] else None
+
+    try:
+        db.session.commit()
+        logger.debug(f"User data updated successfully for user {current_user.id}")
+        return jsonify({
+            "message": "Личные данные успешно обновлены",
+            "user": {
+                "id": current_user.id,
+                "username": current_user.username,
+                "last_name": current_user.last_name,
+                "first_name": current_user.first_name,
+                "middle_name": current_user.middle_name
+            }
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating user data: {str(e)}")
+        return jsonify({"error": "Ошибка при обновлении данных. Попробуйте позже."}), 500

@@ -44,6 +44,22 @@ class Publication(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
+    @property
+    def type_ru(self):
+        return {
+            'article': 'Статья',
+            'monograph': 'Монография',
+            'conference': 'Доклад/конференция'
+        }.get(self.type, self.type)
+
+    @property
+    def status_ru(self):
+        return {
+            'draft': 'Черновик',
+            'review': 'На проверке',
+            'published': 'Опубликовано'
+        }.get(self.status, self.status)
+
 class Achievement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'))

@@ -1,11 +1,48 @@
-import React, { useState, useEffect } from 'react';
-import { Container, Typography, Table, TableHead, TableRow, TableCell, TableBody, Paper, Grid, Card, CardContent, Button, TextField, Box, MenuItem, Alert, Collapse, Dialog, DialogTitle, DialogContent, DialogActions, IconButton } from '@mui/material';
+import React, { useState, useEffect, useRef } from 'react';
+import { Line, Bar } from 'react-chartjs-2';
+import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend } from 'chart.js';
+import {
+	Container,
+	Typography,
+	Table,
+	TableHead,
+	TableRow,
+	TableCell,
+	TableBody,
+	Paper,
+	Grid,
+	Card,
+	CardContent,
+	Button,
+	TextField,
+	Box,
+	MenuItem,
+	Alert,
+	Collapse,
+	Dialog,
+	DialogTitle,
+	DialogContent,
+	DialogActions,
+	IconButton,
+	Tabs,
+	Tab,
+	Accordion,
+	AccordionSummary,
+	AccordionDetails
+} from '@mui/material';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore'; // Для Accordion
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
-import DeleteIcon from '@mui/icons-material/Delete';
 import EditIcon from '@mui/icons-material/Edit';
+import DeleteIcon from '@mui/icons-material/Delete';
+import AttachFileIcon from '@mui/icons-material/AttachFile';
+import DownloadIcon from '@mui/icons-material/Download';
+
+ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend);
 
 function Dashboard() {
+	const [showDetailedAnalytics, setShowDetailedAnalytics] = useState(false);
+	const [value, setValue] = useState(0); // Для табов
 	const [publications, setPublications] = useState([]);
 	const [analytics, setAnalytics] = useState([]);
 	const [uploadType, setUploadType] = useState('file');
@@ -20,83 +57,37 @@ function Dashboard() {
 	const [openSuccess, setOpenSuccess] = useState(false);
 	const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
 	const [publicationToDelete, setPublicationToDelete] = useState(null);
-	const [user, setUser] = useState(null); // Добавляем состояние для данных пользователя
-	const navigate = useNavigate();
 	const [openEditDialog, setOpenEditDialog] = useState(false);
-	const [publicationToEdit, setPublicationToEdit] = useState(null);
+	const [editPublication, setEditPublication] = useState(null);
 	const [editTitle, setEditTitle] = useState('');
 	const [editAuthors, setEditAuthors] = useState('');
 	const [editYear, setEditYear] = useState('');
 	const [editType, setEditType] = useState('article');
 	const [editStatus, setEditStatus] = useState('draft');
-	const typeMap = {
-		article: 'Статья',
-		monograph: 'Монография',
-		conference: 'Доклад/конференция',
-	};
-	const statusMap = {
-		draft: 'Черновик',
-		review: 'На проверке',
-		published: 'Опубликовано',
-	};
-	const handleEditClick = (publication) => {
-		setPublicationToEdit(publication);
-		setEditTitle(publication.title);
-		setEditAuthors(publication.authors);
-		setEditYear(publication.year);
-		setEditType(publication.type);
-		setEditStatus(publication.status);
-		setOpenEditDialog(true);
-	};
+	const [openEditUserDialog, setOpenEditUserDialog] = useState(false);
+	const [editLastName, setEditLastName] = useState('');
+	const [editFirstName, setEditFirstName] = useState('');
+	const [editMiddleName, setEditMiddleName] = useState('');
+	const [user, setUser] = useState(null);
+	const [openAttachFileDialog, setOpenAttachFileDialog] = useState(false);
+	const [publicationToAttach, setPublicationToAttach] = useState(null);
+	const [attachFile, setAttachFile] = useState(null);
+	const [attachError, setAttachError] = useState('');
+	const [attachSuccess, setAttachSuccess] = useState('');
+	const [openChangePasswordDialog, setOpenChangePasswordDialog] = useState(false);
+	const [currentPassword, setCurrentPassword] = useState('');
+	const [newPassword, setNewPassword] = useState('');
+	const [passwordError, setPasswordError] = useState('');
+	const [passwordSuccess, setPasswordSuccess] = useState('');
+	const [pubTypes, setPubTypes] = useState({ article: 0, monograph: 0, conference: 0 });
+	const [pubStatuses, setPubStatuses] = useState({ draft: 0, review: 0, published: 0 });
+	const [totalCitations, setTotalCitations] = useState(0); // Пример, если есть данные о цитированиях
+	const navigate = useNavigate();
+	const chartRef = useRef(null);
 
-	const handleEditSubmit = async (e) => {
-		e.preventDefault();
-		if (!publicationToEdit) return;
-
-		try {
-			const response = await axios.put(`http://localhost:5000/api/publications/${publicationToEdit.id}`, {
-				title: editTitle.trim(),
-				authors: editAuthors.trim(),
-				year: parseInt(editYear, 10),
-				type: editType,
-				status: editStatus,
-			}, {
-				withCredentials: true,
-			});
-			setSuccess('Публикация успешно отредактирована!');
-			setOpenSuccess(true);
-			setError('');
-			setOpenEditDialog(false);
-			const pubResponse = await axios.get('http://localhost:5000/api/publications', {
-				withCredentials: true,
-			});
-			setPublications(pubResponse.data);
-		} catch (err) {
-			console.error('Ошибка редактирования публикации:', err);
-			if (err.response?.status === 401) {
-				navigate('/login');
-			} else if (err.response?.status === 403) {
-				setError('У вас нет прав на редактирование этой публикации.');
-			} else if (err.response?.status === 400) {
-				setError('Ошибка: ' + (err.response?.data?.error || 'Некорректные данные. Проверьте введенные поля.'));
-			} else if (err.response?.status === 500) {
-				setError('Произошла ошибка сервера. Попробуйте позже.');
-			} else {
-				setError('Ошибка редактирования публикации. Попробуйте позже.');
-			}
-			setOpenError(true);
-			setSuccess('');
-		}
-	};
-
-	const handleEditCancel = () => {
-		setOpenEditDialog(false);
-		setPublicationToEdit(null);
-		setEditTitle('');
-		setEditAuthors('');
-		setEditYear('');
-		setEditType('article');
-		setEditStatus('draft');
+	const handleTabChange = (event, newValue) => {
+		setValue(newValue);
+		if (newValue !== 2) setShowDetailedAnalytics(false);
 	};
 
 	useEffect(() => {
@@ -110,6 +101,19 @@ function Dashboard() {
 				});
 				setPublications(pubResponse.data);
 				setAnalytics(analyticsResponse.data);
+
+				// Анализируем типы и статусы публикаций
+				const types = { article: 0, monograph: 0, conference: 0 };
+				const statuses = { draft: 0, review: 0, published: 0 };
+				let citations = 0; // Пример, если есть поле citations
+				pubResponse.data.forEach(pub => {
+					types[pub.type] = (types[pub.type] || 0) + 1;
+					statuses[pub.status] = (statuses[pub.status] || 0) + 1;
+					if (pub.citations) citations += pub.citations; // Если есть поле citations
+				});
+				setPubTypes(types);
+				setPubStatuses(statuses);
+				setTotalCitations(citations);
 			} catch (err) {
 				console.error('Ошибка загрузки данных:', err);
 				if (err.response?.status === 401) {
@@ -139,6 +143,59 @@ function Dashboard() {
 		fetchData();
 		fetchUserData();
 	}, [navigate]);
+
+
+	const handleChangePasswordClick = () => {
+		setOpenChangePasswordDialog(true);
+		setCurrentPassword('');
+		setNewPassword('');
+		setPasswordError('');
+		setPasswordSuccess('');
+	};
+
+	const handleChangePasswordSubmit = async (e) => {
+		e.preventDefault();
+		try {
+			console.log('Changing password for user:', user?.username);
+			const response = await axios.put('http://localhost:5000/api/user/password', {
+				current_password: currentPassword,
+				new_password: newPassword,
+			}, {
+				withCredentials: true,
+			});
+			setPasswordSuccess('Пароль успешно обновлен!');
+			setPasswordError('');
+			setOpenChangePasswordDialog(false);
+			setCurrentPassword('');
+			setNewPassword('');
+		} catch (err) {
+			console.error('Ошибка изменения пароля:', err);
+			if (err.response) {
+				setPasswordError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные данные.'}`);
+			} else {
+				setPasswordError('Ошибка сети. Проверьте подключение и сервер.');
+			}
+			setPasswordSuccess('');
+		}
+	};
+
+	const handleChangePasswordCancel = () => {
+		setOpenChangePasswordDialog(false);
+		setCurrentPassword('');
+		setNewPassword('');
+		setPasswordError('');
+		setPasswordSuccess('');
+	};
+
+	useEffect(() => {
+		if (passwordError || passwordSuccess) {
+			const timer = setTimeout(() => {
+				setPasswordError('');
+				setPasswordSuccess('');
+			}, 5000);
+			return () => clearTimeout(timer);
+		}
+	}, [passwordError, passwordSuccess]);
 
 	const handleFileUpload = async (e) => {
 		e.preventDefault();
@@ -174,10 +231,9 @@ function Dashboard() {
 		formData.append('type', type);
 
 		try {
+			console.log('Uploading file with data:', { title, authors, year, type });
 			const response = await axios.post('http://localhost:5000/api/publications/upload-file', formData, {
-				headers: {
-					'Content-Type': 'multipart/form-data',
-				},
+				headers: { 'Content-Type': 'multipart/form-data' },
 				withCredentials: true,
 			});
 			setSuccess('Публикация успешно загружена!');
@@ -194,14 +250,10 @@ function Dashboard() {
 			setPublications(pubResponse.data);
 		} catch (err) {
 			console.error('Ошибка загрузки файла:', err);
-			if (err.response?.status === 400) {
-				setError('Ошибка: ' + (err.response?.data?.error || 'Некорректные данные. Проверьте введенные поля и файл.'));
-			} else if (err.response?.status === 401) {
-				navigate('/login');
-			} else if (err.response?.status === 403 || err.response?.status === 500) {
-				setError('Произошла ошибка сервера. Попробуйте позже.');
+			if (err.response) {
+				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля и файл.'}`);
 			} else {
-				setError('Ошибка загрузки публикации. Попробуйте позже.');
+				setError('Ошибка сети. Проверьте подключение и сервер.');
 			}
 			setOpenError(true);
 			setSuccess('');
@@ -227,10 +279,9 @@ function Dashboard() {
 		formData.append('file', file);
 
 		try {
+			console.log('Uploading BibTeX file');
 			const response = await axios.post('http://localhost:5000/api/publications/upload-bibtex', formData, {
-				headers: {
-					'Content-Type': 'multipart/form-data',
-				},
+				headers: { 'Content-Type': 'multipart/form-data' },
 				withCredentials: true,
 			});
 			setSuccess(`Загружено ${response.data.message.split(' ')[1]} публикаций!`);
@@ -243,21 +294,79 @@ function Dashboard() {
 			setPublications(pubResponse.data);
 		} catch (err) {
 			console.error('Ошибка загрузки BibTeX:', err);
-			if (err.response?.status === 400) {
-				setError('Ошибка: ' + (err.response?.data?.error || 'Некорректный формат BibTeX. Проверьте файл.'));
-			} else if (err.response?.status === 401) {
-				navigate('/login');
-			} else if (err.response?.status === 403 || err.response?.status === 500) {
-				setError('Произошла ошибка сервера. Попробуйте позже.');
+			if (err.response) {
+				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте формат BibTeX.'}`);
 			} else {
-				setError('Ошибка загрузки BibTeX. Попробуйте позже.');
+				setError('Ошибка сети. Проверьте подключение и сервер.');
 			}
 			setOpenError(true);
 			setSuccess('');
 		}
 	};
 
+	const handleEditClick = (publication) => {
+		console.log('Editing publication:', publication.id);
+		setEditPublication(publication);
+		setEditTitle(publication.title);
+		setEditAuthors(publication.authors);
+		setEditYear(publication.year);
+		setEditType(publication.type);
+		setEditStatus(publication.status);
+		setOpenEditDialog(true);
+	};
+
+	const handleEditSubmit = async (e) => {
+		e.preventDefault();
+		if (!editPublication) return;
+
+		try {
+			console.log('Updating publication with:', { title: editTitle, authors: editAuthors, year: editYear, type: editType, status: editStatus });
+			const response = await axios.put(`http://localhost:5000/api/publications/${editPublication.id}`, {
+				title: editTitle.trim(),
+				authors: editAuthors.trim(),
+				year: parseInt(editYear, 10),
+				type: editType,
+				status: editStatus,
+			}, {
+				withCredentials: true,
+			});
+			setSuccess('Публикация успешно отредактирована!');
+			setOpenSuccess(true);
+			setError('');
+			const pubResponse = await axios.get('http://localhost:5000/api/publications', {
+				withCredentials: true,
+			});
+			setPublications(pubResponse.data);
+			setOpenEditDialog(false);
+		} catch (err) {
+			console.error('Ошибка редактирования публикации:', err);
+			if (err.response) {
+				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`);
+			} else {
+				setError('Ошибка сети. Проверьте подключение и сервер.');
+			}
+			if (err.response?.status === 401) {
+				navigate('/login');
+			} else if (err.response?.status === 403) {
+				setError('У вас нет прав на редактирование этой публикации.');
+			}
+			setOpenError(true);
+			setSuccess('');
+		}
+	};
+
+	const handleEditCancel = () => {
+		setOpenEditDialog(false);
+		setEditPublication(null);
+		setEditTitle('');
+		setEditAuthors('');
+		setEditYear('');
+		setEditType('article');
+		setEditStatus('draft');
+	};
+
 	const handleDeleteClick = (publication) => {
+		console.log('Deleting publication:', publication.id);
 		setPublicationToDelete(publication);
 		setOpenDeleteDialog(true);
 	};
@@ -266,6 +375,7 @@ function Dashboard() {
 		if (!publicationToDelete) return;
 
 		try {
+			console.log('Confirming deletion of publication:', publicationToDelete.id);
 			await axios.delete(`http://localhost:5000/api/publications/${publicationToDelete.id}`, {
 				withCredentials: true,
 			});
@@ -278,14 +388,15 @@ function Dashboard() {
 			setPublications(pubResponse.data);
 		} catch (err) {
 			console.error('Ошибка удаления публикации:', err);
+			if (err.response) {
+				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте права доступа.'}`);
+			} else {
+				setError('Ошибка сети. Проверьте подключение и сервер.');
+			}
 			if (err.response?.status === 401) {
 				navigate('/login');
 			} else if (err.response?.status === 403) {
 				setError('У вас нет прав на удаление этой публикации.');
-			} else if (err.response?.status === 500) {
-				setError('Произошла ошибка сервера. Попробуйте позже.');
-			} else {
-				setError('Ошибка удаления публикации. Попробуйте позже.');
 			}
 			setOpenError(true);
 			setSuccess('');
@@ -299,7 +410,133 @@ function Dashboard() {
 		setPublicationToDelete(null);
 	};
 
-	// Таймеры для автоматического исчезновения уведомлений
+	const handleEditUserClick = () => {
+		setEditLastName(user?.last_name || '');
+		setEditFirstName(user?.first_name || '');
+		setEditMiddleName(user?.middle_name || '');
+		setOpenEditUserDialog(true);
+	};
+
+	const handleEditUserSubmit = async (e) => {
+		e.preventDefault();
+		try {
+			console.log('Updating user data:', { last_name: editLastName, first_name: editFirstName, middle_name: editMiddleName });
+			const response = await axios.put('http://localhost:5000/api/user', {
+				last_name: editLastName.trim() || null,
+				first_name: editFirstName.trim() || null,
+				middle_name: editMiddleName.trim() || null,
+			}, {
+				withCredentials: true,
+			});
+			setSuccess('Личные данные успешно обновлены!');
+			setOpenSuccess(true);
+			setError('');
+			setUser(response.data.user);
+			setOpenEditUserDialog(false);
+		} catch (err) {
+			console.error('Ошибка редактирования данных:', err);
+			if (err.response) {
+				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`);
+			} else {
+				setError('Ошибка сети. Проверьте подключение и сервер.');
+			}
+			if (err.response?.status === 400) {
+				setError('Некорректные данные. Проверьте введенные поля.');
+			} else if (err.response?.status === 401) {
+				navigate('/login');
+			} else if (err.response?.status === 500) {
+				setError('Произошла ошибка сервера. Попробуйте позже.');
+			}
+			setOpenError(true);
+			setSuccess('');
+		}
+	};
+
+	const handleEditUserCancel = () => {
+		setOpenEditUserDialog(false);
+		setEditLastName('');
+		setEditFirstName('');
+		setEditMiddleName('');
+	};
+
+	const handleAttachFileClick = (publication) => {
+		console.log('Attaching file to publication:', publication.id);
+		setPublicationToAttach(publication);
+		setOpenAttachFileDialog(true);
+		setAttachFile(null);
+		setAttachError('');
+		setAttachSuccess('');
+	};
+
+	const handleAttachFileSubmit = async (e) => {
+		e.preventDefault();
+		if (!attachFile) {
+			setAttachError('Пожалуйста, выберите файл для прикрепления.');
+			return;
+		}
+
+		const formData = new FormData();
+		formData.append('file', attachFile);
+
+		try {
+			console.log('Sending attach file request for publication:', publicationToAttach.id);
+			const response = await axios.post(`http://localhost:5000/api/publications/${publicationToAttach.id}/attach-file`, formData, {
+				headers: { 'Content-Type': 'multipart/form-data' },
+				withCredentials: true,
+			});
+			setAttachSuccess('Файл успешно прикреплен!');
+			setAttachError('');
+			const pubResponse = await axios.get('http://localhost:5000/api/publications', {
+				withCredentials: true,
+			});
+			setPublications(pubResponse.data);
+			setOpenAttachFileDialog(false);
+		} catch (err) {
+			console.error('Ошибка прикрепления файла:', err);
+			if (err.response) {
+				setAttachError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте файл и права доступа.'}`);
+			} else {
+				setAttachError('Ошибка сети. Проверьте подключение и сервер.');
+			}
+			if (err.response?.status === 400) {
+				setAttachError('Некорректный файл. Проверьте формат (PDF/DOCX).');
+			} else if (err.response?.status === 401) {
+				navigate('/login');
+			} else if (err.response?.status === 403) {
+				setAttachError('У вас нет прав на изменение этой публикации.');
+			} else if (err.response?.status === 500) {
+				setAttachError('Произошла ошибка сервера. Попробуйте позже.');
+			}
+			setAttachSuccess('');
+		}
+	};
+
+	const handleAttachFileCancel = () => {
+		setOpenAttachFileDialog(false);
+		setPublicationToAttach(null);
+		setAttachFile(null);
+		setAttachError('');
+		setAttachSuccess('');
+	};
+
+	const handleDownloadClick = (publication) => {
+		console.log('Downloading file for publication:', publication.id);
+		if (!publication.file_url) {
+			setError('Файл не прикреплен к этой публикации.');
+			setOpenError(true);
+			return;
+		}
+		// Нормализуем путь, убирая полный путь и оставляя только "uploads/file.pdf"
+		const normalizedUrl = publication.file_url.replace(/^.*uploads/, 'uploads');
+		const link = document.createElement('a');
+		link.href = `http://localhost:5000/${normalizedUrl}`;
+		link.download = normalizedUrl.split('/').pop();
+		document.body.appendChild(link);
+		link.click();
+		document.body.removeChild(link);
+	};
+
+	// Таймеры для уведомлений
 	useEffect(() => {
 		if (openError || openSuccess) {
 			const timer = setTimeout(() => {
@@ -312,6 +549,74 @@ function Dashboard() {
 		}
 	}, [openError, openSuccess]);
 
+	useEffect(() => {
+		if (attachError || attachSuccess) {
+			const timer = setTimeout(() => {
+				setAttachError('');
+				setAttachSuccess('');
+			}, 5000);
+			return () => clearTimeout(timer);
+		}
+	}, [attachError, attachSuccess]);
+
+	const handleExportBibTeX = async () => {
+		try {
+			console.log('Exporting publications to BibTeX');
+			const response = await axios.get('http://localhost:5000/api/publications/export-bibtex', {
+				withCredentials: true,
+				responseType: 'blob', // Для скачивания файла
+			});
+			const url = window.URL.createObjectURL(new Blob([response.data]));
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = 'publications.bib'; // Имя файла для скачивания
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+			window.URL.revokeObjectURL(url);
+			setSuccess('Публикации успешно выгружены в формате BibTeX!');
+			setOpenSuccess(true);
+		} catch (err) {
+			console.error('Ошибка выгрузки в BibTeX:', err);
+			if (err.response) {
+				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте права доступа.'}`);
+			} else {
+				setError('Ошибка сети. Проверьте подключение и сервер.');
+			}
+			setOpenError(true);
+		}
+	};
+
+	const chartData = {
+		labels: analytics.map(item => item.year),
+		datasets: [
+			{
+				label: 'Количество публикаций',
+				data: analytics.map(item => item.count),
+				backgroundColor: 'rgba(0, 120, 255, 0.5)', // Синий акцент в стиле Apple
+				borderColor: 'rgba(0, 120, 255, 1)',
+				borderWidth: 1,
+				fill: true,
+				tension: 0.4, // Плавные линии
+			},
+		],
+	};
+
+	const chartOptions = {
+		responsive: true,
+		maintainAspectRatio: false,
+		plugins: {
+			legend: { position: 'top', labels: { color: 'text.primary' } },
+			title: { display: false },
+			tooltip: { backgroundColor: 'rgba(0, 0, 0, 0.8)', titleColor: 'white', bodyColor: 'white' },
+		},
+		scales: {
+			x: { title: { display: false }, ticks: { color: 'text.secondary' } },
+			y: { title: { display: false }, ticks: { color: 'text.secondary' }, beginAtZero: true },
+		},
+		animation: { duration: 1000 }, // Анимация в стиле Apple
+	};
+
 	return (
 		<Container maxWidth="lg" sx={{ mt: 4, minHeight: 'calc(100vh - 64px - 120px)' }}>
 			<Card elevation={4} sx={{ p: 4, borderRadius: 16, backgroundColor: 'white', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }}>
@@ -320,201 +625,418 @@ function Dashboard() {
 						Личный кабинет
 					</Typography>
 
-					{/* Отображение личных данных пользователя */}
-					{user && (
-						<Typography variant="h6" sx={{ mt: 2, color: 'text.primary' }}>
-							Личные данные: {user.last_name} {user.first_name} {user.middle_name || ''}
-						</Typography>
+					<Tabs value={value} onChange={handleTabChange} sx={{ mb: 4, borderBottom: 1, borderColor: 'divider' }}>
+						<Tab label="Личные данные" sx={{ color: 'text.primary', '&.Mui-selected': { color: 'primary.main' } }} />
+						<Tab label="Публикации" sx={{ color: 'text.primary', '&.Mui-selected': { color: 'primary.main' } }} />
+						<Tab label="Аналитика" sx={{ color: 'text.primary', '&.Mui-selected': { color: 'primary.main' } }} />
+						<Tab label="Экспорт" sx={{ color: 'text.primary', '&.Mui-selected': { color: 'primary.main' } }} />
+					</Tabs>
+
+					{value === 0 && (
+						<Accordion defaultExpanded sx={{ boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)', borderRadius: 16 }}>
+							<AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: 'primary.main' }} />} sx={{ backgroundColor: 'background.paper' }}>
+								<Typography variant="h6" sx={{ color: 'text.primary' }}>Личные данные</Typography>
+							</AccordionSummary>
+							<AccordionDetails>
+								{user && (
+									<Box>
+										<Typography variant="body1" sx={{ color: 'text.secondary', mb: 2 }}>
+											ФИО: {user.last_name} {user.first_name} {user.middle_name || ''}
+										</Typography>
+										<Typography variant="body1" sx={{ color: 'text.secondary', mb: 2 }}>
+											Логин: {user.username}
+										</Typography>
+										<Box sx={{ display: 'flex', gap: 2 }}>
+											<Button
+												variant="contained"
+												color="primary"
+												onClick={handleEditUserClick}
+												sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+											>
+												Редактировать данные
+											</Button>
+											<Button
+												variant="contained"
+												color="primary"
+												onClick={handleChangePasswordClick}
+												sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+											>
+												Изменить пароль
+											</Button>
+										</Box>
+									</Box>
+								)}
+							</AccordionDetails>
+						</Accordion>
 					)}
 
-					{/* Форма загрузки публикаций */}
-					<Typography variant="h5" gutterBottom sx={{ mt: 4, color: 'text.primary' }}>
-						Загрузка публикаций
-					</Typography>
-					<Box sx={{ mb: 4 }}>
-						<Box sx={{ mb: 2 }}>
+					{value === 1 && (
+						<>
+							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: 'text.primary' }}>
+								Загрузка публикаций
+							</Typography>
+							<Box sx={{ mb: 4 }}>
+								<Box sx={{ mb: 2 }}>
+									<Button
+										variant="contained"
+										color="primary"
+										onClick={() => setUploadType('file')}
+										sx={{ mr: 2, borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+									>
+										Загрузить файл (PDF/DOCX)
+									</Button>
+									<Button
+										variant="contained"
+										color="primary"
+										onClick={() => setUploadType('bibtex')}
+										sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+									>
+										Загрузить BibTeX
+									</Button>
+								</Box>
+
+								{uploadType === 'file' ? (
+									<form onSubmit={handleFileUpload}>
+										<TextField
+											fullWidth
+											label="Название"
+											value={title}
+											onChange={(e) => setTitle(e.target.value)}
+											margin="normal"
+											variant="outlined"
+											sx={{ mb: 2, borderRadius: 8 }}
+										/>
+										<TextField
+											fullWidth
+											label="Авторы"
+											value={authors}
+											onChange={(e) => setAuthors(e.target.value)}
+											margin="normal"
+											variant="outlined"
+											sx={{ mb: 2, borderRadius: 8 }}
+										/>
+										<TextField
+											fullWidth
+											label="Год"
+											type="number"
+											value={year}
+											onChange={(e) => setYear(e.target.value)}
+											margin="normal"
+											variant="outlined"
+											sx={{ mb: 2, borderRadius: 8 }}
+										/>
+										<TextField
+											fullWidth
+											select
+											label="Тип публикации"
+											value={type}
+											onChange={(e) => setType(e.target.value)}
+											margin="normal"
+											variant="outlined"
+											sx={{ mb: 2, borderRadius: 8 }}
+										>
+											<MenuItem value="article">Статья</MenuItem>
+											<MenuItem value="monograph">Монография</MenuItem>
+											<MenuItem value="conference">Доклад/конференция</MenuItem>
+										</TextField>
+										<Box sx={{ mb: 2 }}>
+											<input
+												type="file"
+												accept=".pdf,.docx"
+												onChange={(e) => setFile(e.target.files[0])}
+												style={{ display: 'none' }}
+												id="upload-file"
+											/>
+											<label htmlFor="upload-file">
+												<Button
+													variant="contained"
+													component="span"
+													color="primary"
+													sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+												>
+													Выбрать файл
+												</Button>
+											</label>
+											{file && <Typography sx={{ mt: 1, color: 'text.secondary' }}>{file.name}</Typography>}
+										</Box>
+										<Collapse in={openError}>
+											{error && <Alert severity="error" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setOpenError(false)}>{error}</Alert>}
+										</Collapse>
+										<Collapse in={openSuccess}>
+											{success && <Alert severity="success" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setOpenSuccess(false)}>{success}</Alert>}
+										</Collapse>
+										<Button
+											type="submit"
+											variant="contained"
+											color="primary"
+											sx={{ mt: 2, borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+										>
+											Загрузить
+										</Button>
+									</form>
+								) : (
+									<form onSubmit={handleBibtexUpload}>
+										<Box sx={{ mb: 2 }}>
+											<input
+												type="file"
+												accept=".bib"
+												onChange={(e) => setFile(e.target.files[0])}
+												style={{ display: 'none' }}
+												id="upload-bibtex"
+											/>
+											<label htmlFor="upload-bibtex">
+												<Button
+													variant="contained"
+													component="span"
+													color="primary"
+													sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+												>
+													Выбрать BibTeX-файл
+												</Button>
+											</label>
+											{file && <Typography sx={{ mt: 1, color: 'text.secondary' }}>{file.name}</Typography>}
+										</Box>
+										<Collapse in={openError}>
+											{error && <Alert severity="error" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setOpenError(false)}>{error}</Alert>}
+										</Collapse>
+										<Collapse in={openSuccess}>
+											{success && <Alert severity="success" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setOpenSuccess(false)}>{success}</Alert>}
+										</Collapse>
+										<Button
+											type="submit"
+											variant="contained"
+											color="primary"
+											sx={{ mt: 2, borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+										>
+											Загрузить
+										</Button>
+									</form>
+								)}
+							</Box>
+							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: 'text.primary' }}>
+								Ваши публикации
+							</Typography>
+							<Table sx={{ mt: 2, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
+								<TableHead>
+									<TableRow sx={{ backgroundColor: 'primary.light' }}>
+										<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>ID</TableCell>
+										<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Название</TableCell>
+										<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Авторы</TableCell>
+										<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Год</TableCell>
+										<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Тип</TableCell>
+										<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Статус</TableCell>
+										<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Действия</TableCell>
+									</TableRow>
+								</TableHead>
+								<TableBody>
+									{publications.map((pub) => (
+										<TableRow key={pub.id} sx={{ '&:hover': { backgroundColor: 'grey.100' } }}>
+											<TableCell>{pub.id}</TableCell>
+											<TableCell>{pub.title}</TableCell>
+											<TableCell>{pub.authors}</TableCell>
+											<TableCell>{pub.year}</TableCell>
+											<TableCell>
+												{pub.type === 'article' ? 'Статья' :
+													pub.type === 'monograph' ? 'Монография' :
+														pub.type === 'conference' ? 'Доклад/конференция' : pub.type}
+											</TableCell>
+											<TableCell>
+												{pub.status === 'draft' ? 'Черновик' :
+													pub.status === 'review' ? 'На проверке' :
+														pub.status === 'published' ? 'Опубликовано' : pub.status}
+											</TableCell>
+											<TableCell>
+												<IconButton
+													aria-label="edit"
+													onClick={() => handleEditClick(pub)}
+													sx={{ color: 'primary.main', mr: 1, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)' } }}
+												>
+													<EditIcon />
+												</IconButton>
+												<IconButton
+													aria-label="delete"
+													onClick={() => handleDeleteClick(pub)}
+													sx={{ color: 'primary.main', mr: 1, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)' } }}
+												>
+													<DeleteIcon />
+												</IconButton>
+												{!pub.file_url ? (
+													<IconButton
+														aria-label="attach"
+														onClick={() => handleAttachFileClick(pub)}
+														sx={{ color: 'primary.main', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)' } }}
+													>
+														<AttachFileIcon />
+													</IconButton>
+												) : (
+													<IconButton
+														aria-label="download"
+														onClick={() => handleDownloadClick(pub)}
+														sx={{ color: 'primary.main', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)' } }}
+													>
+														<DownloadIcon />
+													</IconButton>
+												)}
+											</TableCell>
+										</TableRow>
+									))}
+								</TableBody>
+							</Table>
+						</>
+					)}
+
+					{value === 2 && (
+						<Box sx={{ mt: 4 }}>
+							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: 'text.primary' }}>
+								Аналитика публикаций
+							</Typography>
+							{analytics.length === 0 ? (
+								<Card elevation={2} sx={{ p: 4, mt: 2, borderRadius: 16, backgroundColor: 'background.paper', boxShadow: '0 2px 6px rgba(0, 0, 0, 0.1)' }}>
+									<Typography variant="body1" sx={{ color: 'text.secondary', textAlign: 'center' }}>
+										У вас ещё нет ни одной публикации.{' '}
+										<Button
+											variant="text"
+											color="primary"
+											onClick={() => setUploadType('file')}
+											sx={{
+												p: 0,
+												textTransform: 'none',
+												'&:hover': {
+													textDecoration: 'underline',
+													backgroundColor: 'transparent',
+													color: 'primary.dark',
+												},
+											}}
+										>
+											Загрузите публикации
+										</Button>
+										, чтобы вести аналитику по своим работам.
+									</Typography>
+								</Card>
+							) : (
+								<Card elevation={2} sx={{ p: 4, mt: 2, borderRadius: 16, backgroundColor: 'background.paper', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }}>
+									<CardContent>
+										{/* График публикаций по годам */}
+										<Typography variant="h6" sx={{ color: 'text.primary', mb: 2 }}>
+											Динамика публикаций
+										</Typography>
+										<Box sx={{ mb: 4, height: '300px' }}>
+											<Line
+												data={chartData}
+												options={chartOptions}
+												ref={chartRef}
+												key={analytics.map(item => item.year).join('-')}
+											/>
+										</Box>
+
+										{/* Кнопка "Подробнее" для статистики */}
+										<Button
+											variant="outlined"
+											color="primary"
+											onClick={() => setShowDetailedAnalytics(!showDetailedAnalytics)} // Переключаем состояние
+											sx={{ mb: 2, borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+										>
+											{showDetailedAnalytics ? 'Свернуть' : 'Подробнее'}
+										</Button>
+
+										{/* Подробная аналитика, отображаемая при showDetailedAnalytics */}
+										<Collapse in={showDetailedAnalytics}>
+											<>
+												{/* Статистика по типам */}
+												<Typography variant="h6" sx={{ color: 'text.primary', mb: 2 }}>
+													Типы публикаций
+												</Typography>
+												<Grid container spacing={2} sx={{ mb: 4 }}>
+													{Object.entries(pubTypes).map(([type, count]) => (
+														<Grid item xs={12} sm={4} key={type}>
+															<Card elevation={1} sx={{ p: 2, borderRadius: 12, backgroundColor: 'background.paper', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)' }}>
+																<CardContent>
+																	<Typography variant="body1" sx={{ color: 'text.primary' }}>
+																		{type === 'article' ? 'Статьи' : type === 'monograph' ? 'Монографии' : 'Доклады'}: {count}
+																	</Typography>
+																</CardContent>
+															</Card>
+														</Grid>
+													))}
+												</Grid>
+
+												{/* Статистика по статусам */}
+												<Typography variant="h6" sx={{ color: 'text.primary', mb: 2 }}>
+													Статусы публикаций
+												</Typography>
+												<Grid container spacing={2} sx={{ mb: 4 }}>
+													{Object.entries(pubStatuses).map(([status, count]) => (
+														<Grid item xs={12} sm={4} key={status}>
+															<Card elevation={1} sx={{ p: 2, borderRadius: 12, backgroundColor: 'background.paper', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)' }}>
+																<CardContent>
+																	<Typography variant="body1" sx={{ color: 'text.primary' }}>
+																		{status === 'draft' ? 'Черновики' : status === 'review' ? 'На проверке' : 'Опубликованные'}: {count}
+																	</Typography>
+																</CardContent>
+															</Card>
+														</Grid>
+													))}
+												</Grid>
+
+												{/* Общая статистика */}
+												<Typography variant="h6" sx={{ color: 'text.primary', mb: 2 }}>
+													Общая статистика
+												</Typography>
+												<Typography variant="body1" sx={{ color: 'text.secondary' }}>
+													Всего публикаций: {publications.length}
+													{totalCitations > 0 && ` | Общее количество цитирований: ${totalCitations}`}
+												</Typography>
+											</>
+										</Collapse>
+									</CardContent>
+								</Card>
+							)}
+						</Box>
+					)}
+
+					{value === 3 && (
+						<Box sx={{ mt: 4 }}>
+							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: 'text.primary' }}>
+								Экспорт публикаций
+							</Typography>
 							<Button
 								variant="contained"
 								color="primary"
-								onClick={() => setUploadType('file')}
-								sx={{ mr: 2, borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+								onClick={handleExportBibTeX}
+								sx={{ mt: 2, borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
 							>
-								Загрузить файл (PDF/DOCX)
-							</Button>
-							<Button
-								variant="contained"
-								color="primary"
-								onClick={() => setUploadType('bibtex')}
-								sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
-							>
-								Загрузить BibTeX
+								Выгрузить публикации в BibTeX
 							</Button>
 						</Box>
+					)}
 
-						{uploadType === 'file' ? (
-							<form onSubmit={handleFileUpload}>
-								<TextField
-									fullWidth
-									label="Название"
-									value={title}
-									onChange={(e) => setTitle(e.target.value)}
-									margin="normal"
-									variant="outlined"
-									sx={{ mb: 2, borderRadius: 8 }}
-								/>
-								<TextField
-									fullWidth
-									label="Авторы"
-									value={authors}
-									onChange={(e) => setAuthors(e.target.value)}
-									margin="normal"
-									variant="outlined"
-									sx={{ mb: 2, borderRadius: 8 }}
-								/>
-								<TextField
-									fullWidth
-									label="Год"
-									type="number"
-									value={year}
-									onChange={(e) => setYear(e.target.value)}
-									margin="normal"
-									variant="outlined"
-									sx={{ mb: 2, borderRadius: 8 }}
-								/>
-								<TextField
-									fullWidth
-									select
-									label="Тип публикации"
-									value={type}
-									onChange={(e) => setType(e.target.value)}
-									margin="normal"
-									variant="outlined"
-									sx={{ mb: 2, borderRadius: 8 }}
-								>
-									<MenuItem value="article">Статья</MenuItem>
-									<MenuItem value="monograph">Монография</MenuItem>
-									<MenuItem value="conference">Доклад/конференция</MenuItem>
-								</TextField>
-								<Box sx={{ mb: 2 }}>
-									<input
-										type="file"
-										accept=".pdf,.docx"
-										onChange={(e) => setFile(e.target.files[0])}
-										style={{ display: 'none' }}
-										id="upload-file"
-									/>
-									<label htmlFor="upload-file">
-										<Button
-											variant="contained"
-											component="span"
-											color="primary"
-											sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
-										>
-											Выбрать файл
-										</Button>
-									</label>
-									{file && <Typography sx={{ mt: 1, color: 'text.secondary' }}>{file.name}</Typography>}
-								</Box>
-								<Collapse in={openError}>
-									{error && <Alert severity="error" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setOpenError(false)}>{error}</Alert>}
-								</Collapse>
-								<Collapse in={openSuccess}>
-									{success && <Alert severity="success" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setOpenSuccess(false)}>{success}</Alert>}
-								</Collapse>
-								<Button
-									type="submit"
-									variant="contained"
-									color="primary"
-									sx={{ mt: 2, borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
-								>
-									Загрузить
-								</Button>
-							</form>
-						) : (
-							<form onSubmit={handleBibtexUpload}>
-								<Box sx={{ mb: 2 }}>
-									<input
-										type="file"
-										accept=".bib"
-										onChange={(e) => setFile(e.target.files[0])}
-										style={{ display: 'none' }}
-										id="upload-bibtex"
-									/>
-									<label htmlFor="upload-bibtex">
-										<Button
-											variant="contained"
-											component="span"
-											color="primary"
-											sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
-										>
-											Выбрать BibTeX-файл
-										</Button>
-									</label>
-									{file && <Typography sx={{ mt: 1, color: 'text.secondary' }}>{file.name}</Typography>}
-								</Box>
-								<Collapse in={openError}>
-									{error && <Alert severity="error" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setOpenError(false)}>{error}</Alert>}
-								</Collapse>
-								<Collapse in={openSuccess}>
-									{success && <Alert severity="success" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setOpenSuccess(false)}>{success}</Alert>}
-								</Collapse>
-								<Button
-									type="submit"
-									variant="contained"
-									color="primary"
-									sx={{ mt: 2, borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
-								>
-									Загрузить
-								</Button>
-							</form>
-						)}
-					</Box>
+					{/* Модальное окно удаления */}
+					<Dialog open={openDeleteDialog} onClose={handleDeleteCancel}>
+						<DialogTitle sx={{ color: 'text.primary' }}>Подтвердите удаление</DialogTitle>
+						<DialogContent>
+							<Typography sx={{ color: 'text.secondary' }}>
+								Вы уверены, что хотите удалить публикацию «{publicationToDelete?.title}»?
+							</Typography>
+						</DialogContent>
+						<DialogActions>
+							<Button
+								onClick={handleDeleteCancel}
+								sx={{ color: 'text.secondary', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+							>
+								Отмена
+							</Button>
+							<Button
+								onClick={handleDeleteConfirm}
+								variant="contained"
+								color="primary"
+								sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+							>
+								Удалить
+							</Button>
+						</DialogActions>
+					</Dialog>
 
-					{/* Список публикаций */}
-					<Typography variant="h5" gutterBottom sx={{ mt: 4, color: 'text.primary' }}>
-						Ваши публикации
-					</Typography>
-					<Table sx={{ mt: 2, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
-						<TableHead>
-							<TableRow sx={{ backgroundColor: 'primary.light' }}>
-								<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>ID</TableCell>
-								<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Название</TableCell>
-								<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Авторы</TableCell>
-								<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Год</TableCell>
-								<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Тип</TableCell>
-								<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Статус</TableCell>
-								<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Действия</TableCell>
-							</TableRow>
-						</TableHead>
-						<TableBody>
-							{publications.map((pub) => (
-								<TableRow key={pub.id} sx={{ '&:hover': { backgroundColor: 'grey.100' } }}>
-									<TableCell>{pub.id}</TableCell>
-									<TableCell>{pub.title}</TableCell>
-									<TableCell>{pub.authors}</TableCell>
-									<TableCell>{pub.year}</TableCell>
-									<TableCell>{typeMap[pub.type] || pub.type}</TableCell>
-									<TableCell>{statusMap[pub.status] || pub.status}</TableCell>
-									<TableCell>
-										<IconButton
-											aria-label="edit"
-											onClick={() => handleEditClick(pub)}
-											sx={{ color: 'primary.main', mr: 1, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)' } }}
-										>
-											<EditIcon />
-										</IconButton>
-										<IconButton
-											aria-label="delete"
-											onClick={() => handleDeleteClick(pub)}
-											sx={{ color: 'primary.main', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)' } }}
-										>
-											<DeleteIcon />
-										</IconButton>
-									</TableCell>
-								</TableRow>
-							))}
-						</TableBody>
-					</Table>
+					{/* Модальное окно редактирования публикации */}
 					<Dialog open={openEditDialog} onClose={handleEditCancel}>
 						<DialogTitle sx={{ color: 'text.primary' }}>Редактировать публикацию</DialogTitle>
 						<DialogContent>
@@ -564,7 +1086,7 @@ function Dashboard() {
 								<TextField
 									fullWidth
 									select
-									label="Статус публикации"
+									label="Статус"
 									value={editStatus}
 									onChange={(e) => setEditStatus(e.target.value)}
 									margin="normal"
@@ -575,94 +1097,181 @@ function Dashboard() {
 									<MenuItem value="review">На проверке</MenuItem>
 									<MenuItem value="published">Опубликовано</MenuItem>
 								</TextField>
+								<DialogActions>
+									<Button
+										onClick={handleEditCancel}
+										sx={{ color: 'text.secondary', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+									>
+										Отмена
+									</Button>
+									<Button
+										type="submit"
+										variant="contained"
+										color="primary"
+										sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+									>
+										Сохранить
+									</Button>
+								</DialogActions>
 							</form>
+						</DialogContent>
+					</Dialog>
+
+					{/* Модальное окно редактирования личных данных */}
+					<Dialog open={openEditUserDialog} onClose={handleEditUserCancel}>
+						<DialogTitle sx={{ color: 'text.primary' }}>Редактировать личные данные</DialogTitle>
+						<DialogContent>
+							<form onSubmit={handleEditUserSubmit}>
+								<TextField
+									fullWidth
+									label="Фамилия"
+									value={editLastName}
+									onChange={(e) => setEditLastName(e.target.value)}
+									margin="normal"
+									variant="outlined"
+									sx={{ mb: 2, borderRadius: 8 }}
+									autoComplete="family-name"
+								/>
+								<TextField
+									fullWidth
+									label="Имя"
+									value={editFirstName}
+									onChange={(e) => setEditFirstName(e.target.value)}
+									margin="normal"
+									variant="outlined"
+									sx={{ mb: 2, borderRadius: 8 }}
+									autoComplete="given-name"
+								/>
+								<TextField
+									fullWidth
+									label="Отчество"
+									value={editMiddleName}
+									onChange={(e) => setEditMiddleName(e.target.value)}
+									margin="normal"
+									variant="outlined"
+									sx={{ mb: 2, borderRadius: 8 }}
+									autoComplete="additional-name"
+								/>
+								<DialogActions>
+									<Button
+										onClick={handleEditUserCancel}
+										sx={{ color: 'text.secondary', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+									>
+										Отмена
+									</Button>
+									<Button
+										type="submit"
+										variant="contained"
+										color="primary"
+										sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+									>
+										Сохранить
+									</Button>
+								</DialogActions>
+							</form>
+						</DialogContent>
+					</Dialog>
+
+					{/* Модальное окно прикрепления файла */}
+					<Dialog open={openAttachFileDialog} onClose={handleAttachFileCancel}>
+						<DialogTitle sx={{ color: 'text.primary' }}>Прикрепить файл к публикации</DialogTitle>
+						<DialogContent>
+							<Box sx={{ mt: 2, mb: 2 }}>
+								<input
+									type="file"
+									accept=".pdf,.docx"
+									onChange={(e) => setAttachFile(e.target.files[0])}
+									style={{ display: 'none' }}
+									id="attach-file"
+								/>
+								<label htmlFor="attach-file">
+									<Button
+										variant="contained"
+										component="span"
+										color="primary"
+										sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+									>
+										Выбрать файл
+									</Button>
+								</label>
+								{attachFile && <Typography sx={{ mt: 1, color: 'text.secondary' }}>{attachFile.name}</Typography>}
+							</Box>
+							<Collapse in={!!attachError}>
+								{attachError && <Alert severity="error" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setAttachError('')}>{attachError}</Alert>}
+							</Collapse>
+							<Collapse in={!!attachSuccess}>
+								{attachSuccess && <Alert severity="success" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setAttachSuccess('')}>{attachSuccess}</Alert>}
+							</Collapse>
 						</DialogContent>
 						<DialogActions>
 							<Button
-								onClick={handleEditCancel}
+								onClick={handleAttachFileCancel}
 								sx={{ color: 'text.secondary', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
 							>
 								Отмена
 							</Button>
 							<Button
-								onClick={handleEditSubmit}
+								onClick={handleAttachFileSubmit}
 								variant="contained"
 								color="primary"
 								sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
 							>
-								Сохранить
+								Прикрепить
 							</Button>
 						</DialogActions>
 					</Dialog>
 
-
-					{/* Аналитика */}
-					<Typography variant="h5" gutterBottom sx={{ mt: 4, color: 'text.primary' }}>
-						Аналитика публикаций
-					</Typography>
-					{analytics.length === 0 ? (
-						<Card elevation={2} sx={{ p: 4, mt: 2, borderRadius: 16, backgroundColor: 'background.paper', boxShadow: '0 2px 6px rgba(0, 0, 0, 0.1)' }}>
-							<Typography variant="body1" sx={{ color: 'text.secondary', textAlign: 'center' }}>
-								У вас ещё нет ни одной публикации.{' '}
-								<Button
-									variant="text"
-									color="primary"
-									onClick={() => setUploadType('file')}
-									sx={{
-										p: 0,
-										textTransform: 'none',
-										'&:hover': {
-											textDecoration: 'underline',
-											backgroundColor: 'transparent',
-											color: 'primary.dark',
-										},
-									}}
-								>
-									Загрузите публикации
-								</Button>
-								, чтобы вести аналитику по своим работам.
-							</Typography>
-						</Card>
-					) : (
-						<Grid container spacing={2} sx={{ mt: 2 }}>
-							{analytics.map((item) => (
-								<Grid item xs={12} sm={6} key={item.year}>
-									<Card elevation={2} sx={{ p: 2, borderRadius: 16, backgroundColor: 'background.paper', boxShadow: '0 2px 6px rgba(0, 0, 0, 0.1)' }}>
-										<CardContent>
-											<Typography variant="body1" sx={{ color: 'text.primary' }}>
-												Год {item.year}: {item.count} публикаций
-											</Typography>
-										</CardContent>
-									</Card>
-								</Grid>
-							))}
-						</Grid>
-					)}
-
-					{/* Модальное окно подтверждения удаления */}
-					<Dialog open={openDeleteDialog} onClose={handleDeleteCancel}>
-						<DialogTitle sx={{ color: 'text.primary' }}>Подтвердите удаление</DialogTitle>
+					{/* Модальное окно изменения пароля */}
+					<Dialog open={openChangePasswordDialog} onClose={handleChangePasswordCancel}>
+						<DialogTitle sx={{ color: 'text.primary' }}>Изменить пароль</DialogTitle>
 						<DialogContent>
-							<Typography sx={{ color: 'text.secondary' }}>
-								Вы уверены, что хотите удалить публикацию «{publicationToDelete?.title}»?
-							</Typography>
+							<form onSubmit={handleChangePasswordSubmit}>
+								<TextField
+									fullWidth
+									label="Текущий пароль"
+									type="password"
+									value={currentPassword}
+									onChange={(e) => setCurrentPassword(e.target.value)}
+									margin="normal"
+									variant="outlined"
+									sx={{ mb: 2, borderRadius: 8 }}
+									autoComplete="current-password"
+								/>
+								<TextField
+									fullWidth
+									label="Новый пароль"
+									type="password"
+									value={newPassword}
+									onChange={(e) => setNewPassword(e.target.value)}
+									margin="normal"
+									variant="outlined"
+									sx={{ mb: 2, borderRadius: 8 }}
+									autoComplete="new-password"
+								/>
+								<Collapse in={!!passwordError}>
+									{passwordError && <Alert severity="error" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setPasswordError('')}>{passwordError}</Alert>}
+								</Collapse>
+								<Collapse in={!!passwordSuccess}>
+									{passwordSuccess && <Alert severity="success" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setPasswordSuccess('')}>{passwordSuccess}</Alert>}
+								</Collapse>
+								<DialogActions>
+									<Button
+										onClick={handleChangePasswordCancel}
+										sx={{ color: 'text.secondary', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+									>
+										Отмена
+									</Button>
+									<Button
+										type="submit"
+										variant="contained"
+										color="primary"
+										sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+									>
+										Сохранить
+									</Button>
+								</DialogActions>
+							</form>
 						</DialogContent>
-						<DialogActions>
-							<Button
-								onClick={handleDeleteCancel}
-								sx={{ color: 'text.secondary', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
-							>
-								Отмена
-							</Button>
-							<Button
-								onClick={handleDeleteConfirm}
-								variant="contained"
-								color="primary"
-								sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
-							>
-								Удалить
-							</Button>
-						</DialogActions>
 					</Dialog>
 				</CardContent>
 			</Card>
