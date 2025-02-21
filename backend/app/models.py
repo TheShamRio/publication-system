@@ -13,6 +13,11 @@ class User(db.Model, UserMixin):
     first_name = db.Column(db.String(100), nullable=True)  # Имя
     middle_name = db.Column(db.String(100), nullable=True)  # Отчество
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    
+    @property
+    def full_name(self):
+        return f"{self.first_name} {self.middle_name} {self.last_name}"
+		
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
@@ -33,16 +38,21 @@ class User(db.Model, UserMixin):
     def get_id(self):
         return str(self.id)  # Flask-Login требует строковый идентификатор
 
+from app import db
+from datetime import datetime
+
 class Publication(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
-    authors = db.Column(db.String(500), nullable=False)
+    authors = db.Column(db.String(200), nullable=False)
     year = db.Column(db.Integer, nullable=False)
     type = db.Column(db.String(50), nullable=False)
-    status = db.Column(db.String(20), default='draft')
-    file_url = db.Column(db.String(300))
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    status = db.Column(db.String(50), nullable=False, default='draft')
+    file_url = db.Column(db.String(200))
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = db.relationship('User', backref='user_publications')  # Переименовали backref, чтобы избежать конфликта
 
     @property
     def type_ru(self):

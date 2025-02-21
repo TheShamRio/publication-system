@@ -9,15 +9,15 @@ from .analytics import get_publications_by_year
 from flask import current_app
 from werkzeug.utils import secure_filename
 import os
-from flask_login import login_required, current_user
 import logging
 from datetime import datetime
-import bibtexparser
-bp = Blueprint('api', __name__)
 from werkzeug.security import generate_password_hash, check_password_hash
-from flask_login import login_required, current_user
-from bibtexparser import bibdatabase  # Импортируем bibdatabase
-from bibtexparser import bwriter  # Импортируем writer
+from sqlalchemy import func, desc
+
+bp = Blueprint('api', __name__)
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
 
 @bp.route('/publications/export-bibtex', methods=['GET'])
 @login_required
@@ -26,25 +26,25 @@ def export_bibtex():
     if not publications:
         return jsonify({"error": "Нет публикаций для выгрузки"}), 404
 
-    bib_database = bibdatabase.BibDatabase()  # Используем bibdatabase.BibDatabase
+    bib_database = bibtexparser.bibdatabase.BibDatabase()
     entries = []
 
     for pub in publications:
         entry = {
-            'ENTRYTYPE': pub.type,  # Тип публикации (article, monograph, conference)
-            'ID': f"{pub.title.replace(' ', '_')}_{pub.year}",  # Уникальный ID
+            'ENTRYTYPE': pub.type,
+            'ID': f"{pub.title.replace(' ', '_')}_{pub.year}",
             'title': pub.title,
             'author': pub.authors,
             'year': str(pub.year),
         }
         if pub.file_url:
-            entry['file'] = pub.file_url  # Опционально, путь к файлу
+            entry['file'] = pub.file_url
         if pub.status:
-            entry['note'] = pub.status  # Статус как заметка
+            entry['note'] = pub.status
         entries.append(entry)
 
     bib_database.entries = entries
-    writer_instance = bwriter.BibTexWriter()  # Используем bibtexparser.writer.BibTexWriter
+    writer_instance = bibtexparser.bwriter.BibTexWriter()
     bibtex_str = bibtexparser.dumps(bib_database, writer_instance)
 
     from flask import make_response
@@ -52,6 +52,7 @@ def export_bibtex():
     response.headers['Content-Disposition'] = 'attachment; filename=publications.bib'
     response.mimetype = 'application/x-bibtex'
     return response
+
 @bp.route('/user/password', methods=['PUT'])
 @login_required
 def update_user_password():
@@ -91,7 +92,7 @@ def attach_file_to_publication(pub_id):
     file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
     file.save(file_path)
 
-    publication.file_url = os.path.join('uploads', filename)  # Сохраняем относительный путь
+    publication.file_url = os.path.join('uploads', filename)
     db.session.commit()
     return jsonify({"message": "Файл успешно прикреплен", "publication": {
         "id": publication.id,
@@ -109,20 +110,45 @@ def allowed_file(filename):
 @bp.route('/publications', methods=['GET'])
 @login_required
 def get_publications():
-    publications = Publication.query.filter_by(user_id=current_user.id).all()
+    query = Publication.query.filter_by(user_id=current_user.id)
+
+    # Фильтрация по статусу только если параметр передан (для Home.js)
+    status = request.args.get('status')
+    if status:
+        query = query.filter_by(status=status)
+
+    # Фильтрация по типу
+    pub_type = request.args.get('type')
+    if pub_type:
+        query = query.filter_by(type=pub_type)
+
+    # Фильтрация по году
+    year = request.args.get('year')
+    if year:
+        query = query.filter_by(year=int(year))
+
+    # Поиск по названию или авторам
+    search = request.args.get('search', '').lower()
+    if search:
+        query = query.filter(
+            (Publication.title.ilike(f'%{search}%')) |
+            (Publication.authors.ilike(f'%{search}%'))
+        )
+
+    # Сортировка по дате обновления
+    publications = query.order_by(desc(Publication.updated_at)).all()
+
     return jsonify([{
         'id': pub.id,
         'title': pub.title,
+        'authors': pub.authors,
         'year': pub.year,
-        'authors': pub.authors,  # Добавим другие поля, если нужны
         'type': pub.type,
         'status': pub.status,
-        'file_url': pub.file_url
-    } for pub in publications])
-
-
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
+        'file_url': pub.file_url,
+        'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
+        'user': {'full_name': pub.user.full_name if pub.user and pub.user.full_name else 'Не указан'}
+    } for pub in publications]), 200
 
 @bp.route('/publications/upload-file', methods=['POST'])
 @login_required
@@ -133,7 +159,6 @@ def upload_file():
         return jsonify({"error": "Не предоставлен файл"}), 400
 
     file = request.files['file']
-
     if file.filename == '':
         return jsonify({"error": "Не выбран файл"}), 400
 
@@ -176,10 +201,6 @@ def upload_file():
     
     return jsonify({"message": "Публикация успешно создана", "id": publication.id}), 201
 
-def allowed_file(filename):
-    with current_app.app_context():
-        return '.' in filename and \
-            filename.rsplit('.', 1)[1].lower() in current_app.config['ALLOWED_EXTENSIONS']
 @bp.route('/publications/upload-bibtex', methods=['POST'])
 @login_required
 def upload_bibtex():
@@ -215,7 +236,7 @@ def upload_bibtex():
 
             entry_type = entry.get('ENTRYTYPE', 'article').lower()
             if entry_type not in ['article', 'book', 'inproceedings']:
-                entry_type = 'article'  # По умолчанию статья, если тип неизвестен
+                entry_type = 'article'
 
             publication = Publication(
                 title=title,
@@ -223,7 +244,7 @@ def upload_bibtex():
                 year=year,
                 type=entry_type,
                 status='draft',
-                user_id=current_user.id  # Связываем с текущим пользователем
+                user_id=current_user.id
             )
             db.session.add(publication)
             publications_count += 1
@@ -234,13 +255,6 @@ def upload_bibtex():
         logger.error(f"Error parsing BibTeX: {str(e)}")
         return jsonify({"error": "Ошибка парсинга BibTeX. Проверьте файл и повторите попытку."}), 400
 
-def allowed_file(filename):
-    with current_app.app_context():
-        return '.' in filename and \
-            filename.rsplit('.', 1)[1].lower() in current_app.config['ALLOWED_EXTENSIONS']
-
-from flask_login import login_required, current_user
-
 @bp.route('/register', methods=['POST'])
 def register():
     data = request.json
@@ -249,11 +263,11 @@ def register():
 
     user = User(
         username=data['username'],
-        last_name=data.get('last_name'),  # По умолчанию None, если не указано
+        last_name=data.get('last_name'),
         first_name=data.get('first_name'),
         middle_name=data.get('middle_name')
     )
-    user.set_password(data['password'])  # Используем метод set_password
+    user.set_password(data['password'])
     db.session.add(user)
     db.session.commit()
     return jsonify({"message": "Пользователь зарегистрирован", "user": {
@@ -267,7 +281,7 @@ def register():
 @bp.route('/login', methods=['POST'])
 def login():
     data = request.json
-    print(f"Received login attempt for username: {data['username']}")  # Отладка
+    print(f"Received login attempt for username: {data['username']}")
     user = User.query.filter_by(username=data['username']).first()
     if user and user.check_password(data['password']):
         login_user(user)
@@ -291,10 +305,7 @@ def admin_required(f):
 @login_required
 @admin_required
 def admin_stats():
-    # Логика для админ-панели
     return jsonify({"total_publications": Publication.query.count()})
-
-from sqlalchemy import func
 
 @bp.route('/analytics/yearly', methods=['GET'])
 @login_required
@@ -309,8 +320,6 @@ def get_yearly_analytics():
         'year': year,
         'count': count
     } for year, count in yearly_stats])
-
-from flask_login import login_required, current_user
 
 @bp.route('/publications/<int:pub_id>', methods=['PUT'])
 @login_required
@@ -340,18 +349,14 @@ def update_publication(pub_id):
         db.session.rollback()
         return jsonify({"error": "Ошибка при редактировании публикации. Попробуйте позже."}), 500
 
-from flask_login import login_required, current_user
-
 @bp.route('/publications/<int:pub_id>', methods=['DELETE'])
 @login_required
 def delete_publication(pub_id):
     publication = Publication.query.get_or_404(pub_id)
-    # Проверяем, принадлежит ли публикация текущему пользователю
     if publication.user_id != current_user.id:
         return jsonify({"error": "У вас нет прав на удаление этой публикации"}), 403
     
     try:
-        # Удаляем файл, если он существует
         if publication.file_url and os.path.exists(publication.file_url):
             os.remove(publication.file_url)
         
@@ -362,11 +367,9 @@ def delete_publication(pub_id):
         db.session.rollback()
         return jsonify({"error": "Ошибка при удалении публикации. Попробуйте позже."}), 500
 
-
 @bp.route('/publications/search', methods=['GET'])
 @login_required
 def search_publications():
-    # Получаем параметры запроса
     year = request.args.get('year')
     author = request.args.get('author')
     title = request.args.get('title')
