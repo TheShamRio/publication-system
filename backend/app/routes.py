@@ -305,8 +305,10 @@ def register():
     if User.query.filter_by(username=data['username']).first():
         return jsonify({"error": "Пользователь с таким именем уже существует"}), 400
 
+    # Создаём пользователя с указанной ролью (по умолчанию 'user', если не указано)
     user = User(
         username=data['username'],
+        role=data.get('role', 'user'),  # Устанавливаем роль из запроса или 'user' по умолчанию
         last_name=data.get('last_name'),
         first_name=data.get('first_name'),
         middle_name=data.get('middle_name')
@@ -314,22 +316,29 @@ def register():
     user.set_password(data['password'])
     db.session.add(user)
     db.session.commit()
-    return jsonify({"message": "Пользователь зарегистрирован", "user": {
-        "id": user.id,
-        "username": user.username,
-        "last_name": user.last_name,
-        "first_name": user.first_name,
-        "middle_name": user.middle_name
-    }}), 201
+    return jsonify({
+        "message": "Пользователь зарегистрирован",
+        "user": {
+            "id": user.id,
+            "username": user.username,
+            "role": user.role,
+            "last_name": user.last_name,
+            "first_name": user.first_name,
+            "middle_name": user.middle_name
+        }
+    }), 201
 
 @bp.route('/login', methods=['POST'])
 def login():
     data = request.json
     print(f"Received login attempt for username: {data['username']}")
+    print(f"Request cookies: {request.cookies}")
     user = User.query.filter_by(username=data['username']).first()
     if user and user.check_password(data['password']):
         login_user(user)
-        return jsonify({"message": "Вход выполнен"})
+        print(f"User {user.username} logged in with role {user.role}")
+        print(f"Response cookies: {request.cookies}")
+        return jsonify({"message": "Вход выполнен", "role": user.role})
     return jsonify({"error": "Неверные учетные данные"}), 401
 
 @bp.route('/logout')
@@ -443,14 +452,17 @@ def search_publications():
 @bp.route('/user', methods=['GET'])
 @login_required
 def get_user():
+    print(f"Request headers: {request.headers}")
+    print(f"Request cookies: {request.cookies}")
+    print(f"Current user: {current_user}")
     return jsonify({
         "id": current_user.id,
         "username": current_user.username,
+        "role": current_user.role,
         "last_name": current_user.last_name,
         "first_name": current_user.first_name,
         "middle_name": current_user.middle_name
     })
-
 @bp.route('/user', methods=['PUT'])
 @login_required
 def update_user():

@@ -97,6 +97,7 @@ function Dashboard() {
 	const [editFirstName, setEditFirstName] = useState('');
 	const [editMiddleName, setEditMiddleName] = useState('');
 	const [user, setUser] = useState(null);
+	const [loadingUser, setLoadingUser] = useState(true); // Добавляем состояние загрузки
 	const [openAttachFileDialog, setOpenAttachFileDialog] = useState(false);
 	const [publicationToAttach, setPublicationToAttach] = useState(null);
 	const [attachFile, setAttachFile] = useState(null);
@@ -153,6 +154,7 @@ function Dashboard() {
 	};
 
 	const fetchUserData = async () => {
+		setLoadingUser(true); // Устанавливаем состояние загрузки
 		try {
 			const response = await axios.get('http://localhost:5000/api/user', {
 				withCredentials: true,
@@ -164,6 +166,8 @@ function Dashboard() {
 				setError('Необходимо войти в систему. Перенаправление...');
 				setTimeout(() => navigate('/login'), 2000);
 			}
+		} finally {
+			setLoadingUser(false); // Сбрасываем состояние загрузки
 		}
 	};
 
@@ -684,7 +688,9 @@ function Dashboard() {
 								</Typography>
 							</AccordionSummary>
 							<AccordionDetails sx={{ p: 3 }}>
-								{user && (
+								{loadingUser ? (
+									<Typography sx={{ color: '#757575' }}>Загрузка данных...</Typography>
+								) : user ? (
 									<Box>
 										<Typography variant="body1" sx={{ color: '#757575', mb: 2 }}>
 											ФИО: {user.last_name} {user.first_name} {user.middle_name || ''}
@@ -711,6 +717,8 @@ function Dashboard() {
 											</Button>
 										</Box>
 									</Box>
+								) : (
+									<Typography sx={{ color: '#757575' }}>Данные пользователя не найдены.</Typography>
 								)}
 							</AccordionDetails>
 						</Accordion>

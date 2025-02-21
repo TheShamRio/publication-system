@@ -6,9 +6,9 @@ from flask_login import UserMixin
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
-    publications = db.relationship('Publication', backref='author', lazy=True)
+    publications = db.relationship('Publication', back_populates='user', lazy=True)  # Убираем backref, используем back_populates
     password_hash = db.Column(db.Text)
-    role = db.Column(db.String(20), default='teacher')
+    role = db.Column(db.String(20), default='user')  # Изменил на 'user' по умолчанию
     last_name = db.Column(db.String(100), nullable=True)  # Фамилия
     first_name = db.Column(db.String(100), nullable=True)  # Имя
     middle_name = db.Column(db.String(100), nullable=True)  # Отчество
@@ -24,7 +24,7 @@ class User(db.Model, UserMixin):
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
     
-        # Flask-Login methods
+    # Flask-Login methods
     def is_active(self):
         return True  # Всегда активный пользователь, измените, если нужны проверки
 
@@ -34,12 +34,8 @@ class User(db.Model, UserMixin):
     def is_anonymous(self):
         return False
     
-		    # Flask-Login methods
     def get_id(self):
         return str(self.id)  # Flask-Login требует строковый идентификатор
-
-from app import db
-from datetime import datetime
 
 class Publication(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -52,7 +48,8 @@ class Publication(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-    user = db.relationship('User', backref='user_publications')  # Переименовали backref, чтобы избежать конфликта
+    user = db.relationship('User', back_populates='publications', lazy=True)  # Убираем backref, используем back_populates
+    # Убираем конфликтное relationship 'author', так как оно дублирует user
 
     @property
     def type_ru(self):
@@ -82,5 +79,4 @@ class Achievement(db.Model):
         if count >= 10:
             achievement = Achievement(user_id=user_id, badge='10_publications')
             db.session.add(achievement)
-            db.session.commit()
             db.session.commit()

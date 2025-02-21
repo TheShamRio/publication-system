@@ -3,6 +3,7 @@ from .extensions import db, migrate, login_manager
 from .models import User
 import os
 from flask_cors import CORS
+from flask_cors import CORS
 
 def create_app():
     app = Flask(__name__)
@@ -16,7 +17,12 @@ def create_app():
     login_manager.init_app(app)
 
     # Настройка CORS — разрешаем запросы с localhost:3001 и включаем учетные данные
-    CORS(app, resources={r"/api/*": {"origins": "http://localhost:3001", "supports_credentials": True}})
+    CORS(app, resources={r"/api/*": {
+        "origins": ["http://localhost:3001"],
+        "allow_headers": ["Content-Type", "Authorization"],
+        "supports_credentials": True,
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
+    }})
 
     from .routes import bp
     app.register_blueprint(bp, url_prefix='/api')

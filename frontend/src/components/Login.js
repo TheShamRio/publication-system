@@ -9,7 +9,7 @@ function Login() {
 	const [password, setPassword] = useState('');
 	const [error, setError] = useState('');
 	const navigate = useNavigate();
-	const { login } = useAuth(); // Используем метод login из контекста
+	const { login, updateAuthState } = useAuth(); // Используем updateAuthState
 
 	const handleSubmit = async (e) => {
 		e.preventDefault();
@@ -25,10 +25,16 @@ function Login() {
 				}
 			);
 			if (response.data.message === 'Вход выполнен') {
-				localStorage.setItem('user', JSON.stringify({ username }));
-				login(); // Обновляем состояние авторизации через контекст
-				console.log('User logged in, localStorage updated:', localStorage.getItem('user'));
-				navigate('/dashboard');
+				const userData = {
+					username,
+					role: response.data.role || 'user',
+				};
+				localStorage.setItem('user', JSON.stringify(userData));
+				login(userData); // Обновляем состояние авторизации
+				updateAuthState({ isAuthenticated: true, role: userData.role, username }); // Синхронизируем состояние
+				console.log('User logged in, role:', userData.role);
+				// Перенаправляем на соответствующий маршрут в зависимости от роли
+				navigate(userData.role === 'admin' ? '/admin' : '/dashboard');
 			}
 		} catch (err) {
 			if (err.response && err.response.data.error === 'Неверные учетные данные') {
@@ -36,6 +42,7 @@ function Login() {
 			} else {
 				setError('Произошла ошибка при входе. Попробуйте позже.');
 			}
+			console.error('Login error:', err);
 		}
 	};
 
