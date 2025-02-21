@@ -6,7 +6,6 @@ import {
 	Box,
 	Grid,
 	Card,
-	CardContent,
 	Button,
 	Select,
 	MenuItem,
@@ -18,7 +17,7 @@ import {
 	List,
 	ListItem,
 	ListItemText,
-	Pagination
+	Pagination,
 } from '@mui/material';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
@@ -58,41 +57,42 @@ function Home() {
 	useEffect(() => {
 		const fetchPublishedPublications = async () => {
 			try {
-				const response = await axios.get('http://localhost:5000/api/publications', {
-					withCredentials: true,
-					params: { status: 'published' }, // Фиксированный фильтр только для published
-				});
+				const response = await axios.get('http://localhost:5000/api/publications/public');
 				const sortedPubs = response.data
-					.filter(pub => pub.status === 'published')
+					.filter((pub) => pub.status === 'published')
 					.sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
 				setAllPublications(sortedPubs);
 			} catch (err) {
 				console.error('Ошибка загрузки публикаций:', err);
-				if (err.response?.status === 401) {
-					setError('Необходимо войти в систему. Перенаправление...');
-					setTimeout(() => navigate('/login'), 2000);
-				} else if (err.response?.status === 403 || err.response?.status === 500) {
-					setError('Произошла ошибка сервера. Попробуйте позже.');
-				}
+				setError('Произошла ошибка при загрузке данных. Попробуйте позже.');
 				setOpenError(true);
 			}
 		};
 
 		fetchPublishedPublications();
-	}, [navigate]);
+	}, []);
 
 	const filteredPublications = useMemo(() => {
 		return allPublications
-			.filter(pub =>
-				(pub.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-					pub.authors.toLowerCase().includes(searchTerm.toLowerCase())) &&
-				(!filterType || pub.type === filterType) &&
-				(!filterYear || pub.year.toString() === filterYear) &&
-				pub.status === 'published'
+			.filter(
+				(pub) =>
+					(pub.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+						pub.authors.toLowerCase().includes(searchTerm.toLowerCase())) &&
+					(!filterType || pub.type === filterType) &&
+					(!filterYear || pub.year.toString() === filterYear) &&
+					pub.status === 'published'
 			)
 			.sort((a, b) => {
-				const aMatch = a.title.toLowerCase().includes(searchTerm.toLowerCase()) || a.authors.toLowerCase().includes(searchTerm.toLowerCase()) ? 1 : 0;
-				const bMatch = b.title.toLowerCase().includes(searchTerm.toLowerCase()) || b.authors.toLowerCase().includes(searchTerm.toLowerCase()) ? 1 : 0;
+				const aMatch =
+					a.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+						a.authors.toLowerCase().includes(searchTerm.toLowerCase())
+						? 1
+						: 0;
+				const bMatch =
+					b.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
+						b.authors.toLowerCase().includes(searchTerm.toLowerCase())
+						? 1
+						: 0;
 				return bMatch - aMatch || new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at);
 			});
 	}, [searchTerm, filterType, filterYear, allPublications]);
@@ -113,10 +113,10 @@ function Home() {
 	return (
 		<Container maxWidth="lg" sx={{ mt: 4, minHeight: 'calc(100vh - 64px)', backgroundColor: 'white', borderRadius: 20, boxShadow: '0 12px 32px rgba(0, 0, 0, 0.15)' }}>
 			<Box sx={{ p: 4 }}>
-				<Typography variant="h2" gutterBottom sx={{ color: 'text.primary', fontWeight: 700, textAlign: 'center', mb: 2 }}>
+				<Typography variant="h2" gutterBottom sx={{ color: '#212121', fontWeight: 700, textAlign: 'center', mb: 2 }}>
 					Добро пожаловать в Систему Публикаций
 				</Typography>
-				<Typography variant="body1" sx={{ color: 'text.secondary', textAlign: 'center', mb: 4 }}>
+				<Typography variant="body1" sx={{ color: '#757575', textAlign: 'center', mb: 4 }}>
 					Эффективно управляйте научными публикациями и отслеживайте академическую активность.
 				</Typography>
 
@@ -129,7 +129,7 @@ function Home() {
 						variant="outlined"
 						InputProps={{
 							endAdornment: (
-								<IconButton sx={{ color: 'primary.main', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' } }}>
+								<IconButton sx={{ color: '#1976D2', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' } }}>
 									<SearchIcon />
 								</IconButton>
 							),
@@ -161,7 +161,7 @@ function Home() {
 									value="published"
 									disabled
 									label="Статус"
-									sx={{ borderRadius: 16, '& .MuiSelect-select': { color: 'text.primary' }, '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+									sx={{ borderRadius: 16, '& .MuiSelect-select': { color: '#212121' }, '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
 								>
 									<MenuItem value="published">Опубликовано</MenuItem>
 								</Select>
@@ -191,76 +191,95 @@ function Home() {
 					</Grid>
 				</Box>
 
-				<Typography variant="h5" gutterBottom sx={{ mt: 4, color: 'text.primary', fontWeight: 600, textAlign: 'center' }}>
+				<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#212121', fontWeight: 600, textAlign: 'center' }}>
 					Последние опубликованные работы
 				</Typography>
 				<Card sx={{ mt: 2, mb: 4, borderRadius: 20, boxShadow: '0 12px 32px rgba(0, 0, 0, 0.15)', backgroundColor: 'white' }}>
-					<List sx={{ width: '100%', bgcolor: 'background.paper', p: 3 }}>
-						{currentPublications.map((pub) => (
-							<ListItem
-								key={pub.id}
-								sx={{
-									borderRadius: 5,
-									padding: 3,
-									borderBottom: '1px solid',
-									borderColor: 'divider',
-									'&:hover': { backgroundColor: 'grey.50', transition: 'all 0.3s ease', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }
-								}}
-							>
-								<ListItemText
-									primary={
-										<Typography
-											variant="h6"
-											component="a"
-											href={`/publication/${pub.id}`}
-											sx={{ color: 'primary.main', textDecoration: 'none', '&:hover': { textDecoration: 'underline', color: 'primary.dark' }, fontWeight: 500 }}
-										>
-											{pub.title}
-										</Typography>
-									}
-									secondary={
-										<>
-											<Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-												Год: {pub.year}
+					{filteredPublications.length === 0 ? (
+						<Box sx={{ p: 3, textAlign: 'center', color: '#757575' }}>
+							<Typography variant="h6" sx={{ fontWeight: 500 }}>
+								Увы, ничего не нашлось
+							</Typography>
+						</Box>
+					) : (
+						<List sx={{ width: '100%', backgroundColor: 'white', p: 3 }}>
+							{currentPublications.map((pub) => (
+								<ListItem
+									key={pub.id}
+									sx={{
+										borderRadius: 5,
+										padding: 3,
+										borderBottom: '1px solid',
+										borderColor: '#e0e0e0',
+										'&:hover': { backgroundColor: 'grey.50', transition: 'all 0.3s ease', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
+									}}
+								>
+									<ListItemText
+										primary={
+											<Typography
+												variant="h6"
+												component="a"
+												href={`/publication/${pub.id}`}
+												sx={{ color: '#1976D2', textDecoration: 'none', '&:hover': { textDecoration: 'underline', color: '#1565C0' }, fontWeight: 500 }}
+											>
+												{pub.title}
 											</Typography>
-											<Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-												Автор: {pub.authors}
-											</Typography>
-											<Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.5 }}>
-												Опубликовал: {pub.user?.full_name || 'Не указан'}
-											</Typography>
-										</>
-									}
-								/>
-							</ListItem>
-						))}
-					</List>
+										}
+										secondary={
+											<>
+												<Typography variant="body2" sx={{ color: '#757575', mt: 0.5 }}>
+													Год: {pub.year}
+												</Typography>
+												<Typography variant="body2" sx={{ color: '#757575', mt: 0.5 }}>
+													Автор: {pub.authors}
+												</Typography>
+												<Typography variant="body2" sx={{ color: '#757575', mt: 0.5 }}>
+													Опубликовал: {pub.user?.full_name || 'Не указан'}
+												</Typography>
+											</>
+										}
+									/>
+								</ListItem>
+							))}
+						</List>
+					)}
 				</Card>
 
-				<Box sx={{ display: 'flex', justifyContent: 'center', mt: 4, mb: 4 }}>
-					<Pagination
-						count={totalPages}
-						page={currentPage}
-						onChange={handlePageChange}
-						color="primary"
-						sx={{
-							'& .MuiPaginationItem-root': {
-								borderRadius: 20,
-								transition: 'all 0.3s ease',
-								'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
-								'&.Mui-selected': { backgroundColor: 'primary.main', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' }
-							}
-						}}
-					/>
-				</Box>
+				{filteredPublications.length > 0 && (
+					<Box sx={{ display: 'flex', justifyContent: 'center', mt: 4, mb: 4 }}>
+						<Pagination
+							count={totalPages}
+							page={currentPage}
+							onChange={handlePageChange}
+							color="primary"
+							sx={{
+								'& .MuiPaginationItem-root': {
+									borderRadius: 20,
+									transition: 'all 0.3s ease',
+									'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
+									'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
+								},
+							}}
+						/>
+					</Box>
+				)}
 
 				<Collapse in={openError}>
-					{error && <Alert severity="error" sx={{ mt: 2, borderRadius: 20, boxShadow: '0 6px 16px rgba(0, 0, 0, 0.15)' }} onClose={() => setOpenError(false)}>{error}</Alert>}
+					{error && (
+						<Alert severity="error" sx={{ mt: 2, borderRadius: 20, boxShadow: '0 6px 16px rgba(0, 0, 0, 0.15)' }} onClose={() => setOpenError(false)}>
+							{error}
+						</Alert>
+					)}
 				</Collapse>
 				<Collapse in={openSuccess}>
-					{success && <Alert severity="success" sx={{ mt: 2, borderRadius: 20, boxShadow: '0 6px 16px rgba(0, 0, 0, 0.15)' }} onClose={() => setOpenSuccess(false)}>{success}</Alert>}
+					{success && (
+						<Alert severity="success" sx={{ mt: 2, borderRadius: 20, boxShadow: '0 6px 16px rgba(0, 0, 0, 0.15)' }} onClose={() => setOpenSuccess(false)}>
+							{success}
+						</Alert>
+					)}
 				</Collapse>
 			</Box>
+			{/* Убрали <Footer /> отсюда, он уже есть в Layout.js */}
 		</Container>
 	);
 }

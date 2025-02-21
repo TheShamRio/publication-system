@@ -38,11 +38,19 @@ function Register() {
 		<Container maxWidth="sm" sx={{ mt: 8 }}>
 			<Card elevation={4} sx={{ p: 4, borderRadius: 16, backgroundColor: 'white', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
 				<CardContent>
-					<Typography variant="h4" gutterBottom align="center" sx={{ mb: 3, color: 'primary.main' }}>
+					<Typography variant="h4" gutterBottom align="center" sx={{ mb: 3, color: '#1976D2' }}>
 						Регистрация в Системе Публикаций
 					</Typography>
-					{error && <Alert severity="error" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setError('')}>{error}</Alert>}
-					{success && <Alert severity="success" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setSuccess('')}>{success}</Alert>}
+					{error && (
+						<Alert severity="error" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setError('')}>
+							{error}
+						</Alert>
+					)}
+					{success && (
+						<Alert severity="success" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setSuccess('')}>
+							{success}
+						</Alert>
+					)}
 					<form onSubmit={handleSubmit}>
 						<TextField
 							fullWidth

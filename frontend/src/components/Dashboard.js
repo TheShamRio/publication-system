@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Line, Bar } from 'react-chartjs-2';
+import { Line } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend } from 'chart.js';
 import {
 	Container,
@@ -9,7 +9,6 @@ import {
 	TableRow,
 	TableCell,
 	TableBody,
-	Paper,
 	Grid,
 	Card,
 	CardContent,
@@ -28,7 +27,7 @@ import {
 	Tab,
 	Accordion,
 	AccordionSummary,
-	AccordionDetails
+	AccordionDetails,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import axios from 'axios';
@@ -37,12 +36,41 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import DownloadIcon from '@mui/icons-material/Download';
+import { styled } from '@mui/system';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend);
 
+const CancelButton = styled(Button)({
+	borderRadius: 16,
+	border: '1px solid #1976D2',
+	color: '#1976D2',
+	backgroundColor: 'transparent',
+	transition: 'all 0.3s ease',
+	'&:hover': {
+		backgroundColor: '#1976D2',
+		color: '#fff',
+		border: '1px solid #1976D2',
+		boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+	},
+});
+
+const DetailsButton = styled(Button)({
+	borderRadius: 16,
+	border: '1px solid #1976D2',
+	color: '#1976D2',
+	backgroundColor: 'transparent',
+	transition: 'all 0.3s ease',
+	'&:hover': {
+		backgroundColor: '#1976D2',
+		color: '#fff',
+		border: '1px solid #1976D2',
+		boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+	},
+});
+
 function Dashboard() {
 	const [showDetailedAnalytics, setShowDetailedAnalytics] = useState(false);
-	const [value, setValue] = useState(0); // Для табов
+	const [value, setValue] = useState(0);
 	const [publications, setPublications] = useState([]);
 	const [analytics, setAnalytics] = useState([]);
 	const [uploadType, setUploadType] = useState('file');
@@ -92,7 +120,6 @@ function Dashboard() {
 
 	const fetchData = async () => {
 		try {
-			// Убрали фильтр по status, чтобы видеть все публикации пользователя
 			const pubResponse = await axios.get('http://localhost:5000/api/publications', {
 				withCredentials: true,
 			});
@@ -102,14 +129,13 @@ function Dashboard() {
 			setPublications(pubResponse.data);
 			setAnalytics(analyticsResponse.data);
 
-			// Анализируем типы и статусы публикаций
 			const types = { article: 0, monograph: 0, conference: 0 };
 			const statuses = { draft: 0, review: 0, published: 0 };
 			let citations = 0;
-			pubResponse.data.forEach(pub => {
+			pubResponse.data.forEach((pub) => {
 				types[pub.type] = (types[pub.type] || 0) + 1;
 				statuses[pub.status] = (statuses[pub.status] || 0) + 1;
-				if (pub.citations) citations += pub.citations; // Если есть поле citations
+				if (pub.citations) citations += pub.citations;
 			});
 			setPubTypes(types);
 			setPubStatuses(statuses);
@@ -158,12 +184,14 @@ function Dashboard() {
 		e.preventDefault();
 		try {
 			console.log('Changing password for user:', user?.username);
-			const response = await axios.put('http://localhost:5000/api/user/password', {
-				current_password: currentPassword,
-				new_password: newPassword,
-			}, {
-				withCredentials: true,
-			});
+			const response = await axios.put(
+				'http://localhost:5000/api/user/password',
+				{
+					current_password: currentPassword,
+					new_password: newPassword,
+				},
+				{ withCredentials: true }
+			);
 			setPasswordSuccess('Пароль успешно обновлен!');
 			setPasswordError('');
 			setOpenChangePasswordDialog(false);
@@ -172,7 +200,9 @@ function Dashboard() {
 		} catch (err) {
 			console.error('Ошибка изменения пароля:', err);
 			if (err.response) {
-				setPasswordError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные данные.'}`);
+				setPasswordError(
+					`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные данные.'}`
+				);
 			} else {
 				setPasswordError('Ошибка сети. Проверьте подключение и сервер.');
 			}
@@ -219,7 +249,9 @@ function Dashboard() {
 		}
 
 		if (isNaN(year) || year < 1900 || year > new Date().getFullYear()) {
-			setError('Год должен быть числом и находиться в разумных пределах (например, 1900–' + new Date().getFullYear() + ').');
+			setError(
+				'Год должен быть числом и находиться в разумных пределах (например, 1900–' + new Date().getFullYear() + ').'
+			);
 			setOpenError(true);
 			return;
 		}
@@ -233,7 +265,7 @@ function Dashboard() {
 
 		try {
 			console.log('Uploading file with data:', { title, authors, year, type });
-			const response = await axios.post('http://localhost:5000/api/publications/upload-file', formData, {
+			await axios.post('http://localhost:5000/api/publications/upload-file', formData, {
 				headers: { 'Content-Type': 'multipart/form-data' },
 				withCredentials: true,
 			});
@@ -245,11 +277,13 @@ function Dashboard() {
 			setYear('');
 			setType('article');
 			setFile(null);
-			await fetchData(); // Обновляем список после загрузки
+			await fetchData();
 		} catch (err) {
 			console.error('Ошибка загрузки файла:', err);
 			if (err.response) {
-				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля и файл.'}`);
+				setError(
+					`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля и файл.'}`
+				);
 			} else {
 				setError('Ошибка сети. Проверьте подключение и сервер.');
 			}
@@ -286,7 +320,7 @@ function Dashboard() {
 			setOpenSuccess(true);
 			setError('');
 			setFile(null);
-			await fetchData(); // Обновляем список после загрузки
+			await fetchData();
 		} catch (err) {
 			console.error('Ошибка загрузки BibTeX:', err);
 			if (err.response) {
@@ -315,25 +349,37 @@ function Dashboard() {
 		if (!editPublication) return;
 
 		try {
-			console.log('Updating publication with:', { title: editTitle, authors: editAuthors, year: editYear, type: editType, status: editStatus });
-			const response = await axios.put(`http://localhost:5000/api/publications/${editPublication.id}`, {
-				title: editTitle.trim(),
-				authors: editAuthors.trim(),
-				year: parseInt(editYear, 10),
+			console.log('Updating publication with:', {
+				title: editTitle,
+				authors: editAuthors,
+				year: editYear,
 				type: editType,
 				status: editStatus,
-			}, {
-				withCredentials: true,
 			});
+			await axios.put(
+				`http://localhost:5000/api/publications/${editPublication.id}`,
+				{
+					title: editTitle.trim(),
+					authors: editAuthors.trim(),
+					year: parseInt(editYear, 10),
+					type: editType,
+					status: editStatus,
+				},
+				{
+					withCredentials: true,
+				}
+			);
 			setSuccess('Публикация успешно отредактирована!');
 			setOpenSuccess(true);
 			setError('');
-			await fetchData(); // Обновляем список после редактирования
+			await fetchData();
 			setOpenEditDialog(false);
 		} catch (err) {
 			console.error('Ошибка редактирования публикации:', err);
 			if (err.response) {
-				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`);
+				setError(
+					`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`
+				);
 			} else {
 				setError('Ошибка сети. Проверьте подключение и сервер.');
 			}
@@ -374,11 +420,13 @@ function Dashboard() {
 			setSuccess('Публикация успешно удалена!');
 			setOpenSuccess(true);
 			setError('');
-			await fetchData(); // Обновляем список после удаления
+			await fetchData();
 		} catch (err) {
 			console.error('Ошибка удаления публикации:', err);
 			if (err.response) {
-				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте права доступа.'}`);
+				setError(
+					`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте права доступа.'}`
+				);
 			} else {
 				setError('Ошибка сети. Проверьте подключение и сервер.');
 			}
@@ -410,13 +458,17 @@ function Dashboard() {
 		e.preventDefault();
 		try {
 			console.log('Updating user data:', { last_name: editLastName, first_name: editFirstName, middle_name: editMiddleName });
-			const response = await axios.put('http://localhost:5000/api/user', {
-				last_name: editLastName.trim() || null,
-				first_name: editFirstName.trim() || null,
-				middle_name: editMiddleName.trim() || null,
-			}, {
-				withCredentials: true,
-			});
+			const response = await axios.put(
+				'http://localhost:5000/api/user',
+				{
+					last_name: editLastName.trim() || null,
+					first_name: editFirstName.trim() || null,
+					middle_name: editMiddleName.trim() || null,
+				},
+				{
+					withCredentials: true,
+				}
+			);
 			setSuccess('Личные данные успешно обновлены!');
 			setOpenSuccess(true);
 			setError('');
@@ -425,7 +477,9 @@ function Dashboard() {
 		} catch (err) {
 			console.error('Ошибка редактирования данных:', err);
 			if (err.response) {
-				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`);
+				setError(
+					`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`
+				);
 			} else {
 				setError('Ошибка сети. Проверьте подключение и сервер.');
 			}
@@ -469,18 +523,24 @@ function Dashboard() {
 
 		try {
 			console.log('Sending attach file request for publication:', publicationToAttach.id);
-			const response = await axios.post(`http://localhost:5000/api/publications/${publicationToAttach.id}/attach-file`, formData, {
-				headers: { 'Content-Type': 'multipart/form-data' },
-				withCredentials: true,
-			});
+			await axios.post(
+				`http://localhost:5000/api/publications/${publicationToAttach.id}/attach-file`,
+				formData,
+				{
+					headers: { 'Content-Type': 'multipart/form-data' },
+					withCredentials: true,
+				}
+			);
 			setAttachSuccess('Файл успешно прикреплен!');
 			setAttachError('');
-			await fetchData(); // Обновляем список после прикрепления файла
+			await fetchData();
 			setOpenAttachFileDialog(false);
 		} catch (err) {
 			console.error('Ошибка прикрепления файла:', err);
 			if (err.response) {
-				setAttachError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте файл и права доступа.'}`);
+				setAttachError(
+					`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте файл и права доступа.'}`
+				);
 			} else {
 				setAttachError('Ошибка сети. Проверьте подключение и сервер.');
 			}
@@ -572,11 +632,11 @@ function Dashboard() {
 	};
 
 	const chartData = {
-		labels: analytics.map(item => item.year),
+		labels: analytics.map((item) => item.year),
 		datasets: [
 			{
 				label: 'Количество публикаций',
-				data: analytics.map(item => item.count),
+				data: analytics.map((item) => item.count),
 				backgroundColor: 'rgba(0, 120, 255, 0.5)',
 				borderColor: 'rgba(0, 120, 255, 1)',
 				borderWidth: 1,
@@ -590,13 +650,13 @@ function Dashboard() {
 		responsive: true,
 		maintainAspectRatio: false,
 		plugins: {
-			legend: { position: 'top', labels: { color: 'text.primary' } },
+			legend: { position: 'top' },
 			title: { display: false },
 			tooltip: { backgroundColor: 'rgba(0, 0, 0, 0.8)', titleColor: 'white', bodyColor: 'white' },
 		},
 		scales: {
-			x: { title: { display: false }, ticks: { color: 'text.secondary' } },
-			y: { title: { display: false }, ticks: { color: 'text.secondary' }, beginAtZero: true },
+			x: { title: { display: false } },
+			y: { title: { display: false }, beginAtZero: true },
 		},
 		animation: { duration: 1000 },
 	};
@@ -605,29 +665,31 @@ function Dashboard() {
 		<Container maxWidth="lg" sx={{ mt: 4, minHeight: 'calc(100vh - 64px)', backgroundColor: 'white', borderRadius: 20, boxShadow: '0 12px 32px rgba(0, 0, 0, 0.15)' }}>
 			<Card sx={{ p: 4, borderRadius: 20, backgroundColor: 'white', boxShadow: 'none' }}>
 				<CardContent>
-					<Typography variant="h4" gutterBottom sx={{ color: 'text.primary', fontWeight: 700, textAlign: 'center' }}>
+					<Typography variant="h4" gutterBottom sx={{ color: '#212121', fontWeight: 700, textAlign: 'center' }}>
 						Личный кабинет
 					</Typography>
 
 					<Tabs value={value} onChange={handleTabChange} sx={{ mb: 4, borderBottom: 1, borderColor: 'divider' }}>
-						<Tab label="Личные данные" sx={{ color: 'text.primary', '&.Mui-selected': { color: 'primary.main' } }} />
-						<Tab label="Публикации" sx={{ color: 'text.primary', '&.Mui-selected': { color: 'primary.main' } }} />
-						<Tab label="Аналитика" sx={{ color: 'text.primary', '&.Mui-selected': { color: 'primary.main' } }} />
-						<Tab label="Экспорт" sx={{ color: 'text.primary', '&.Mui-selected': { color: 'primary.main' } }} />
+						<Tab label="Личные данные" />
+						<Tab label="Публикации" />
+						<Tab label="Аналитика" />
+						<Tab label="Экспорт" />
 					</Tabs>
 
 					{value === 0 && (
 						<Accordion defaultExpanded sx={{ boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)', borderRadius: 16 }}>
-							<AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: 'primary.main' }} />} sx={{ backgroundColor: 'grey.50', borderRadius: 16 }}>
-								<Typography variant="h6" sx={{ color: 'text.primary' }}>Личные данные</Typography>
+							<AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: '#1976D2' }} />} sx={{ backgroundColor: 'grey.50', borderRadius: 16 }}>
+								<Typography variant="h6" sx={{ color: '#212121' }}>
+									Личные данные
+								</Typography>
 							</AccordionSummary>
 							<AccordionDetails sx={{ p: 3 }}>
 								{user && (
 									<Box>
-										<Typography variant="body1" sx={{ color: 'text.secondary', mb: 2 }}>
+										<Typography variant="body1" sx={{ color: '#757575', mb: 2 }}>
 											ФИО: {user.last_name} {user.first_name} {user.middle_name || ''}
 										</Typography>
-										<Typography variant="body1" sx={{ color: 'text.secondary', mb: 2 }}>
+										<Typography variant="body1" sx={{ color: '#757575', mb: 2 }}>
 											Логин: {user.username}
 										</Typography>
 										<Box sx={{ display: 'flex', gap: 2 }}>
@@ -656,7 +718,7 @@ function Dashboard() {
 
 					{value === 1 && (
 						<>
-							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: 'text.primary', fontWeight: 600, textAlign: 'center' }}>
+							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#212121', fontWeight: 600, textAlign: 'center' }}>
 								Загрузка публикаций
 							</Typography>
 							<Box sx={{ mb: 4, p: 3, backgroundColor: 'grey.50', borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
@@ -741,13 +803,21 @@ function Dashboard() {
 													Выбрать файл
 												</Button>
 											</label>
-											{file && <Typography sx={{ mt: 1, color: 'text.secondary' }}>{file.name}</Typography>}
+											{file && <Typography sx={{ mt: 1, color: '#757575' }}>{file.name}</Typography>}
 										</Box>
 										<Collapse in={openError}>
-											{error && <Alert severity="error" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setOpenError(false)}>{error}</Alert>}
+											{error && (
+												<Alert severity="error" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setOpenError(false)}>
+													{error}
+												</Alert>
+											)}
 										</Collapse>
 										<Collapse in={openSuccess}>
-											{success && <Alert severity="success" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setOpenSuccess(false)}>{success}</Alert>}
+											{success && (
+												<Alert severity="success" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setOpenSuccess(false)}>
+													{success}
+												</Alert>
+											)}
 										</Collapse>
 										<Button
 											type="submit"
@@ -778,13 +848,21 @@ function Dashboard() {
 													Выбрать BibTeX-файл
 												</Button>
 											</label>
-											{file && <Typography sx={{ mt: 1, color: 'text.secondary' }}>{file.name}</Typography>}
+											{file && <Typography sx={{ mt: 1, color: '#757575' }}>{file.name}</Typography>}
 										</Box>
 										<Collapse in={openError}>
-											{error && <Alert severity="error" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setOpenError(false)}>{error}</Alert>}
+											{error && (
+												<Alert severity="error" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setOpenError(false)}>
+													{error}
+												</Alert>
+											)}
 										</Collapse>
 										<Collapse in={openSuccess}>
-											{success && <Alert severity="success" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setOpenSuccess(false)}>{success}</Alert>}
+											{success && (
+												<Alert severity="success" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setOpenSuccess(false)}>
+													{success}
+												</Alert>
+											)}
 										</Collapse>
 										<Button
 											type="submit"
@@ -797,12 +875,12 @@ function Dashboard() {
 									</form>
 								)}
 							</Box>
-							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: 'text.primary', fontWeight: 600, textAlign: 'center' }}>
+							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#212121', fontWeight: 600, textAlign: 'center' }}>
 								Ваши публикации
 							</Typography>
 							<Table sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)', borderRadius: 5, overflow: 'hidden' }}>
 								<TableHead>
-									<TableRow sx={{ backgroundColor: 'primary.main' }}>
+									<TableRow sx={{ backgroundColor: '#1976D2' }}>
 										<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>ID</TableCell>
 										<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Название</TableCell>
 										<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Авторы</TableCell>
@@ -820,27 +898,35 @@ function Dashboard() {
 											<TableCell>{pub.authors}</TableCell>
 											<TableCell>{pub.year}</TableCell>
 											<TableCell>
-												{pub.type === 'article' ? 'Статья' :
-													pub.type === 'monograph' ? 'Монография' :
-														pub.type === 'conference' ? 'Доклад/конференция' : pub.type}
+												{pub.type === 'article'
+													? 'Статья'
+													: pub.type === 'monograph'
+														? 'Монография'
+														: pub.type === 'conference'
+															? 'Доклад/конференция'
+															: pub.type}
 											</TableCell>
 											<TableCell>
-												{pub.status === 'draft' ? 'Черновик' :
-													pub.status === 'review' ? 'На проверке' :
-														pub.status === 'published' ? 'Опубликовано' : pub.status}
+												{pub.status === 'draft'
+													? 'Черновик'
+													: pub.status === 'review'
+														? 'На проверке'
+														: pub.status === 'published'
+															? 'Опубликовано'
+															: pub.status}
 											</TableCell>
 											<TableCell>
 												<IconButton
 													aria-label="edit"
 													onClick={() => handleEditClick(pub)}
-													sx={{ color: 'primary.main', mr: 1, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' } }}
+													sx={{ color: '#1976D2', mr: 1, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' } }}
 												>
 													<EditIcon />
 												</IconButton>
 												<IconButton
 													aria-label="delete"
 													onClick={() => handleDeleteClick(pub)}
-													sx={{ color: 'primary.main', mr: 1, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' } }}
+													sx={{ color: '#1976D2', mr: 1, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' } }}
 												>
 													<DeleteIcon />
 												</IconButton>
@@ -848,7 +934,7 @@ function Dashboard() {
 													<IconButton
 														aria-label="attach"
 														onClick={() => handleAttachFileClick(pub)}
-														sx={{ color: 'primary.main', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' } }}
+														sx={{ color: '#1976D2', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' } }}
 													>
 														<AttachFileIcon />
 													</IconButton>
@@ -856,7 +942,7 @@ function Dashboard() {
 													<IconButton
 														aria-label="download"
 														onClick={() => handleDownloadClick(pub)}
-														sx={{ color: 'primary.main', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' } }}
+														sx={{ color: '#1976D2', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' } }}
 													>
 														<DownloadIcon />
 													</IconButton>
@@ -871,24 +957,24 @@ function Dashboard() {
 
 					{value === 2 && (
 						<Box sx={{ mt: 4 }}>
-							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: 'text.primary', fontWeight: 600, textAlign: 'center' }}>
+							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#212121', fontWeight: 600, textAlign: 'center' }}>
 								Аналитика публикаций
 							</Typography>
 							{analytics.length === 0 ? (
-								<Card elevation={2} sx={{ p: 4, mt: 2, borderRadius: 20, backgroundColor: 'background.paper', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }}>
-									<Typography variant="body1" sx={{ color: 'text.secondary', textAlign: 'center' }}>
+								<Card elevation={2} sx={{ p: 4, mt: 2, borderRadius: 20, backgroundColor: 'white', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }}>
+									<Typography variant="body1" sx={{ color: '#757575', textAlign: 'center' }}>
 										У вас ещё нет ни одной публикации.{' '}
 										<Button
 											variant="text"
 											color="primary"
 											onClick={() => setUploadType('file')}
 											sx={{
-												p: 0,
+												p: 0.5,
 												textTransform: 'none',
 												'&:hover': {
 													textDecoration: 'underline',
 													backgroundColor: 'transparent',
-													color: 'primary.dark',
+													color: '#1565C0',
 												},
 											}}
 										>
@@ -898,9 +984,9 @@ function Dashboard() {
 									</Typography>
 								</Card>
 							) : (
-								<Card elevation={2} sx={{ p: 4, mt: 2, borderRadius: 20, backgroundColor: 'background.paper', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }}>
+								<Card elevation={2} sx={{ p: 4, mt: 2, borderRadius: 20, backgroundColor: 'white', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }}>
 									<CardContent>
-										<Typography variant="h6" sx={{ color: 'text.primary', mb: 2 }}>
+										<Typography variant="h6" sx={{ color: '#212121', mb: 2 }}>
 											Динамика публикаций
 										</Typography>
 										<Box sx={{ mb: 4, height: '300px' }}>
@@ -908,30 +994,28 @@ function Dashboard() {
 												data={chartData}
 												options={chartOptions}
 												ref={chartRef}
-												key={analytics.map(item => item.year).join('-')}
+												key={analytics.map((item) => item.year).join('-')}
 											/>
 										</Box>
 
-										<Button
-											variant="outlined"
-											color="primary"
+										<DetailsButton
 											onClick={() => setShowDetailedAnalytics(!showDetailedAnalytics)}
-											sx={{ mb: 2, borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+											sx={{ mb: 2 }}
 										>
 											{showDetailedAnalytics ? 'Свернуть' : 'Подробнее'}
-										</Button>
+										</DetailsButton>
 
 										<Collapse in={showDetailedAnalytics}>
 											<>
-												<Typography variant="h6" sx={{ color: 'text.primary', mb: 2 }}>
+												<Typography variant="h6" sx={{ color: '#212121', mb: 2 }}>
 													Типы публикаций
 												</Typography>
 												<Grid container spacing={2} sx={{ mb: 4 }}>
 													{Object.entries(pubTypes).map(([type, count]) => (
 														<Grid item xs={12} sm={4} key={type}>
-															<Card elevation={1} sx={{ p: 2, borderRadius: 12, backgroundColor: 'background.paper', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
+															<Card elevation={1} sx={{ p: 2, borderRadius: 12, backgroundColor: 'white', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
 																<CardContent>
-																	<Typography variant="body1" sx={{ color: 'text.primary' }}>
+																	<Typography variant="body1" sx={{ color: '#212121' }}>
 																		{type === 'article' ? 'Статьи' : type === 'monograph' ? 'Монографии' : 'Доклады'}: {count}
 																	</Typography>
 																</CardContent>
@@ -940,15 +1024,15 @@ function Dashboard() {
 													))}
 												</Grid>
 
-												<Typography variant="h6" sx={{ color: 'text.primary', mb: 2 }}>
+												<Typography variant="h6" sx={{ color: '#212121', mb: 2 }}>
 													Статусы публикаций
 												</Typography>
 												<Grid container spacing={2} sx={{ mb: 4 }}>
 													{Object.entries(pubStatuses).map(([status, count]) => (
 														<Grid item xs={12} sm={4} key={status}>
-															<Card elevation={1} sx={{ p: 2, borderRadius: 12, backgroundColor: 'background.paper', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
+															<Card elevation={1} sx={{ p: 2, borderRadius: 12, backgroundColor: 'white', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
 																<CardContent>
-																	<Typography variant="body1" sx={{ color: 'text.primary' }}>
+																	<Typography variant="body1" sx={{ color: '#212121' }}>
 																		{status === 'draft' ? 'Черновики' : status === 'review' ? 'На проверке' : 'Опубликованные'}: {count}
 																	</Typography>
 																</CardContent>
@@ -957,10 +1041,10 @@ function Dashboard() {
 													))}
 												</Grid>
 
-												<Typography variant="h6" sx={{ color: 'text.primary', mb: 2 }}>
+												<Typography variant="h6" sx={{ color: '#212121', mb: 2 }}>
 													Общая статистика
 												</Typography>
-												<Typography variant="body1" sx={{ color: 'text.secondary' }}>
+												<Typography variant="body1" sx={{ color: '#757575' }}>
 													Всего публикаций: {publications.length}
 													{totalCitations > 0 && ` | Общее количество цитирований: ${totalCitations}`}
 												</Typography>
@@ -974,7 +1058,7 @@ function Dashboard() {
 
 					{value === 3 && (
 						<Box sx={{ mt: 4 }}>
-							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: 'text.primary', fontWeight: 600, textAlign: 'center' }}>
+							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#212121', fontWeight: 600, textAlign: 'center' }}>
 								Экспорт публикаций
 							</Typography>
 							<Button
@@ -989,19 +1073,16 @@ function Dashboard() {
 					)}
 
 					<Dialog open={openDeleteDialog} onClose={handleDeleteCancel}>
-						<DialogTitle sx={{ color: 'text.primary' }}>Подтвердите удаление</DialogTitle>
+						<DialogTitle sx={{ color: '#212121' }}>Подтвердите удаление</DialogTitle>
 						<DialogContent>
-							<Typography sx={{ color: 'text.secondary' }}>
+							<Typography sx={{ color: '#757575' }}>
 								Вы уверены, что хотите удалить публикацию «{publicationToDelete?.title}»?
 							</Typography>
 						</DialogContent>
 						<DialogActions>
-							<Button
-								onClick={handleDeleteCancel}
-								sx={{ color: 'text.secondary', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
-							>
+							<CancelButton onClick={handleDeleteCancel}>
 								Отмена
-							</Button>
+							</CancelButton>
 							<Button
 								onClick={handleDeleteConfirm}
 								variant="contained"
@@ -1014,7 +1095,7 @@ function Dashboard() {
 					</Dialog>
 
 					<Dialog open={openEditDialog} onClose={handleEditCancel}>
-						<DialogTitle sx={{ color: 'text.primary' }}>Редактировать публикацию</DialogTitle>
+						<DialogTitle sx={{ color: '#212121' }}>Редактировать публикацию</DialogTitle>
 						<DialogContent>
 							<form onSubmit={handleEditSubmit}>
 								<TextField
@@ -1074,12 +1155,9 @@ function Dashboard() {
 									<MenuItem value="published">Опубликовано</MenuItem>
 								</TextField>
 								<DialogActions>
-									<Button
-										onClick={handleEditCancel}
-										sx={{ color: 'text.secondary', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
-									>
+									<CancelButton onClick={handleEditCancel}>
 										Отмена
-									</Button>
+									</CancelButton>
 									<Button
 										type="submit"
 										variant="contained"
@@ -1094,7 +1172,7 @@ function Dashboard() {
 					</Dialog>
 
 					<Dialog open={openEditUserDialog} onClose={handleEditUserCancel}>
-						<DialogTitle sx={{ color: 'text.primary' }}>Редактировать личные данные</DialogTitle>
+						<DialogTitle sx={{ color: '#212121' }}>Редактировать личные данные</DialogTitle>
 						<DialogContent>
 							<form onSubmit={handleEditUserSubmit}>
 								<TextField
@@ -1128,12 +1206,9 @@ function Dashboard() {
 									autoComplete="additional-name"
 								/>
 								<DialogActions>
-									<Button
-										onClick={handleEditUserCancel}
-										sx={{ color: 'text.secondary', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
-									>
+									<CancelButton onClick={handleEditUserCancel}>
 										Отмена
-									</Button>
+									</CancelButton>
 									<Button
 										type="submit"
 										variant="contained"
@@ -1148,7 +1223,7 @@ function Dashboard() {
 					</Dialog>
 
 					<Dialog open={openAttachFileDialog} onClose={handleAttachFileCancel}>
-						<DialogTitle sx={{ color: 'text.primary' }}>Прикрепить файл к публикации</DialogTitle>
+						<DialogTitle sx={{ color: '#212121' }}>Прикрепить файл к публикации</DialogTitle>
 						<DialogContent>
 							<Box sx={{ mt: 2, mb: 2 }}>
 								<input
@@ -1168,22 +1243,27 @@ function Dashboard() {
 										Выбрать файл
 									</Button>
 								</label>
-								{attachFile && <Typography sx={{ mt: 1, color: 'text.secondary' }}>{attachFile.name}</Typography>}
+								{attachFile && <Typography sx={{ mt: 1, color: '#757575' }}>{attachFile.name}</Typography>}
 							</Box>
 							<Collapse in={!!attachError}>
-								{attachError && <Alert severity="error" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setAttachError('')}>{attachError}</Alert>}
+								{attachError && (
+									<Alert severity="error" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setAttachError('')}>
+										{attachError}
+									</Alert>
+								)}
 							</Collapse>
 							<Collapse in={!!attachSuccess}>
-								{attachSuccess && <Alert severity="success" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setAttachSuccess('')}>{attachSuccess}</Alert>}
+								{attachSuccess && (
+									<Alert severity="success" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setAttachSuccess('')}>
+										{attachSuccess}
+									</Alert>
+								)}
 							</Collapse>
 						</DialogContent>
 						<DialogActions>
-							<Button
-								onClick={handleAttachFileCancel}
-								sx={{ color: 'text.secondary', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
-							>
+							<CancelButton onClick={handleAttachFileCancel}>
 								Отмена
-							</Button>
+							</CancelButton>
 							<Button
 								onClick={handleAttachFileSubmit}
 								variant="contained"
@@ -1196,7 +1276,7 @@ function Dashboard() {
 					</Dialog>
 
 					<Dialog open={openChangePasswordDialog} onClose={handleChangePasswordCancel}>
-						<DialogTitle sx={{ color: 'text.primary' }}>Изменить пароль</DialogTitle>
+						<DialogTitle sx={{ color: '#212121' }}>Изменить пароль</DialogTitle>
 						<DialogContent>
 							<form onSubmit={handleChangePasswordSubmit}>
 								<TextField
@@ -1222,18 +1302,23 @@ function Dashboard() {
 									autoComplete="new-password"
 								/>
 								<Collapse in={!!passwordError}>
-									{passwordError && <Alert severity="error" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setPasswordError('')}>{passwordError}</Alert>}
+									{passwordError && (
+										<Alert severity="error" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setPasswordError('')}>
+											{passwordError}
+										</Alert>
+									)}
 								</Collapse>
 								<Collapse in={!!passwordSuccess}>
-									{passwordSuccess && <Alert severity="success" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setPasswordSuccess('')}>{passwordSuccess}</Alert>}
+									{passwordSuccess && (
+										<Alert severity="success" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setPasswordSuccess('')}>
+											{passwordSuccess}
+										</Alert>
+									)}
 								</Collapse>
 								<DialogActions>
-									<Button
-										onClick={handleChangePasswordCancel}
-										sx={{ color: 'text.secondary', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
-									>
+									<CancelButton onClick={handleChangePasswordCancel}>
 										Отмена
-									</Button>
+									</CancelButton>
 									<Button
 										type="submit"
 										variant="contained"

@@ -1,23 +1,21 @@
 import React, { useState } from 'react';
-import { BrowserRouter as Router, Route, Routes, Navigate } from 'react-router-dom';
-import { Container, Typography, Button } from '@mui/material';
-import Home from './components/Home'; // Импортируем обновленный Home
-import Login from './components/Login'; // Предполагаем, что есть компонент Login
-import Dashboard from './components/Dashboard'; // Предполагаем, что есть компонент Dashboard
-import Publication from './components/Publication'; // Компонент для страницы публикации
+import { Route, Routes, Navigate } from 'react-router-dom';
+import Home from './components/Home';
+import Login from './components/Login';
+import Dashboard from './components/Dashboard';
+import Publication from './components/Publication';
+import Register from './components/Register';
+import Layout from './components/Layout';
 
 function App() {
 	const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('user'));
 
-	const handleLogout = () => {
-		localStorage.removeItem('user');
-		setIsAuthenticated(false);
-	};
-
 	return (
-			<Routes>
-				<Route path="/" element={<Home />} />
+		<Routes>
+			<Route path="/" element={<Layout />}>
+				<Route index element={<Home />} />
 				<Route path="/login" element={<Login />} />
+				<Route path="/register" element={<Register />} />
 				<Route
 					path="/dashboard"
 					element={isAuthenticated ? <Dashboard /> : <Navigate to="/login" />}
@@ -26,7 +24,8 @@ function App() {
 					path="/publication/:id"
 					element={isAuthenticated ? <Publication /> : <Navigate to="/login" />}
 				/>
-			</Routes>
+			</Route>
+		</Routes>
 	);
 }
 

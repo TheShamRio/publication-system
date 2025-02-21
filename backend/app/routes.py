@@ -19,6 +19,50 @@ bp = Blueprint('api', __name__)
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+# Новый публичный эндпоинт для всех опубликованных работ
+@bp.route('/publications/public', methods=['GET'])
+def get_all_published_publications():
+    """Fetch all published publications, accessible to everyone."""
+    query = Publication.query.filter_by(status='published')
+
+    # Опциональная фильтрация по типу (для Home.js)
+    pub_type = request.args.get('type')
+    if pub_type:
+        query = query.filter_by(type=pub_type)
+
+    # Опциональная фильтрация по году (для Home.js)
+    year = request.args.get('year')
+    if year:
+        try:
+            query = query.filter_by(year=int(year))
+        except ValueError:
+            return jsonify({"error": "Год должен быть числом"}), 400
+
+    # Опциональный поиск по названию или авторам (для Home.js)
+    search = request.args.get('search', '').lower()
+    if search:
+        query = query.filter(
+            (Publication.title.ilike(f'%{search}%')) |
+            (Publication.authors.ilike(f'%{search}%'))
+        )
+
+    # Сортировка по дате обновления (последние работы первыми)
+    publications = query.order_by(desc(Publication.updated_at)).all()
+
+    return jsonify([{
+        'id': pub.id,
+        'title': pub.title,
+        'authors': pub.authors,
+        'year': pub.year,
+        'type': pub.type,
+        'status': pub.status,
+        'file_url': pub.file_url,
+        'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
+        'user': {'full_name': pub.user.full_name if pub.user and pub.user.full_name else 'Не указан'}
+    } for pub in publications]), 200
+
+# Остальные существующие эндпоинты остаются без изменений...
+
 @bp.route('/publications/export-bibtex', methods=['GET'])
 @login_required
 def export_bibtex():
@@ -112,7 +156,7 @@ def allowed_file(filename):
 def get_publications():
     query = Publication.query.filter_by(user_id=current_user.id)
 
-    # Фильтрация по статусу только если параметр передан (для Home.js)
+    # Фильтрация по статусу только если параметр передан
     status = request.args.get('status')
     if status:
         query = query.filter_by(status=status)

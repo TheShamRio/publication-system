@@ -1,8 +1,8 @@
 import React from 'react';
 import { AppBar, Toolbar, Typography, Button, Box } from '@mui/material';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { styled } from '@mui/system';
-import logoPng from './assets/logo_kai.png'; // Используем PNG логотип
+import logoPng from '../assets/logo_kai.png';
 
 const StyledAppBar = styled(AppBar)({
 	backgroundColor: 'white',
@@ -14,20 +14,17 @@ const StyledAppBar = styled(AppBar)({
 });
 
 const Logo = styled('img')({
-	height: '40px',
+	height: '60px',
 	marginLeft: '16px',
 	transition: 'all 0.3s ease',
 	'&:hover': {
 		transform: 'scale(1.05)',
 	},
-	// Адаптируем синий фон для белого хедера (опционально)
-	backgroundColor: 'transparent', // Убираем синий фон
-	// Фильтр для инверсии цвета (если нужно):
-	// filter: 'invert(100%) sepia(0%) saturate(0%) hue-rotate(0deg) brightness(100%) contrast(100%)',
 });
 
 function Header({ isAuthenticated, onLogout }) {
-	const navigate = useNavigate();
+	const authenticated = isAuthenticated || false;
+	const handleLogout = onLogout || (() => { });
 
 	return (
 		<StyledAppBar position="fixed">
@@ -38,45 +35,79 @@ function Header({ isAuthenticated, onLogout }) {
 						component={Link}
 						to="/"
 						sx={{
-							color: 'primary.main',
+							color: '#115293',
 							textDecoration: 'none',
 							'&:hover': { textDecoration: 'underline' },
 							mr: 2,
 							transition: 'all 0.3s ease',
+							fontWeight: '700',
+							fontSize: '1.5rem',
 						}}
 					>
 						Система Публикаций
 					</Typography>
 					<Logo src={logoPng} alt="КАИ Logo" />
 				</Box>
-				{isAuthenticated ? (
-					<Button
-						onClick={onLogout}
-						variant="contained"
-						color="primary"
-						sx={{
-							borderRadius: 16,
-							transition: 'all 0.3s ease',
-							'&:hover': { transform: 'scale(1.05)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)' },
-						}}
-					>
-						Выйти
-					</Button>
-				) : (
-					<Button
-						component={Link}
-						to="/login"
-						variant="contained"
-						color="primary"
-						sx={{
-							borderRadius: 16,
-							transition: 'all 0.3s ease',
-							'&:hover': { transform: 'scale(1.05)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)' },
-						}}
-					>
-						Войти
-					</Button>
-				)}
+				<Box sx={{ display: 'flex', gap: 2 }}>
+					{!authenticated ? (
+						<>
+							<Button
+								component={Link}
+								to="/register"
+								variant="contained"
+								color="primary"
+								sx={{
+									borderRadius: 16,
+									transition: 'all 0.3s ease',
+									'&:hover': { transform: 'scale(1.05)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)' },
+								}}
+							>
+								Зарегистрироваться
+							</Button>
+							<Button
+								component={Link}
+								to="/login"
+								variant="contained"
+								color="primary"
+								sx={{
+									borderRadius: 16,
+									transition: 'all 0.3s ease',
+									'&:hover': { transform: 'scale(1.05)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)' },
+								}}
+							>
+								Войти
+							</Button>
+						</>
+					) : (
+						<>
+							<Button
+								component={Link}
+								to="/dashboard"
+								variant="contained"
+								color="primary"
+								sx={{
+									borderRadius: 16,
+									transition: 'all 0.3s ease',
+									'&:hover': { transform: 'scale(1.05)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)' },
+								}}
+							>
+								Личный кабинет
+							</Button>
+							<Button
+								onClick={handleLogout}
+								variant="contained"
+								color="primary"
+								sx={{
+									borderRadius: 16,
+									transition: 'all 0.3s ease',
+									'&:hover': { transform: 'scale(1.05)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)' },
+								}}
+							>
+								Выйти
+							</Button>
+						</>
+					)}
+				</Box>
 			</Toolbar>
 		</StyledAppBar>
 	);
