@@ -2,12 +2,14 @@ import React, { useState } from 'react';
 import { TextField, Button, Container, Typography, Box, Card, CardContent, Alert } from '@mui/material';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext'; // Импортируем useAuth
 
 function Login() {
 	const [username, setUsername] = useState('');
 	const [password, setPassword] = useState('');
 	const [error, setError] = useState('');
 	const navigate = useNavigate();
+	const { login } = useAuth(); // Используем метод login из контекста
 
 	const handleSubmit = async (e) => {
 		e.preventDefault();
@@ -24,6 +26,8 @@ function Login() {
 			);
 			if (response.data.message === 'Вход выполнен') {
 				localStorage.setItem('user', JSON.stringify({ username }));
+				login(); // Обновляем состояние авторизации через контекст
+				console.log('User logged in, localStorage updated:', localStorage.getItem('user'));
 				navigate('/dashboard');
 			}
 		} catch (err) {
