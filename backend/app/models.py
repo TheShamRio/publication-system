@@ -12,12 +12,12 @@ class User(db.Model, UserMixin):
     last_name = db.Column(db.String(100), nullable=True)  # Фамилия
     first_name = db.Column(db.String(100), nullable=True)  # Имя
     middle_name = db.Column(db.String(100), nullable=True)  # Отчество
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), nullable=False)  # Изменили на nullable=False
     
     @property
     def full_name(self):
-        return f"{self.first_name} {self.middle_name} {self.last_name}"
-		
+        return f"{self.first_name or ''} {self.middle_name or ''} {self.last_name or ''}".strip()
+    
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)
 
@@ -46,10 +46,9 @@ class Publication(db.Model):
     status = db.Column(db.String(50), nullable=False, default='draft')
     file_url = db.Column(db.String(200))
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow(), nullable=False)  # Изменили на nullable=False
 
     user = db.relationship('User', back_populates='publications', lazy=True)  # Убираем backref, используем back_populates
-    # Убираем конфликтное relationship 'author', так как оно дублирует user
 
     @property
     def type_ru(self):
@@ -69,14 +68,25 @@ class Publication(db.Model):
 
 class Achievement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'))
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     badge = db.Column(db.String(50))  # 'top_author', '10_publications'
-    date_earned = db.Column(db.DateTime, default=datetime.utcnow)
+    date_earned = db.Column(db.DateTime, default=lambda: datetime.utcnow(), nullable=False)
+
+    user = db.relationship('User', backref='achievements', lazy=True)  # Связь с пользователем
 
     @staticmethod
     def check_achievements(user_id):
-        count = Publication.query.filter_by(user_id=user_id).count()
-        if count >= 10:
-            achievement = Achievement(user_id=user_id, badge='10_publications')
-            db.session.add(achievement)
-            db.session.commit()
+        user = User.query.get_or_404(user_id)
+        pub_count = Publication.query.filter_by(user_id=user_id).count()
+
+        achievements = [
+            ('top_author', pub_count >= 10),  # Пример достижения для 10 публикаций
+            ('10_publications', pub_count >= 10),
+            ('50_publications', pub_count >= 50)
+        ]
+
+        for badge, condition in achievements:
+            if condition and not Achievement.query.filter_by(user_id=user_id, badge=badge).first():
+                new_achievement = Achievement(user_id=user_id, badge=badge)
+                db.session.add(new_achievement)
+        db.session.commit()

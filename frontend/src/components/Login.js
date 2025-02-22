@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { TextField, Button, Container, Typography, Box, Card, CardContent, Alert } from '@mui/material';
-import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext'; // Импортируем useAuth
+import { makeAuthenticatedRequest } from '../utils/auth'; // Импортируем новую утилиту
 
 function Login() {
 	const [username, setUsername] = useState('');
@@ -14,16 +14,11 @@ function Login() {
 	const handleSubmit = async (e) => {
 		e.preventDefault();
 		try {
-			const response = await axios.post(
-				'http://localhost:5000/api/login',
-				{
-					username,
-					password,
-				},
-				{
-					withCredentials: true,
-				}
-			);
+			const response = await makeAuthenticatedRequest('/login', 'POST', {
+				username,
+				password,
+			});
+
 			if (response.data.message === 'Вход выполнен') {
 				const userData = {
 					username,

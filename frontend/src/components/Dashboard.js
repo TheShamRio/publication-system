@@ -30,13 +30,13 @@ import {
 	AccordionDetails,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import DownloadIcon from '@mui/icons-material/Download';
 import { styled } from '@mui/system';
+import { makeAuthenticatedRequest } from '../utils/auth'; // Импортируем новую утилиту
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend);
 
@@ -97,7 +97,7 @@ function Dashboard() {
 	const [editFirstName, setEditFirstName] = useState('');
 	const [editMiddleName, setEditMiddleName] = useState('');
 	const [user, setUser] = useState(null);
-	const [loadingUser, setLoadingUser] = useState(true); // Добавляем состояние загрузки
+	const [loadingUser, setLoadingUser] = useState(true);
 	const [openAttachFileDialog, setOpenAttachFileDialog] = useState(false);
 	const [publicationToAttach, setPublicationToAttach] = useState(null);
 	const [attachFile, setAttachFile] = useState(null);
@@ -121,12 +121,8 @@ function Dashboard() {
 
 	const fetchData = async () => {
 		try {
-			const pubResponse = await axios.get('http://localhost:5000/api/publications', {
-				withCredentials: true,
-			});
-			const analyticsResponse = await axios.get('http://localhost:5000/api/analytics/yearly', {
-				withCredentials: true,
-			});
+			const pubResponse = await makeAuthenticatedRequest('/publications', 'GET');
+			const analyticsResponse = await makeAuthenticatedRequest('/analytics/yearly', 'GET');
 			setPublications(pubResponse.data);
 			setAnalytics(analyticsResponse.data);
 
@@ -154,11 +150,9 @@ function Dashboard() {
 	};
 
 	const fetchUserData = async () => {
-		setLoadingUser(true); // Устанавливаем состояние загрузки
+		setLoadingUser(true);
 		try {
-			const response = await axios.get('http://localhost:5000/api/user', {
-				withCredentials: true,
-			});
+			const response = await makeAuthenticatedRequest('/user', 'GET');
 			setUser(response.data);
 		} catch (err) {
 			console.error('Ошибка загрузки данных пользователя:', err);
@@ -167,7 +161,7 @@ function Dashboard() {
 				setTimeout(() => navigate('/login'), 2000);
 			}
 		} finally {
-			setLoadingUser(false); // Сбрасываем состояние загрузки
+			setLoadingUser(false);
 		}
 	};
 
@@ -188,14 +182,11 @@ function Dashboard() {
 		e.preventDefault();
 		try {
 			console.log('Changing password for user:', user?.username);
-			const response = await axios.put(
-				'http://localhost:5000/api/user/password',
-				{
-					current_password: currentPassword,
-					new_password: newPassword,
-				},
-				{ withCredentials: true }
-			);
+			const response = await makeAuthenticatedRequest('/user/password', 'PUT', {
+				current_password: currentPassword,
+				new_password: newPassword,
+			});
+
 			setPasswordSuccess('Пароль успешно обновлен!');
 			setPasswordError('');
 			setOpenChangePasswordDialog(false);
@@ -269,9 +260,8 @@ function Dashboard() {
 
 		try {
 			console.log('Uploading file with data:', { title, authors, year, type });
-			await axios.post('http://localhost:5000/api/publications/upload-file', formData, {
+			const response = await makeAuthenticatedRequest('/publications/upload-file', 'POST', formData, {
 				headers: { 'Content-Type': 'multipart/form-data' },
-				withCredentials: true,
 			});
 			setSuccess('Публикация успешно загружена!');
 			setOpenSuccess(true);
@@ -283,7 +273,7 @@ function Dashboard() {
 			setFile(null);
 			await fetchData();
 		} catch (err) {
-			console.error('Ошибка загрузки файла:', err);
+			console.error('Ошибка загрузки файла:', err.response?.data || err);
 			if (err.response) {
 				setError(
 					`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля и файл.'}`
@@ -316,9 +306,8 @@ function Dashboard() {
 
 		try {
 			console.log('Uploading BibTeX file');
-			const response = await axios.post('http://localhost:5000/api/publications/upload-bibtex', formData, {
+			const response = await makeAuthenticatedRequest('/publications/upload-bibtex', 'POST', formData, {
 				headers: { 'Content-Type': 'multipart/form-data' },
-				withCredentials: true,
 			});
 			setSuccess(`Загружено ${response.data.message.split(' ')[1]} публикаций!`);
 			setOpenSuccess(true);
@@ -326,7 +315,7 @@ function Dashboard() {
 			setFile(null);
 			await fetchData();
 		} catch (err) {
-			console.error('Ошибка загрузки BibTeX:', err);
+			console.error('Ошибка загрузки BibTeX:', err.response?.data || err);
 			if (err.response) {
 				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте формат BibTeX.'}`);
 			} else {
@@ -360,26 +349,20 @@ function Dashboard() {
 				type: editType,
 				status: editStatus,
 			});
-			await axios.put(
-				`http://localhost:5000/api/publications/${editPublication.id}`,
-				{
-					title: editTitle.trim(),
-					authors: editAuthors.trim(),
-					year: parseInt(editYear, 10),
-					type: editType,
-					status: editStatus,
-				},
-				{
-					withCredentials: true,
-				}
-			);
+			const response = await makeAuthenticatedRequest(`/publications/${editPublication.id}`, 'PUT', {
+				title: editTitle.trim(),
+				authors: editAuthors.trim(),
+				year: parseInt(editYear, 10),
+				type: editType,
+				status: editStatus,
+			});
 			setSuccess('Публикация успешно отредактирована!');
 			setOpenSuccess(true);
 			setError('');
 			await fetchData();
 			setOpenEditDialog(false);
 		} catch (err) {
-			console.error('Ошибка редактирования публикации:', err);
+			console.error('Ошибка редактирования публикации:', err.response?.data || err);
 			if (err.response) {
 				setError(
 					`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`
@@ -418,15 +401,13 @@ function Dashboard() {
 
 		try {
 			console.log('Confirming deletion of publication:', publicationToDelete.id);
-			await axios.delete(`http://localhost:5000/api/publications/${publicationToDelete.id}`, {
-				withCredentials: true,
-			});
+			const response = await makeAuthenticatedRequest(`/publications/${publicationToDelete.id}`, 'DELETE');
 			setSuccess('Публикация успешно удалена!');
 			setOpenSuccess(true);
 			setError('');
 			await fetchData();
 		} catch (err) {
-			console.error('Ошибка удаления публикации:', err);
+			console.error('Ошибка удаления публикации:', err.response?.data || err);
 			if (err.response) {
 				setError(
 					`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте права доступа.'}`
@@ -462,24 +443,18 @@ function Dashboard() {
 		e.preventDefault();
 		try {
 			console.log('Updating user data:', { last_name: editLastName, first_name: editFirstName, middle_name: editMiddleName });
-			const response = await axios.put(
-				'http://localhost:5000/api/user',
-				{
-					last_name: editLastName.trim() || null,
-					first_name: editFirstName.trim() || null,
-					middle_name: editMiddleName.trim() || null,
-				},
-				{
-					withCredentials: true,
-				}
-			);
+			const response = await makeAuthenticatedRequest('/user', 'PUT', {
+				last_name: editLastName.trim() || null,
+				first_name: editFirstName.trim() || null,
+				middle_name: editMiddleName.trim() || null,
+			});
 			setSuccess('Личные данные успешно обновлены!');
 			setOpenSuccess(true);
 			setError('');
 			setUser(response.data.user);
 			setOpenEditUserDialog(false);
 		} catch (err) {
-			console.error('Ошибка редактирования данных:', err);
+			console.error('Ошибка редактирования данных:', err.response?.data || err);
 			if (err.response) {
 				setError(
 					`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`
@@ -527,20 +502,15 @@ function Dashboard() {
 
 		try {
 			console.log('Sending attach file request for publication:', publicationToAttach.id);
-			await axios.post(
-				`http://localhost:5000/api/publications/${publicationToAttach.id}/attach-file`,
-				formData,
-				{
-					headers: { 'Content-Type': 'multipart/form-data' },
-					withCredentials: true,
-				}
-			);
+			const response = await makeAuthenticatedRequest(`/publications/${publicationToAttach.id}/attach-file`, 'POST', formData, {
+				headers: { 'Content-Type': 'multipart/form-data' },
+			});
 			setAttachSuccess('Файл успешно прикреплен!');
 			setAttachError('');
 			await fetchData();
 			setOpenAttachFileDialog(false);
 		} catch (err) {
-			console.error('Ошибка прикрепления файла:', err);
+			console.error('Ошибка прикрепления файла:', err.response?.data || err);
 			if (err.response) {
 				setAttachError(
 					`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте файл и права доступа.'}`
@@ -610,8 +580,7 @@ function Dashboard() {
 	const handleExportBibTeX = async () => {
 		try {
 			console.log('Exporting publications to BibTeX');
-			const response = await axios.get('http://localhost:5000/api/publications/export-bibtex', {
-				withCredentials: true,
+			const response = await makeAuthenticatedRequest('/publications/export-bibtex', 'GET', null, {
 				responseType: 'blob',
 			});
 			const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -625,7 +594,7 @@ function Dashboard() {
 			setSuccess('Публикации успешно выгружены в формате BibTeX!');
 			setOpenSuccess(true);
 		} catch (err) {
-			console.error('Ошибка выгрузки в BibTeX:', err);
+			console.error('Ошибка выгрузки в BibTeX:', err.response?.data || err);
 			if (err.response) {
 				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте права доступа.'}`);
 			} else {

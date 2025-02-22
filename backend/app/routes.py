@@ -1,9 +1,9 @@
 from flask import Blueprint, jsonify, request
 from .extensions import db
 from .models import Publication, User
+from .utils import allowed_file  # Импортируем из utils
 import bibtexparser
 from flask_login import login_user, current_user, logout_user
-from functools import wraps
 from flask_login import login_required
 from .analytics import get_publications_by_year
 from flask import current_app
@@ -13,6 +13,7 @@ import logging
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy import func, desc
+from functools import wraps  # Добавляем импорт wraps
 
 bp = Blueprint('api', __name__)
 
@@ -61,7 +62,6 @@ def get_all_published_publications():
         'user': {'full_name': pub.user.full_name if pub.user and pub.user.full_name else 'Не указан'}
     } for pub in publications]), 200
 
-# Остальные существующие эндпоинты остаются без изменений...
 
 @bp.route('/publications/export-bibtex', methods=['GET'])
 @login_required
@@ -346,17 +346,8 @@ def logout():
     logout_user()
     return jsonify({"message": "Logged out"})
 
-def admin_required(f):
-    @wraps(f)
-    def decorated(*args, **kwargs):
-        if current_user.role != 'admin':
-            return jsonify({"error": "Access denied"}), 403
-        return f(*args, **kwargs)
-    return decorated
-
 @bp.route('/admin/stats')
 @login_required
-@admin_required
 def admin_stats():
     return jsonify({"total_publications": Publication.query.count()})
 
@@ -461,8 +452,10 @@ def get_user():
         "role": current_user.role,
         "last_name": current_user.last_name,
         "first_name": current_user.first_name,
-        "middle_name": current_user.middle_name
+        "middle_name": current_user.middle_name,
+        "achievements": [ach.badge for ach in current_user.achievements] if current_user.achievements else []  # Добавляем достижения
     })
+
 @bp.route('/user', methods=['PUT'])
 @login_required
 def update_user():

@@ -10,32 +10,32 @@ import AdminDashboard from './components/AdminDashboard'; // Новый комп
 import { useAuth } from './contexts/AuthContext'; // Импортируем useAuth
 
 function App() {
-  const { isAuthenticated, role } = useAuth(); // Получаем role из контекста
+	const { isAuthenticated, role } = useAuth(); // Получаем role из контекста
 
-  return (
-    <Routes>
-      <Route path="/" element={<Layout />}>
-        {/* Публичные маршруты — доступны всем */}
-        <Route index element={<Home />} />
-        <Route path="/login" element={<Login />} />
-        <Route path="/register" element={<Register />} />
-        
-        {/* Защищённые маршруты — только для авторизованных пользователей */}
-        <Route
-          path="/dashboard"
-          element={isAuthenticated && role === 'user' ? <Dashboard /> : <Navigate to="/login" />}
-        />
-        <Route
-          path="/publication/:id"
-          element={isAuthenticated ? <Publication /> : <Navigate to="/login" />}
-        />
-        <Route
-          path="/admin"
-          element={isAuthenticated && role === 'admin' ? <AdminDashboard /> : <Navigate to="/login" />}
-        />
-      </Route>
-    </Routes>
-  );
+	return (
+		<Routes>
+			<Route path="/" element={<Layout />}>
+				{/* Публичные маршруты — доступны всем */}
+				<Route index element={<Home />} />
+				<Route path="/login" element={<Login />} />
+				<Route path="/register" element={<Register />} />
+
+				{/* Защищённые маршруты — только для авторизованных пользователей */}
+				<Route
+					path="/dashboard"
+					element={isAuthenticated && role === 'user' ? <Dashboard /> : <Navigate to="/login" />}
+				/>
+				<Route
+					path="/publication/:id"
+					element={isAuthenticated ? <Publication /> : <Navigate to="/login" />}
+				/>
+				<Route
+					path="/admin"
+					element={isAuthenticated && role === 'admin' ? <AdminDashboard /> : <Navigate to="/login" />}
+				/>
+			</Route>
+		</Routes>
+	);
 }
 
 export default App;

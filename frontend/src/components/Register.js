@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { TextField, Button, Container, Typography, Box, Card, CardContent, Alert } from '@mui/material';
-import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext'; // Импортируем useAuth
+import { makeAuthenticatedRequest } from '../utils/auth'; // Импортируем новую утилиту
 
 function Register() {
 	const [username, setUsername] = useState('');
@@ -12,21 +13,24 @@ function Register() {
 	const [error, setError] = useState('');
 	const [success, setSuccess] = useState('');
 	const navigate = useNavigate();
+	const { login } = useAuth();
 
 	const handleSubmit = async (e) => {
 		e.preventDefault();
 		try {
-			const response = await axios.post('http://localhost:5000/api/register', {
+			const response = await makeAuthenticatedRequest('/register', 'POST', {
 				username,
 				password,
 				last_name: lastName,
 				first_name: firstName,
 				middle_name: middleName,
 			});
+
 			if (response.data.message === 'Пользователь зарегистрирован') {
 				setSuccess('Регистрация успешна! Теперь вы можете войти.');
 				setError('');
 				setTimeout(() => navigate('/login'), 2000);
+				login({ username, role: response.data.user.role });
 			}
 		} catch (err) {
 			setError(err.response?.data?.error || 'Произошла ошибка при регистрации. Попробуйте позже.');

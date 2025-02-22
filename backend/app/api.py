@@ -2,6 +2,7 @@
 from flask import Blueprint, jsonify, request
 from .extensions import db
 from .models import Publication, User
+from .utils import allowed_file  # Импортируем из utils
 import bibtexparser
 from flask_login import login_user, current_user, logout_user, login_required
 from .middleware import admin_required  # Импортируем middleware
@@ -14,12 +15,10 @@ from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy import func, desc
 
-bp = Blueprint('api', __name__)
+bp = Blueprint('admin_api', __name__)
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
-
-# ... (остальные существующие эндпоинты остаются без изменений)
 
 # Эндпоинты для администратора
 @bp.route('/admin/users', methods=['GET'])
@@ -34,9 +33,8 @@ def get_all_users():
         'last_name': user.last_name,
         'first_name': user.first_name,
         'middle_name': user.middle_name,
-        'created_at': user.created_at.isoformat()
+        'created_at': user.created_at.isoformat() if user.created_at else None
     } for user in users]), 200
-
 @bp.route('/admin/users/<int:user_id>', methods=['PUT'])
 @login_required
 @admin_required
@@ -95,7 +93,6 @@ def get_all_publications():
         'user_id': pub.user_id,
         'updated_at': pub.updated_at.isoformat() if pub.updated_at else None
     } for pub in publications]), 200
-
 @bp.route('/admin/publications/<int:pub_id>', methods=['PUT'])
 @login_required
 @admin_required
