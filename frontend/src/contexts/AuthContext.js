@@ -6,12 +6,14 @@ export function AuthProvider({ children }) {
 	const [authState, setAuthState] = useState({
 		isAuthenticated: !!localStorage.getItem('user'),
 		role: localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user')).role : 'user',
+		username: localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user')).username : '',
 	});
 
 	const login = (userData) => {
 		setAuthState({
 			isAuthenticated: true,
 			role: userData.role || 'user',
+			username: userData.username || '',
 		});
 		localStorage.setItem('user', JSON.stringify({ ...userData, role: userData.role }));
 	};
@@ -20,11 +22,11 @@ export function AuthProvider({ children }) {
 		setAuthState({
 			isAuthenticated: false,
 			role: 'user',
+			username: '',
 		});
 		localStorage.removeItem('user');
 	};
 
-	// Функция для ручного обновления состояния (для синхронизации с Layout)
 	const updateAuthState = (newState) => {
 		setAuthState(newState);
 		if (newState.isAuthenticated) {

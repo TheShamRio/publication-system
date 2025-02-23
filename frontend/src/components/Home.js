@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
 	Container,
 	Typography,
@@ -57,11 +57,10 @@ function Home() {
 	useEffect(() => {
 		const fetchPublishedPublications = async () => {
 			try {
-				const response = await axios.get('http://localhost:5000/api/publications/public', {
-					withCredentials: true, // Убедимся, что куки передаются для аутентификации, если требуется
+				const response = await axios.get('http://localhost:5000/api/public/publications', {
+					withCredentials: true,
 				});
 				const sortedPubs = response.data
-					.filter((pub) => pub.status === 'published')
 					.sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
 				setAllPublications(sortedPubs);
 			} catch (err) {
@@ -81,18 +80,17 @@ function Home() {
 					(pub.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
 						pub.authors.toLowerCase().includes(searchTerm.toLowerCase())) &&
 					(!filterType || pub.type === filterType) &&
-					(!filterYear || pub.year.toString() === filterYear) &&
-					pub.status === 'published'
+					(!filterYear || pub.year.toString() === filterYear)
 			)
 			.sort((a, b) => {
 				const aMatch =
 					a.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-						a.authors.toLowerCase().includes(searchTerm.toLowerCase())
+					a.authors.toLowerCase().includes(searchTerm.toLowerCase())
 						? 1
 						: 0;
 				const bMatch =
 					b.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-						b.authors.toLowerCase().includes(searchTerm.toLowerCase())
+					b.authors.toLowerCase().includes(searchTerm.toLowerCase())
 						? 1
 						: 0;
 				return bMatch - aMatch || new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at);
@@ -111,20 +109,6 @@ function Home() {
 	const handleFilterChange = () => {
 		setCurrentPage(1);
 	};
-
-	// Примечание: Если вы добавите POST-запросы (например, для фильтрации или отправки данных), используйте makeAuthenticatedRequest:
-	/*
-	const handleSomePostAction = async (data) => {
-		try {
-			const response = await makeAuthenticatedRequest('/some-endpoint', 'POST', data);
-			// Обработка ответа
-		} catch (err) {
-			console.error('Ошибка POST-запроса:', err);
-			setError('Произошла ошибка при отправке данных.');
-			setOpenError(true);
-		}
-	};
-	*/
 
 	return (
 		<Container maxWidth="lg" sx={{ mt: 4, minHeight: 'calc(100vh - 64px)', backgroundColor: 'white', borderRadius: 20, boxShadow: '0 12px 32px rgba(0, 0, 0, 0.15)' }}>
@@ -234,7 +218,7 @@ function Home() {
 										primary={
 											<Typography
 												variant="h6"
-												component="a" // Указываем, что это должен быть <a>, а не <p>
+												component="a"
 												href={`/publication/${pub.id}`}
 												sx={{ color: '#1976D2', textDecoration: 'none', '&:hover': { textDecoration: 'underline', color: '#1565C0' }, fontWeight: 500 }}
 											>

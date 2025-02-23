@@ -6,13 +6,13 @@ from flask_login import UserMixin
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)
-    publications = db.relationship('Publication', back_populates='user', lazy=True)  # Убираем backref, используем back_populates
+    publications = db.relationship('Publication', back_populates='user', lazy=True)
     password_hash = db.Column(db.Text)
-    role = db.Column(db.String(20), default='user')  # Изменил на 'user' по умолчанию
-    last_name = db.Column(db.String(100), nullable=True)  # Фамилия
-    first_name = db.Column(db.String(100), nullable=True)  # Имя
-    middle_name = db.Column(db.String(100), nullable=True)  # Отчество
-    created_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), nullable=False)  # Изменили на nullable=False
+    role = db.Column(db.String(20), default='user')
+    last_name = db.Column(db.String(100), nullable=True)
+    first_name = db.Column(db.String(100), nullable=True)
+    middle_name = db.Column(db.String(100), nullable=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), nullable=False)
     
     @property
     def full_name(self):
@@ -24,9 +24,8 @@ class User(db.Model, UserMixin):
     def check_password(self, password):
         return check_password_hash(self.password_hash, password)
     
-    # Flask-Login methods
     def is_active(self):
-        return True  # Всегда активный пользователь, измените, если нужны проверки
+        return True
 
     def is_authenticated(self):
         return True
@@ -35,7 +34,7 @@ class User(db.Model, UserMixin):
         return False
     
     def get_id(self):
-        return str(self.id)  # Flask-Login требует строковый идентификатор
+        return str(self.id)
 
 class Publication(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -45,10 +44,10 @@ class Publication(db.Model):
     type = db.Column(db.String(50), nullable=False)
     status = db.Column(db.String(50), nullable=False, default='draft')
     file_url = db.Column(db.String(200))
-    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    updated_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow(), nullable=False)  # Изменили на nullable=False
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)  # Разрешаем NULL
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow(), nullable=False)
 
-    user = db.relationship('User', back_populates='publications', lazy=True)  # Убираем backref, используем back_populates
+    user = db.relationship('User', back_populates='publications', lazy=True)
 
     @property
     def type_ru(self):
@@ -69,10 +68,10 @@ class Publication(db.Model):
 class Achievement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    badge = db.Column(db.String(50))  # 'top_author', '10_publications'
+    badge = db.Column(db.String(50))
     date_earned = db.Column(db.DateTime, default=lambda: datetime.utcnow(), nullable=False)
 
-    user = db.relationship('User', backref='achievements', lazy=True)  # Связь с пользователем
+    user = db.relationship('User', backref='achievements', lazy=True)
 
     @staticmethod
     def check_achievements(user_id):
@@ -80,7 +79,7 @@ class Achievement(db.Model):
         pub_count = Publication.query.filter_by(user_id=user_id).count()
 
         achievements = [
-            ('top_author', pub_count >= 10),  # Пример достижения для 10 публикаций
+            ('top_author', pub_count >= 10),
             ('10_publications', pub_count >= 10),
             ('50_publications', pub_count >= 50)
         ]

@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
 import { TextField, Button, Container, Typography, Box, Card, CardContent, Alert } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext'; // Импортируем useAuth
-import { makeAuthenticatedRequest } from '../utils/auth'; // Импортируем новую утилиту
+import { useAuth } from '../contexts/AuthContext';
+import axios from 'axios';
 
 function Register() {
 	const [username, setUsername] = useState('');
@@ -18,13 +18,13 @@ function Register() {
 	const handleSubmit = async (e) => {
 		e.preventDefault();
 		try {
-			const response = await makeAuthenticatedRequest('/register', 'POST', {
+			const response = await axios.post('http://localhost:5000/api/register', {
 				username,
 				password,
 				last_name: lastName,
 				first_name: firstName,
 				middle_name: middleName,
-			});
+			}, { withCredentials: true });
 
 			if (response.data.message === 'Пользователь зарегистрирован') {
 				setSuccess('Регистрация успешна! Теперь вы можете войти.');

@@ -36,35 +36,30 @@ import DeleteIcon from '@mui/icons-material/Delete';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import DownloadIcon from '@mui/icons-material/Download';
 import { styled } from '@mui/system';
-import { makeAuthenticatedRequest } from '../utils/auth'; // Импортируем новую утилиту
+import axios from 'axios';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend);
 
 const CancelButton = styled(Button)({
-	borderRadius: 16,
-	border: '1px solid #1976D2',
-	color: '#1976D2',
-	backgroundColor: 'transparent',
-	transition: 'all 0.3s ease',
+	borderRadius: '12px',
+	color: '#0071E3',
+	textTransform: 'none',
 	'&:hover': {
-		backgroundColor: '#1976D2',
-		color: '#fff',
-		border: '1px solid #1976D2',
-		boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+		color: '#FFFFFF',
+		backgroundColor: '#0071E3'
 	},
 });
 
 const DetailsButton = styled(Button)({
-	borderRadius: 16,
-	border: '1px solid #1976D2',
-	color: '#1976D2',
-	backgroundColor: 'transparent',
+	borderRadius: '12px',
+	border: '1px solid #D1D1D6',
+	color: '#1D1D1F',
+	textTransform: 'none',
 	transition: 'all 0.3s ease',
 	'&:hover': {
-		backgroundColor: '#1976D2',
-		color: '#fff',
-		border: '1px solid #1976D2',
-		boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)',
+		borderColor: '#0071E3',
+		color: '#0071E3',
+		backgroundColor: 'transparent'
 	},
 });
 
@@ -92,6 +87,7 @@ function Dashboard() {
 	const [editYear, setEditYear] = useState('');
 	const [editType, setEditType] = useState('article');
 	const [editStatus, setEditStatus] = useState('draft');
+	const [editFile, setEditFile] = useState(null);
 	const [openEditUserDialog, setOpenEditUserDialog] = useState(false);
 	const [editLastName, setEditLastName] = useState('');
 	const [editFirstName, setEditFirstName] = useState('');
@@ -121,8 +117,8 @@ function Dashboard() {
 
 	const fetchData = async () => {
 		try {
-			const pubResponse = await makeAuthenticatedRequest('/publications', 'GET');
-			const analyticsResponse = await makeAuthenticatedRequest('/analytics/yearly', 'GET');
+			const pubResponse = await axios.get('/api/publications', { withCredentials: true });
+			const analyticsResponse = await axios.get('/api/analytics/yearly', { withCredentials: true });
 			setPublications(pubResponse.data);
 			setAnalytics(analyticsResponse.data);
 
@@ -152,7 +148,7 @@ function Dashboard() {
 	const fetchUserData = async () => {
 		setLoadingUser(true);
 		try {
-			const response = await makeAuthenticatedRequest('/user', 'GET');
+			const response = await axios.get('/api/user', { withCredentials: true });
 			setUser(response.data);
 		} catch (err) {
 			console.error('Ошибка загрузки данных пользователя:', err);
@@ -182,9 +178,11 @@ function Dashboard() {
 		e.preventDefault();
 		try {
 			console.log('Changing password for user:', user?.username);
-			const response = await makeAuthenticatedRequest('/user/password', 'PUT', {
+			const response = await axios.put('/api/user/password', {
 				current_password: currentPassword,
 				new_password: newPassword,
+			}, {
+				withCredentials: true
 			});
 
 			setPasswordSuccess('Пароль успешно обновлен!');
@@ -260,8 +258,9 @@ function Dashboard() {
 
 		try {
 			console.log('Uploading file with data:', { title, authors, year, type });
-			const response = await makeAuthenticatedRequest('/publications/upload-file', 'POST', formData, {
-				headers: { 'Content-Type': 'multipart/form-data' },
+			const response = await axios.post('/api/publications/upload-file', formData, {
+				withCredentials: true,
+				headers: { 'Content-Type': 'multipart/form-data' }
 			});
 			setSuccess('Публикация успешно загружена!');
 			setOpenSuccess(true);
@@ -306,8 +305,9 @@ function Dashboard() {
 
 		try {
 			console.log('Uploading BibTeX file');
-			const response = await makeAuthenticatedRequest('/publications/upload-bibtex', 'POST', formData, {
-				headers: { 'Content-Type': 'multipart/form-data' },
+			const response = await axios.post('/api/publications/upload-bibtex', formData, {
+				withCredentials: true,
+				headers: { 'Content-Type': 'multipart/form-data' }
 			});
 			setSuccess(`Загружено ${response.data.message.split(' ')[1]} публикаций!`);
 			setOpenSuccess(true);
@@ -334,12 +334,35 @@ function Dashboard() {
 		setEditYear(publication.year);
 		setEditType(publication.type);
 		setEditStatus(publication.status);
+		setEditFile(null);
 		setOpenEditDialog(true);
 	};
 
 	const handleEditSubmit = async (e) => {
 		e.preventDefault();
 		if (!editPublication) return;
+
+		let data;
+		let headers = {};
+		if (editFile) {
+			data = new FormData();
+			data.append('file', editFile);
+			data.append('title', editTitle.trim() || '');
+			data.append('authors', editAuthors.trim() || '');
+			data.append('year', editYear ? parseInt(editYear, 10) : '');
+			data.append('type', editType || 'article');
+			data.append('status', editStatus || 'draft');
+			headers['Content-Type'] = 'multipart/form-data';
+		} else {
+			data = {
+				title: editTitle.trim() || '',
+				authors: editAuthors.trim() || '',
+				year: editYear ? parseInt(editYear, 10) : '',
+				type: editType || 'article',
+				status: editStatus || 'draft'
+			};
+			headers['Content-Type'] = 'application/json';
+		}
 
 		try {
 			console.log('Updating publication with:', {
@@ -348,14 +371,13 @@ function Dashboard() {
 				year: editYear,
 				type: editType,
 				status: editStatus,
+				file: editFile ? editFile.name : 'No new file'
 			});
-			const response = await makeAuthenticatedRequest(`/publications/${editPublication.id}`, 'PUT', {
-				title: editTitle.trim(),
-				authors: editAuthors.trim(),
-				year: parseInt(editYear, 10),
-				type: editType,
-				status: editStatus,
-			});
+			const response = await axios.put(
+				`/api/publications/${editPublication.id}`,
+				data,
+				{ withCredentials: true, headers }
+			);
 			setSuccess('Публикация успешно отредактирована!');
 			setOpenSuccess(true);
 			setError('');
@@ -388,6 +410,7 @@ function Dashboard() {
 		setEditYear('');
 		setEditType('article');
 		setEditStatus('draft');
+		setEditFile(null);
 	};
 
 	const handleDeleteClick = (publication) => {
@@ -401,7 +424,7 @@ function Dashboard() {
 
 		try {
 			console.log('Confirming deletion of publication:', publicationToDelete.id);
-			const response = await makeAuthenticatedRequest(`/publications/${publicationToDelete.id}`, 'DELETE');
+			const response = await axios.delete(`/api/publications/${publicationToDelete.id}`, { withCredentials: true });
 			setSuccess('Публикация успешно удалена!');
 			setOpenSuccess(true);
 			setError('');
@@ -443,10 +466,12 @@ function Dashboard() {
 		e.preventDefault();
 		try {
 			console.log('Updating user data:', { last_name: editLastName, first_name: editFirstName, middle_name: editMiddleName });
-			const response = await makeAuthenticatedRequest('/user', 'PUT', {
+			const response = await axios.put('/api/user', {
 				last_name: editLastName.trim() || null,
 				first_name: editFirstName.trim() || null,
 				middle_name: editMiddleName.trim() || null,
+			}, {
+				withCredentials: true
 			});
 			setSuccess('Личные данные успешно обновлены!');
 			setOpenSuccess(true);
@@ -502,8 +527,9 @@ function Dashboard() {
 
 		try {
 			console.log('Sending attach file request for publication:', publicationToAttach.id);
-			const response = await makeAuthenticatedRequest(`/publications/${publicationToAttach.id}/attach-file`, 'POST', formData, {
-				headers: { 'Content-Type': 'multipart/form-data' },
+			const response = await axios.post(`/api/publications/${publicationToAttach.id}/attach-file`, formData, {
+				withCredentials: true,
+				headers: { 'Content-Type': 'multipart/form-data' }
 			});
 			setAttachSuccess('Файл успешно прикреплен!');
 			setAttachError('');
@@ -580,9 +606,7 @@ function Dashboard() {
 	const handleExportBibTeX = async () => {
 		try {
 			console.log('Exporting publications to BibTeX');
-			const response = await makeAuthenticatedRequest('/publications/export-bibtex', 'GET', null, {
-				responseType: 'blob',
-			});
+			const response = await axios.get('/api/publications/export-bibtex', { withCredentials: true });
 			const url = window.URL.createObjectURL(new Blob([response.data]));
 			const link = document.createElement('a');
 			link.href = url;
@@ -623,26 +647,58 @@ function Dashboard() {
 		responsive: true,
 		maintainAspectRatio: false,
 		plugins: {
-			legend: { position: 'top' },
+			legend: { position: 'top', labels: { color: '#1D1D1F' } },
 			title: { display: false },
-			tooltip: { backgroundColor: 'rgba(0, 0, 0, 0.8)', titleColor: 'white', bodyColor: 'white' },
+			tooltip: { backgroundColor: 'rgba(0, 0, 0, 0.8)', titleColor: '#FFFFFF', bodyColor: '#FFFFFF' },
 		},
 		scales: {
-			x: { title: { display: false } },
-			y: { title: { display: false }, beginAtZero: true },
+			x: { title: { display: false }, ticks: { color: '#1D1D1F' } },
+			y: { title: { display: false }, beginAtZero: true, ticks: { color: '#1D1D1F' } },
 		},
 		animation: { duration: 1000 },
 	};
 
 	return (
-		<Container maxWidth="lg" sx={{ mt: 4, minHeight: 'calc(100vh - 64px)', backgroundColor: 'white', borderRadius: 20, boxShadow: '0 12px 32px rgba(0, 0, 0, 0.15)' }}>
-			<Card sx={{ p: 4, borderRadius: 20, backgroundColor: 'white', boxShadow: 'none' }}>
+		<Container
+			maxWidth="lg"
+			sx={{
+				mt: 4,
+				minHeight: 'calc(100vh - 64px)',
+				backgroundColor: '#FFFFFF',
+				borderRadius: '12px',
+				boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
+				fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
+			}}
+		>
+			<Card sx={{ p: 4, borderRadius: '12px', backgroundColor: '#FFFFFF', boxShadow: 'none' }}>
 				<CardContent>
-					<Typography variant="h4" gutterBottom sx={{ color: '#212121', fontWeight: 700, textAlign: 'center' }}>
+					<Typography
+						variant="h4"
+						gutterBottom
+						sx={{
+							color: '#1D1D1F',
+							fontWeight: 600,
+							textAlign: 'center'
+						}}
+					>
 						Личный кабинет
 					</Typography>
 
-					<Tabs value={value} onChange={handleTabChange} sx={{ mb: 4, borderBottom: 1, borderColor: 'divider' }}>
+					<Tabs
+						value={value}
+						onChange={handleTabChange}
+						sx={{
+							mb: 4,
+							'& .MuiTab-root': {
+								color: '#6E6E73',
+								fontSize: '1.1rem',
+								textTransform: 'none',
+								'&:hover': { color: '#0071E3' },
+								'&.Mui-selected': { color: '#1D1D1F' }
+							},
+							'& .MuiTabs-indicator': { backgroundColor: '#0071E3' }
+						}}
+					>
 						<Tab label="Личные данные" />
 						<Tab label="Публикации" />
 						<Tab label="Аналитика" />
@@ -650,44 +706,64 @@ function Dashboard() {
 					</Tabs>
 
 					{value === 0 && (
-						<Accordion defaultExpanded sx={{ boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)', borderRadius: 16 }}>
-							<AccordionSummary expandIcon={<ExpandMoreIcon sx={{ color: '#1976D2' }} />} sx={{ backgroundColor: 'grey.50', borderRadius: 16 }}>
-								<Typography variant="h6" sx={{ color: '#212121' }}>
+						<Accordion
+							defaultExpanded
+							sx={{
+								boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
+								borderRadius: '12px',
+								backgroundColor: '#FFFFFF'
+							}}
+						>
+							<AccordionSummary
+								expandIcon={<ExpandMoreIcon sx={{ color: '#0071E3' }} />}
+								sx={{ backgroundColor: '#0071E3', borderRadius: '12px' }}
+							>
+								<Typography variant="h5" sx={{ color: '#FFFFFF' }}>
 									Личные данные
 								</Typography>
 							</AccordionSummary>
 							<AccordionDetails sx={{ p: 3 }}>
 								{loadingUser ? (
-									<Typography sx={{ color: '#757575' }}>Загрузка данных...</Typography>
+									<Typography sx={{ color: '#6E6E73' }}>Загрузка данных...</Typography>
 								) : user ? (
 									<Box>
-										<Typography variant="body1" sx={{ color: '#757575', mb: 2 }}>
+										<Typography variant="body1" sx={{ color: '#1D1D1F', mb: 2 }}>
 											ФИО: {user.last_name} {user.first_name} {user.middle_name || ''}
 										</Typography>
-										<Typography variant="body1" sx={{ color: '#757575', mb: 2 }}>
+										<Typography variant="body1" sx={{ color: '#1D1D1F', mb: 2 }}>
 											Логин: {user.username}
 										</Typography>
 										<Box sx={{ display: 'flex', gap: 2 }}>
 											<Button
 												variant="contained"
-												color="primary"
 												onClick={handleEditUserClick}
-												sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' } }}
+												sx={{
+													backgroundColor: '#0071E3',
+													color: '#FFFFFF',
+													borderRadius: '12px',
+													textTransform: 'none',
+													'&:hover': { backgroundColor: '#005BB5' }
+												}}
 											>
 												Редактировать данные
 											</Button>
 											<Button
 												variant="contained"
-												color="primary"
 												onClick={handleChangePasswordClick}
-												sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' } }}
+												sx={{
+													backgroundColor: '#0071E3',
+													color: '#FFFFFF',
+													borderRadius: '12px',
+													textTransform: 'none',
+													'&:hover': { backgroundColor: '#005BB5' }
+												}}
 											>
 												Изменить пароль
 											</Button>
 										</Box>
 									</Box>
 								) : (
-									<Typography sx={{ color: '#757575' }}>Данные пользователя не найдены.</Typography>
+									<Typography sx={{ color: '#6E6E73' }}>Данные пользователя не найдены.</Typography>
 								)}
 							</AccordionDetails>
 						</Accordion>
@@ -695,24 +771,60 @@ function Dashboard() {
 
 					{value === 1 && (
 						<>
-							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#212121', fontWeight: 600, textAlign: 'center' }}>
+							<Typography
+								variant="h5"
+								gutterBottom
+								sx={{
+									mt: 4,
+									color: '#1D1D1F',
+									fontWeight: 600,
+									textAlign: 'center'
+								}}
+							>
 								Загрузка публикаций
 							</Typography>
-							<Box sx={{ mb: 4, p: 3, backgroundColor: 'grey.50', borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
+							<Box
+								sx={{
+									mb: 4,
+									p: 3,
+									backgroundColor: '#F5F5F7',
+									borderRadius: '12px',
+									boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)'
+								}}
+							>
 								<Box sx={{ mb: 2 }}>
 									<Button
 										variant="contained"
-										color="primary"
 										onClick={() => setUploadType('file')}
-										sx={{ mr: 2, borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' } }}
+										sx={{
+											mr: 2,
+											backgroundColor: uploadType === 'file' ? '#0071E3' : '#FFFFFF',
+											color: uploadType === 'file' ? '#FFFFFF' : '#1D1D1F',
+											borderRadius: '12px',
+											textTransform: 'none',
+											border: '1px solid #D1D1D6',
+											'&:hover': {
+												backgroundColor: uploadType === 'file' ? '#005BB5' : '#E5E5E5',
+												color: uploadType === 'file' ? '#FFFFFF' : '#0071E3'
+											}
+										}}
 									>
 										Загрузить файл (PDF/DOCX)
 									</Button>
 									<Button
 										variant="contained"
-										color="primary"
 										onClick={() => setUploadType('bibtex')}
-										sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' } }}
+										sx={{
+											backgroundColor: uploadType === 'bibtex' ? '#0071E3' : '#FFFFFF',
+											color: uploadType === 'bibtex' ? '#FFFFFF' : '#1D1D1F',
+											borderRadius: '12px',
+											textTransform: 'none',
+											border: '1px solid #D1D1D6',
+											'&:hover': {
+												backgroundColor: uploadType === 'bibtex' ? '#005BB5' : '#E5E5E5',
+												color: uploadType === 'bibtex' ? '#FFFFFF' : '#0071E3'
+											}
+										}}
 									>
 										Загрузить BibTeX
 									</Button>
@@ -727,7 +839,15 @@ function Dashboard() {
 											onChange={(e) => setTitle(e.target.value)}
 											margin="normal"
 											variant="outlined"
-											sx={{ mb: 2, borderRadius: 16, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)', '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+											sx={{
+												'& .MuiOutlinedInput-root': {
+													'& fieldset': { borderColor: '#D1D1D6' },
+													'&:hover fieldset': { borderColor: '#0071E3' },
+													'&.Mui-focused fieldset': { borderColor: '#0071E3' }
+												},
+												'& label': { color: '#6E6E73' },
+												'& input': { color: '#1D1D1F' }
+											}}
 										/>
 										<TextField
 											fullWidth
@@ -736,7 +856,15 @@ function Dashboard() {
 											onChange={(e) => setAuthors(e.target.value)}
 											margin="normal"
 											variant="outlined"
-											sx={{ mb: 2, borderRadius: 16, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)', '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+											sx={{
+												'& .MuiOutlinedInput-root': {
+													'& fieldset': { borderColor: '#D1D1D6' },
+													'&:hover fieldset': { borderColor: '#0071E3' },
+													'&.Mui-focused fieldset': { borderColor: '#0071E3' }
+												},
+												'& label': { color: '#6E6E73' },
+												'& input': { color: '#1D1D1F' }
+											}}
 										/>
 										<TextField
 											fullWidth
@@ -746,7 +874,15 @@ function Dashboard() {
 											onChange={(e) => setYear(e.target.value)}
 											margin="normal"
 											variant="outlined"
-											sx={{ mb: 2, borderRadius: 16, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)', '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+											sx={{
+												'& .MuiOutlinedInput-root': {
+													'& fieldset': { borderColor: '#D1D1D6' },
+													'&:hover fieldset': { borderColor: '#0071E3' },
+													'&.Mui-focused fieldset': { borderColor: '#0071E3' }
+												},
+												'& label': { color: '#6E6E73' },
+												'& input': { color: '#1D1D1F' }
+											}}
 										/>
 										<TextField
 											fullWidth
@@ -756,13 +892,21 @@ function Dashboard() {
 											onChange={(e) => setType(e.target.value)}
 											margin="normal"
 											variant="outlined"
-											sx={{ mb: 2, borderRadius: 16, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)', '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+											sx={{
+												'& .MuiOutlinedInput-root': {
+													'& fieldset': { borderColor: '#D1D1D6' },
+													'&:hover fieldset': { borderColor: '#0071E3' },
+													'&.Mui-focused fieldset': { borderColor: '#0071E3' }
+												},
+												'& label': { color: '#6E6E73' },
+												'& input': { color: '#1D1D1F' }
+											}}
 										>
 											<MenuItem value="article">Статья</MenuItem>
 											<MenuItem value="monograph">Монография</MenuItem>
 											<MenuItem value="conference">Доклад/конференция</MenuItem>
 										</TextField>
-										<Box sx={{ mb: 2 }}>
+										<Box sx={{ mt: 2 }}>
 											<input
 												type="file"
 												accept=".pdf,.docx"
@@ -772,26 +916,54 @@ function Dashboard() {
 											/>
 											<label htmlFor="upload-file">
 												<Button
-													variant="contained"
+													variant="outlined"
 													component="span"
-													color="primary"
-													sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' } }}
+													sx={{
+														borderRadius: '12px',
+														borderColor: '#D1D1D6',
+														color: '#1D1D1F',
+														textTransform: 'none',
+														backgroundColor: '#FFFFFF',
+														'&:hover': {
+															borderColor: '#0071E3',
+															backgroundColor: '#0071E3',
+															color: '#FFFFFF'
+														}
+													}}
 												>
 													Выбрать файл
 												</Button>
 											</label>
-											{file && <Typography sx={{ mt: 1, color: '#757575' }}>{file.name}</Typography>}
+											{file && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{file.name}</Typography>}
 										</Box>
 										<Collapse in={openError}>
 											{error && (
-												<Alert severity="error" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setOpenError(false)}>
+												<Alert
+													severity="error"
+													sx={{
+														mt: 2,
+														borderRadius: '12px',
+														backgroundColor: '#FFF1F0',
+														color: '#1D1D1F'
+													}}
+													onClose={() => setOpenError(false)}
+												>
 													{error}
 												</Alert>
 											)}
 										</Collapse>
 										<Collapse in={openSuccess}>
 											{success && (
-												<Alert severity="success" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setOpenSuccess(false)}>
+												<Alert
+													severity="success"
+													sx={{
+														mt: 2,
+														borderRadius: '12px',
+														backgroundColor: '#E7F8E7',
+														color: '#1D1D1F'
+													}}
+													onClose={() => setOpenSuccess(false)}
+												>
 													{success}
 												</Alert>
 											)}
@@ -799,8 +971,14 @@ function Dashboard() {
 										<Button
 											type="submit"
 											variant="contained"
-											color="primary"
-											sx={{ mt: 2, borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' } }}
+											sx={{
+												mt: 2,
+												backgroundColor: '#0071E3',
+												color: '#FFFFFF',
+												borderRadius: '12px',
+												textTransform: 'none',
+												'&:hover': { backgroundColor: '#005BB5' }
+											}}
 										>
 											Загрузить
 										</Button>
@@ -817,26 +995,54 @@ function Dashboard() {
 											/>
 											<label htmlFor="upload-bibtex">
 												<Button
-													variant="contained"
+													variant="outlined"
 													component="span"
-													color="primary"
-													sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' } }}
+													sx={{
+														borderRadius: '12px',
+														borderColor: '#D1D1D6',
+														color: '#1D1D1F',
+														textTransform: 'none',
+														backgroundColor: '#FFFFFF',
+														'&:hover': {
+															borderColor: '#0071E3',
+															backgroundColor: '#0071E3',
+															color: '#FFFFFF'
+														}
+													}}
 												>
 													Выбрать BibTeX-файл
 												</Button>
 											</label>
-											{file && <Typography sx={{ mt: 1, color: '#757575' }}>{file.name}</Typography>}
+											{file && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{file.name}</Typography>}
 										</Box>
 										<Collapse in={openError}>
 											{error && (
-												<Alert severity="error" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setOpenError(false)}>
+												<Alert
+													severity="error"
+													sx={{
+														mb: 2,
+														borderRadius: '12px',
+														backgroundColor: '#FFF1F0',
+														color: '#1D1D1F'
+													}}
+													onClose={() => setOpenError(false)}
+												>
 													{error}
 												</Alert>
 											)}
 										</Collapse>
 										<Collapse in={openSuccess}>
 											{success && (
-												<Alert severity="success" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setOpenSuccess(false)}>
+												<Alert
+													severity="success"
+													sx={{
+														mb: 2,
+														borderRadius: '12px',
+														backgroundColor: '#E7F8E7',
+														color: '#1D1D1F'
+													}}
+													onClose={() => setOpenSuccess(false)}
+												>
 													{success}
 												</Alert>
 											)}
@@ -844,37 +1050,65 @@ function Dashboard() {
 										<Button
 											type="submit"
 											variant="contained"
-											color="primary"
-											sx={{ mt: 2, borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' } }}
+											sx={{
+												mt: 2,
+												backgroundColor: '#0071E3',
+												color: '#FFFFFF',
+												borderRadius: '12px',
+												textTransform: 'none',
+												'&:hover': { backgroundColor: '#005BB5' }
+											}}
 										>
 											Загрузить
 										</Button>
 									</form>
 								)}
 							</Box>
-							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#212121', fontWeight: 600, textAlign: 'center' }}>
+							<Typography
+								variant="h5"
+								gutterBottom
+								sx={{
+									mt: 4,
+									color: '#1D1D1F',
+									fontWeight: 600,
+									textAlign: 'center'
+								}}
+							>
 								Ваши публикации
 							</Typography>
-							<Table sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)', borderRadius: 5, overflow: 'hidden' }}>
+							<Table
+								sx={{
+									mt: 2,
+									boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
+									borderRadius: '12px',
+									overflow: 'hidden',
+									backgroundColor: '#FFFFFF'
+								}}
+							>
 								<TableHead>
-									<TableRow sx={{ backgroundColor: '#1976D2' }}>
-										<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>ID</TableCell>
-										<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Название</TableCell>
-										<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Авторы</TableCell>
-										<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Год</TableCell>
-										<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Тип</TableCell>
-										<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Статус</TableCell>
-										<TableCell sx={{ fontWeight: 'bold', color: 'white' }}>Действия</TableCell>
+									<TableRow sx={{ backgroundColor: '#0071E3' }}>
+										<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>ID</TableCell>
+										<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Название</TableCell>
+										<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Авторы</TableCell>
+										<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
+										<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Тип</TableCell>
+										<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
+										<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center' }}>Действия</TableCell>
 									</TableRow>
 								</TableHead>
 								<TableBody>
 									{publications.map((pub) => (
-										<TableRow key={pub.id} sx={{ '&:hover': { backgroundColor: 'grey.50' } }}>
-											<TableCell>{pub.id}</TableCell>
-											<TableCell>{pub.title}</TableCell>
-											<TableCell>{pub.authors}</TableCell>
-											<TableCell>{pub.year}</TableCell>
-											<TableCell>
+										<TableRow
+											key={pub.id}
+											sx={{
+												'&:hover': { backgroundColor: '#E5E5E5', transition: 'background-color 0.3s ease' }
+											}}
+										>
+											<TableCell sx={{ color: '#1D1D1F' }}>{pub.id}</TableCell>
+											<TableCell sx={{ color: '#1D1D1F' }}>{pub.title}</TableCell>
+											<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
+											<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
+											<TableCell sx={{ color: '#1D1D1F' }}>
 												{pub.type === 'article'
 													? 'Статья'
 													: pub.type === 'monograph'
@@ -883,47 +1117,77 @@ function Dashboard() {
 															? 'Доклад/конференция'
 															: pub.type}
 											</TableCell>
-											<TableCell>
+											<TableCell sx={{ color: '#1D1D1F' }}>
 												{pub.status === 'draft'
 													? 'Черновик'
 													: pub.status === 'review'
 														? 'На проверке'
 														: pub.status === 'published'
-															? 'Опубликовано'
+															? 'Опубликованные'
 															: pub.status}
 											</TableCell>
-											<TableCell>
-												<IconButton
-													aria-label="edit"
-													onClick={() => handleEditClick(pub)}
-													sx={{ color: '#1976D2', mr: 1, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' } }}
-												>
-													<EditIcon />
-												</IconButton>
-												<IconButton
-													aria-label="delete"
-													onClick={() => handleDeleteClick(pub)}
-													sx={{ color: '#1976D2', mr: 1, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' } }}
-												>
-													<DeleteIcon />
-												</IconButton>
-												{!pub.file_url ? (
+											<TableCell sx={{ textAlign: 'center' }}>
+												<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
 													<IconButton
-														aria-label="attach"
-														onClick={() => handleAttachFileClick(pub)}
-														sx={{ color: '#1976D2', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' } }}
+														aria-label="edit"
+														onClick={() => handleEditClick(pub)}
+														sx={{
+															color: '#0071E3',
+															'&:hover': {
+																color: '#FFFFFF',
+																backgroundColor: '#0071E3',
+																borderRadius: '12px'
+															}
+														}}
 													>
-														<AttachFileIcon />
+														<EditIcon />
 													</IconButton>
-												) : (
 													<IconButton
-														aria-label="download"
-														onClick={() => handleDownloadClick(pub)}
-														sx={{ color: '#1976D2', transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.1)', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' } }}
+														aria-label="delete"
+														onClick={() => handleDeleteClick(pub)}
+														sx={{
+															color: '#0071E3',
+															'&:hover': {
+																color: '#FFFFFF',
+																backgroundColor: '#0071E3',
+																borderRadius: '12px'
+															}
+														}}
 													>
-														<DownloadIcon />
+														<DeleteIcon />
 													</IconButton>
-												)}
+													{!pub.file_url ? (
+														<IconButton
+															aria-label="attach"
+															onClick={() => handleAttachFileClick(pub)}
+															sx={{
+																color: '#0071E3',
+																'&:hover': {
+																	color: '#FFFFFF',
+																	backgroundColor: '#0071E3',
+																	borderRadius: '12px'
+																}
+															}}
+														>
+															<AttachFileIcon />
+														</IconButton>
+													) : (
+														<IconButton
+															aria-label="download"
+															onClick={() => handleDownloadClick(pub)}
+															sx={{
+																color: '#0071E3',
+																'&:hover': {
+																	color: '#FFFFFF',
+																	backgroundColor: '#0071E3',
+																	borderRadius: '12px'
+																}
+															}}
+														>
+															<DownloadIcon />
+														</IconButton>
+													)}
+												</Box>
 											</TableCell>
 										</TableRow>
 									))}
@@ -934,25 +1198,39 @@ function Dashboard() {
 
 					{value === 2 && (
 						<Box sx={{ mt: 4 }}>
-							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#212121', fontWeight: 600, textAlign: 'center' }}>
+							<Typography
+								variant="h5"
+								gutterBottom
+								sx={{
+									mt: 4,
+									color: '#1D1D1F',
+									fontWeight: 600,
+									textAlign: 'center'
+								}}
+							>
 								Аналитика публикаций
 							</Typography>
 							{analytics.length === 0 ? (
-								<Card elevation={2} sx={{ p: 4, mt: 2, borderRadius: 20, backgroundColor: 'white', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }}>
-									<Typography variant="body1" sx={{ color: '#757575', textAlign: 'center' }}>
+								<Card
+									elevation={2}
+									sx={{
+										p: 4,
+										mt: 2,
+										borderRadius: '12px',
+										backgroundColor: '#FFFFFF',
+										boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)'
+									}}
+								>
+									<Typography variant="body1" sx={{ color: '#6E6E73', textAlign: 'center' }}>
 										У вас ещё нет ни одной публикации.{' '}
 										<Button
 											variant="text"
-											color="primary"
 											onClick={() => setUploadType('file')}
 											sx={{
 												p: 0.5,
 												textTransform: 'none',
-												'&:hover': {
-													textDecoration: 'underline',
-													backgroundColor: 'transparent',
-													color: '#1565C0',
-												},
+												color: '#0071E3',
+												'&:hover': { color: '#005BB5', backgroundColor: 'transparent' }
 											}}
 										>
 											Загрузите публикации
@@ -961,9 +1239,18 @@ function Dashboard() {
 									</Typography>
 								</Card>
 							) : (
-								<Card elevation={2} sx={{ p: 4, mt: 2, borderRadius: 20, backgroundColor: 'white', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }}>
+								<Card
+									elevation={2}
+									sx={{
+										p: 4,
+										mt: 2,
+										borderRadius: '12px',
+										backgroundColor: '#FFFFFF',
+										boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)'
+									}}
+								>
 									<CardContent>
-										<Typography variant="h6" sx={{ color: '#212121', mb: 2 }}>
+										<Typography variant="h6" sx={{ color: '#1D1D1F', mb: 2 }}>
 											Динамика публикаций
 										</Typography>
 										<Box sx={{ mb: 4, height: '300px' }}>
@@ -975,24 +1262,29 @@ function Dashboard() {
 											/>
 										</Box>
 
-										<DetailsButton
-											onClick={() => setShowDetailedAnalytics(!showDetailedAnalytics)}
-											sx={{ mb: 2 }}
-										>
+										<DetailsButton onClick={() => setShowDetailedAnalytics(!showDetailedAnalytics)} sx={{ mb: 2 }}>
 											{showDetailedAnalytics ? 'Свернуть' : 'Подробнее'}
 										</DetailsButton>
 
 										<Collapse in={showDetailedAnalytics}>
 											<>
-												<Typography variant="h6" sx={{ color: '#212121', mb: 2 }}>
+												<Typography variant="h6" sx={{ color: '#1D1D1F', mb: 2 }}>
 													Типы публикаций
 												</Typography>
 												<Grid container spacing={2} sx={{ mb: 4 }}>
 													{Object.entries(pubTypes).map(([type, count]) => (
 														<Grid item xs={12} sm={4} key={type}>
-															<Card elevation={1} sx={{ p: 2, borderRadius: 12, backgroundColor: 'white', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
+															<Card
+																elevation={1}
+																sx={{
+																	p: 2,
+																	borderRadius: '12px',
+																	backgroundColor: '#FFFFFF',
+																	boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
+																}}
+															>
 																<CardContent>
-																	<Typography variant="body1" sx={{ color: '#212121' }}>
+																	<Typography variant="body1" sx={{ color: '#1D1D1F' }}>
 																		{type === 'article' ? 'Статьи' : type === 'monograph' ? 'Монографии' : 'Доклады'}: {count}
 																	</Typography>
 																</CardContent>
@@ -1001,15 +1293,23 @@ function Dashboard() {
 													))}
 												</Grid>
 
-												<Typography variant="h6" sx={{ color: '#212121', mb: 2 }}>
+												<Typography variant="h6" sx={{ color: '#1D1D1F', mb: 2 }}>
 													Статусы публикаций
 												</Typography>
 												<Grid container spacing={2} sx={{ mb: 4 }}>
 													{Object.entries(pubStatuses).map(([status, count]) => (
 														<Grid item xs={12} sm={4} key={status}>
-															<Card elevation={1} sx={{ p: 2, borderRadius: 12, backgroundColor: 'white', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
+															<Card
+																elevation={1}
+																sx={{
+																	p: 2,
+																	borderRadius: '12px',
+																	backgroundColor: '#FFFFFF',
+																	boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
+																}}
+															>
 																<CardContent>
-																	<Typography variant="body1" sx={{ color: '#212121' }}>
+																	<Typography variant="body1" sx={{ color: '#1D1D1F' }}>
 																		{status === 'draft' ? 'Черновики' : status === 'review' ? 'На проверке' : 'Опубликованные'}: {count}
 																	</Typography>
 																</CardContent>
@@ -1018,10 +1318,10 @@ function Dashboard() {
 													))}
 												</Grid>
 
-												<Typography variant="h6" sx={{ color: '#212121', mb: 2 }}>
+												<Typography variant="h6" sx={{ color: '#1D1D1F', mb: 2 }}>
 													Общая статистика
 												</Typography>
-												<Typography variant="body1" sx={{ color: '#757575' }}>
+												<Typography variant="body1" sx={{ color: '#6E6E73' }}>
 													Всего публикаций: {publications.length}
 													{totalCitations > 0 && ` | Общее количество цитирований: ${totalCitations}`}
 												</Typography>
@@ -1035,45 +1335,91 @@ function Dashboard() {
 
 					{value === 3 && (
 						<Box sx={{ mt: 4 }}>
-							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#212121', fontWeight: 600, textAlign: 'center' }}>
+							<Typography
+								variant="h5"
+								gutterBottom
+								sx={{
+									mt: 4,
+									color: '#1D1D1F',
+									fontWeight: 600,
+									textAlign: 'center'
+								}}
+							>
 								Экспорт публикаций
 							</Typography>
 							<Button
 								variant="contained"
-								color="primary"
 								onClick={handleExportBibTeX}
-								sx={{ mt: 2, borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' } }}
+								sx={{
+									mt: 2,
+									backgroundColor: '#0071E3',
+									color: '#FFFFFF',
+									borderRadius: '12px',
+									textTransform: 'none',
+									'&:hover': { backgroundColor: '#005BB5' }
+								}}
 							>
 								Выгрузить публикации в BibTeX
 							</Button>
 						</Box>
 					)}
 
-					<Dialog open={openDeleteDialog} onClose={handleDeleteCancel}>
-						<DialogTitle sx={{ color: '#212121' }}>Подтвердите удаление</DialogTitle>
-						<DialogContent>
-							<Typography sx={{ color: '#757575' }}>
+					<Dialog
+						open={openDeleteDialog}
+						onClose={handleDeleteCancel}
+						sx={{
+							'& .MuiDialog-paper': {
+								backgroundColor: '#FFFFFF',
+								boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
+								borderRadius: '12px',
+								fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
+							}
+						}}
+					>
+						<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5E5' }}>
+							Подтвердите удаление
+						</DialogTitle>
+						<DialogContent sx={{ padding: '24px' }}>
+							<Typography sx={{ color: '#6E6E73' }}>
 								Вы уверены, что хотите удалить публикацию «{publicationToDelete?.title}»?
 							</Typography>
 						</DialogContent>
-						<DialogActions>
+						<DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5E5' }}>
 							<CancelButton onClick={handleDeleteCancel}>
 								Отмена
 							</CancelButton>
 							<Button
 								onClick={handleDeleteConfirm}
 								variant="contained"
-								color="primary"
-								sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' } }}
+								sx={{
+									backgroundColor: '#0071E3',
+									color: '#FFFFFF',
+									borderRadius: '12px',
+									textTransform: 'none',
+									'&:hover': { backgroundColor: '#005BB5' }
+								}}
 							>
 								Удалить
 							</Button>
 						</DialogActions>
 					</Dialog>
 
-					<Dialog open={openEditDialog} onClose={handleEditCancel}>
-						<DialogTitle sx={{ color: '#212121' }}>Редактировать публикацию</DialogTitle>
-						<DialogContent>
+					<Dialog
+						open={openEditDialog}
+						onClose={handleEditCancel}
+						sx={{
+							'& .MuiDialog-paper': {
+								backgroundColor: '#FFFFFF',
+								boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
+								borderRadius: '12px',
+								fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
+							}
+						}}
+					>
+						<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5E5' }}>
+							Редактировать публикацию
+						</DialogTitle>
+						<DialogContent sx={{ padding: '24px' }}>
 							<form onSubmit={handleEditSubmit}>
 								<TextField
 									fullWidth
@@ -1082,7 +1428,15 @@ function Dashboard() {
 									onChange={(e) => setEditTitle(e.target.value)}
 									margin="normal"
 									variant="outlined"
-									sx={{ mb: 2, borderRadius: 16, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)', '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+									sx={{
+										'& .MuiOutlinedInput-root': {
+											'& fieldset': { borderColor: '#D1D1D6' },
+											'&:hover fieldset': { borderColor: '#0071E3' },
+											'&.Mui-focused fieldset': { borderColor: '#0071E3' }
+										},
+										'& label': { color: '#6E6E73' },
+										'& input': { color: '#1D1D1F' }
+									}}
 								/>
 								<TextField
 									fullWidth
@@ -1091,7 +1445,15 @@ function Dashboard() {
 									onChange={(e) => setEditAuthors(e.target.value)}
 									margin="normal"
 									variant="outlined"
-									sx={{ mb: 2, borderRadius: 16, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)', '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+									sx={{
+										'& .MuiOutlinedInput-root': {
+											'& fieldset': { borderColor: '#D1D1D6' },
+											'&:hover fieldset': { borderColor: '#0071E3' },
+											'&.Mui-focused fieldset': { borderColor: '#0071E3' }
+										},
+										'& label': { color: '#6E6E73' },
+										'& input': { color: '#1D1D1F' }
+									}}
 								/>
 								<TextField
 									fullWidth
@@ -1101,7 +1463,15 @@ function Dashboard() {
 									onChange={(e) => setEditYear(e.target.value)}
 									margin="normal"
 									variant="outlined"
-									sx={{ mb: 2, borderRadius: 16, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)', '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+									sx={{
+										'& .MuiOutlinedInput-root': {
+											'& fieldset': { borderColor: '#D1D1D6' },
+											'&:hover fieldset': { borderColor: '#0071E3' },
+											'&.Mui-focused fieldset': { borderColor: '#0071E3' }
+										},
+										'& label': { color: '#6E6E73' },
+										'& input': { color: '#1D1D1F' }
+									}}
 								/>
 								<TextField
 									fullWidth
@@ -1111,7 +1481,15 @@ function Dashboard() {
 									onChange={(e) => setEditType(e.target.value)}
 									margin="normal"
 									variant="outlined"
-									sx={{ mb: 2, borderRadius: 16, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)', '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+									sx={{
+										'& .MuiOutlinedInput-root': {
+											'& fieldset': { borderColor: '#D1D1D6' },
+											'&:hover fieldset': { borderColor: '#0071E3' },
+											'&.Mui-focused fieldset': { borderColor: '#0071E3' }
+										},
+										'& label': { color: '#6E6E73' },
+										'& input': { color: '#1D1D1F' }
+									}}
 								>
 									<MenuItem value="article">Статья</MenuItem>
 									<MenuItem value="monograph">Монография</MenuItem>
@@ -1125,21 +1503,67 @@ function Dashboard() {
 									onChange={(e) => setEditStatus(e.target.value)}
 									margin="normal"
 									variant="outlined"
-									sx={{ mb: 2, borderRadius: 16, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)', '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+									sx={{
+										'& .MuiOutlinedInput-root': {
+											'& fieldset': { borderColor: '#D1D1D6' },
+											'&:hover fieldset': { borderColor: '#0071E3' },
+											'&.Mui-focused fieldset': { borderColor: '#0071E3' }
+										},
+										'& label': { color: '#6E6E73' },
+										'& input': { color: '#1D1D1F' }
+									}}
 								>
 									<MenuItem value="draft">Черновик</MenuItem>
 									<MenuItem value="review">На проверке</MenuItem>
 									<MenuItem value="published">Опубликовано</MenuItem>
 								</TextField>
-								<DialogActions>
+								<Box sx={{ mt: 2 }}>
+									<Typography variant="body2" sx={{ color: '#6E6E73', mb: 1 }}>
+										Текущий файл: {editPublication?.file_url || 'Нет файла'}
+									</Typography>
+									<input
+										type="file"
+										accept=".pdf,.docx"
+										onChange={(e) => setEditFile(e.target.files[0])}
+										style={{ display: 'none' }}
+										id="edit-upload-file"
+									/>
+									<label htmlFor="edit-upload-file">
+										<Button
+											variant="outlined"
+											component="span"
+											sx={{
+												borderRadius: '12px',
+												borderColor: '#D1D1D6',
+												color: '#1D1D1F',
+												textTransform: 'none',
+												backgroundColor: '#FFFFFF',
+												'&:hover': {
+													borderColor: '#0071E3',
+													backgroundColor: '#0071E3',
+													color: '#FFFFFF'
+												}
+											}}
+										>
+											Выбрать файл
+										</Button>
+									</label>
+									{editFile && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{editFile.name}</Typography>}
+								</Box>
+								<DialogActions sx={{ mt: 2, padding: '16px 0', borderTop: '1px solid #E5E5E5' }}>
 									<CancelButton onClick={handleEditCancel}>
 										Отмена
 									</CancelButton>
 									<Button
 										type="submit"
 										variant="contained"
-										color="primary"
-										sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' } }}
+										sx={{
+											backgroundColor: '#0071E3',
+											color: '#FFFFFF',
+											borderRadius: '12px',
+											textTransform: 'none',
+											'&:hover': { backgroundColor: '#005BB5' }
+										}}
 									>
 										Сохранить
 									</Button>
@@ -1148,9 +1572,22 @@ function Dashboard() {
 						</DialogContent>
 					</Dialog>
 
-					<Dialog open={openEditUserDialog} onClose={handleEditUserCancel}>
-						<DialogTitle sx={{ color: '#212121' }}>Редактировать личные данные</DialogTitle>
-						<DialogContent>
+					<Dialog
+						open={openEditUserDialog}
+						onClose={handleEditUserCancel}
+						sx={{
+							'& .MuiDialog-paper': {
+								backgroundColor: '#FFFFFF',
+								boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
+								borderRadius: '12px',
+								fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
+							}
+						}}
+					>
+						<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5E5' }}>
+							Редактировать личные данные
+						</DialogTitle>
+						<DialogContent sx={{ padding: '24px' }}>
 							<form onSubmit={handleEditUserSubmit}>
 								<TextField
 									fullWidth
@@ -1159,7 +1596,15 @@ function Dashboard() {
 									onChange={(e) => setEditLastName(e.target.value)}
 									margin="normal"
 									variant="outlined"
-									sx={{ mb: 2, borderRadius: 16, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)', '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+									sx={{
+										'& .MuiOutlinedInput-root': {
+											'& fieldset': { borderColor: '#D1D1D6' },
+											'&:hover fieldset': { borderColor: '#0071E3' },
+											'&.Mui-focused fieldset': { borderColor: '#0071E3' }
+										},
+										'& label': { color: '#6E6E73' },
+										'& input': { color: '#1D1D1F' }
+									}}
 									autoComplete="family-name"
 								/>
 								<TextField
@@ -1169,7 +1614,15 @@ function Dashboard() {
 									onChange={(e) => setEditFirstName(e.target.value)}
 									margin="normal"
 									variant="outlined"
-									sx={{ mb: 2, borderRadius: 16, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)', '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+									sx={{
+										'& .MuiOutlinedInput-root': {
+											'& fieldset': { borderColor: '#D1D1D6' },
+											'&:hover fieldset': { borderColor: '#0071E3' },
+											'&.Mui-focused fieldset': { borderColor: '#0071E3' }
+										},
+										'& label': { color: '#6E6E73' },
+										'& input': { color: '#1D1D1F' }
+									}}
 									autoComplete="given-name"
 								/>
 								<TextField
@@ -1179,18 +1632,31 @@ function Dashboard() {
 									onChange={(e) => setEditMiddleName(e.target.value)}
 									margin="normal"
 									variant="outlined"
-									sx={{ mb: 2, borderRadius: 16, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)', '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+									sx={{
+										'& .MuiOutlinedInput-root': {
+											'& fieldset': { borderColor: '#D1D1D6' },
+											'&:hover fieldset': { borderColor: '#0071E3' },
+											'&.Mui-focused fieldset': { borderColor: '#0071E3' }
+										},
+										'& label': { color: '#6E6E73' },
+										'& input': { color: '#1D1D1F' }
+									}}
 									autoComplete="additional-name"
 								/>
-								<DialogActions>
+								<DialogActions sx={{ padding: '16px 0', borderTop: '1px solid #E5E5E5' }}>
 									<CancelButton onClick={handleEditUserCancel}>
 										Отмена
 									</CancelButton>
 									<Button
 										type="submit"
 										variant="contained"
-										color="primary"
-										sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' } }}
+										sx={{
+											backgroundColor: '#0071E3',
+											color: '#FFFFFF',
+											borderRadius: '12px',
+											textTransform: 'none',
+											'&:hover': { backgroundColor: '#005BB5' }
+										}}
 									>
 										Сохранить
 									</Button>
@@ -1199,9 +1665,22 @@ function Dashboard() {
 						</DialogContent>
 					</Dialog>
 
-					<Dialog open={openAttachFileDialog} onClose={handleAttachFileCancel}>
-						<DialogTitle sx={{ color: '#212121' }}>Прикрепить файл к публикации</DialogTitle>
-						<DialogContent>
+					<Dialog
+						open={openAttachFileDialog}
+						onClose={handleAttachFileCancel}
+						sx={{
+							'& .MuiDialog-paper': {
+								backgroundColor: '#FFFFFF',
+								boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
+								borderRadius: '12px',
+								fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
+							}
+						}}
+					>
+						<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5E5' }}>
+							Прикрепить файл к публикации
+						</DialogTitle>
+						<DialogContent sx={{ padding: '24px' }}>
 							<Box sx={{ mt: 2, mb: 2 }}>
 								<input
 									type="file"
@@ -1212,49 +1691,95 @@ function Dashboard() {
 								/>
 								<label htmlFor="attach-file">
 									<Button
-										variant="contained"
+										variant="outlined"
 										component="span"
-										color="primary"
-										sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' } }}
+										sx={{
+											borderRadius: '12px',
+											borderColor: '#D1D1D6',
+											color: '#1D1D1F',
+											textTransform: 'none',
+											backgroundColor: '#FFFFFF',
+											'&:hover': {
+												borderColor: '#0071E3',
+												backgroundColor: '#0071E3',
+												color: '#FFFFFF'
+											}
+										}}
 									>
 										Выбрать файл
 									</Button>
 								</label>
-								{attachFile && <Typography sx={{ mt: 1, color: '#757575' }}>{attachFile.name}</Typography>}
+								{attachFile && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{attachFile.name}</Typography>}
 							</Box>
 							<Collapse in={!!attachError}>
 								{attachError && (
-									<Alert severity="error" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setAttachError('')}>
+									<Alert
+										severity="error"
+										sx={{
+											mb: 2,
+											borderRadius: '12px',
+											backgroundColor: '#FFF1F0',
+											color: '#1D1D1F'
+										}}
+										onClose={() => setAttachError('')}
+									>
 										{attachError}
 									</Alert>
 								)}
 							</Collapse>
 							<Collapse in={!!attachSuccess}>
 								{attachSuccess && (
-									<Alert severity="success" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setAttachSuccess('')}>
+									<Alert
+										severity="success"
+										sx={{
+											mb: 2,
+											borderRadius: '12px',
+											backgroundColor: '#E7F8E7',
+											color: '#1D1D1F'
+										}}
+										onClose={() => setAttachSuccess('')}
+									>
 										{attachSuccess}
 									</Alert>
 								)}
 							</Collapse>
 						</DialogContent>
-						<DialogActions>
+						<DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5E5' }}>
 							<CancelButton onClick={handleAttachFileCancel}>
 								Отмена
 							</CancelButton>
 							<Button
 								onClick={handleAttachFileSubmit}
 								variant="contained"
-								color="primary"
-								sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' } }}
+								sx={{
+									backgroundColor: '#0071E3',
+									color: '#FFFFFF',
+									borderRadius: '12px',
+									textTransform: 'none',
+									'&:hover': { backgroundColor: '#005BB5' }
+								}}
 							>
 								Прикрепить
 							</Button>
 						</DialogActions>
 					</Dialog>
 
-					<Dialog open={openChangePasswordDialog} onClose={handleChangePasswordCancel}>
-						<DialogTitle sx={{ color: '#212121' }}>Изменить пароль</DialogTitle>
-						<DialogContent>
+					<Dialog
+						open={openChangePasswordDialog}
+						onClose={handleChangePasswordCancel}
+						sx={{
+							'& .MuiDialog-paper': {
+								backgroundColor: '#FFFFFF',
+								boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
+								borderRadius: '12px',
+								fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
+							}
+						}}
+					>
+						<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5E5' }}>
+							Изменить пароль
+						</DialogTitle>
+						<DialogContent sx={{ padding: '24px' }}>
 							<form onSubmit={handleChangePasswordSubmit}>
 								<TextField
 									fullWidth
@@ -1264,7 +1789,15 @@ function Dashboard() {
 									onChange={(e) => setCurrentPassword(e.target.value)}
 									margin="normal"
 									variant="outlined"
-									sx={{ mb: 2, borderRadius: 16, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)', '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+									sx={{
+										'& .MuiOutlinedInput-root': {
+											'& fieldset': { borderColor: '#D1D1D6' },
+											'&:hover fieldset': { borderColor: '#0071E3' },
+											'&.Mui-focused fieldset': { borderColor: '#0071E3' }
+										},
+										'& label': { color: '#6E6E73' },
+										'& input': { color: '#1D1D1F' }
+									}}
 									autoComplete="current-password"
 								/>
 								<TextField
@@ -1275,32 +1808,63 @@ function Dashboard() {
 									onChange={(e) => setNewPassword(e.target.value)}
 									margin="normal"
 									variant="outlined"
-									sx={{ mb: 2, borderRadius: 16, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)', '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+									sx={{
+										'& .MuiOutlinedInput-root': {
+											'& fieldset': { borderColor: '#D1D1D6' },
+											'&:hover fieldset': { borderColor: '#0071E3' },
+											'&.Mui-focused fieldset': { borderColor: '#0071E3' }
+										},
+										'& label': { color: '#6E6E73' },
+										'& input': { color: '#1D1D1F' }
+									}}
 									autoComplete="new-password"
 								/>
 								<Collapse in={!!passwordError}>
 									{passwordError && (
-										<Alert severity="error" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setPasswordError('')}>
+										<Alert
+											severity="error"
+											sx={{
+												mb: 2,
+												borderRadius: '12px',
+												backgroundColor: '#FFF1F0',
+												color: '#1D1D1F'
+											}}
+											onClose={() => setPasswordError('')}
+										>
 											{passwordError}
 										</Alert>
 									)}
 								</Collapse>
 								<Collapse in={!!passwordSuccess}>
 									{passwordSuccess && (
-										<Alert severity="success" sx={{ mb: 2, borderRadius: 16, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' }} onClose={() => setPasswordSuccess('')}>
+										<Alert
+											severity="success"
+											sx={{
+												mb: 2,
+												borderRadius: '12px',
+												backgroundColor: '#E7F8E7',
+												color: '#1D1D1F'
+											}}
+											onClose={() => setPasswordSuccess('')}
+										>
 											{passwordSuccess}
 										</Alert>
 									)}
 								</Collapse>
-								<DialogActions>
+								<DialogActions sx={{ padding: '16px 0', borderTop: '1px solid #E5E5E5' }}>
 									<CancelButton onClick={handleChangePasswordCancel}>
 										Отмена
 									</CancelButton>
 									<Button
 										type="submit"
 										variant="contained"
-										color="primary"
-										sx={{ borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' } }}
+										sx={{
+											backgroundColor: '#0071E3',
+											color: '#FFFFFF',
+											borderRadius: '12px',
+											textTransform: 'none',
+											'&:hover': { backgroundColor: '#005BB5' }
+										}}
 									>
 										Сохранить
 									</Button>

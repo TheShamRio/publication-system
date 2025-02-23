@@ -1,30 +1,26 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useMemo } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { Box, CssBaseline } from '@mui/material';
 import Header from './Header';
 import Footer from './Footer';
 import axios from 'axios';
-import { useAuth } from '../contexts/AuthContext'; // Импортируем useAuth
+import { useAuth } from '../contexts/AuthContext';
 
 function Layout() {
-	const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('user')); // Инициализируем из localStorage
+	const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('user'));
 	const navigate = useNavigate();
 	const location = useLocation();
-	const { logout, updateAuthState } = useAuth(); // Убрали login, если он не используется
+	const { logout, updateAuthState } = useAuth();
 
-	// Мемоизация состояния авторизации для предотвращения лишних рендеров
 	const authState = useMemo(() => ({
 		isAuthenticated,
 		setIsAuthenticated,
 	}), [isAuthenticated]);
 
-	// Debounce для проверки авторизации, чтобы избежать бесконечных запросов
 	const checkAuth = useCallback(async () => {
-		// Проверяем, есть ли данные в localStorage, и не делаем запрос для публичных страниц
 		const storedUser = localStorage.getItem('user');
 		if (storedUser) {
 			const userData = JSON.parse(storedUser);
-			// Устанавливаем состояние только если оно отличается
 			if (!isAuthenticated) {
 				setIsAuthenticated(true);
 				updateAuthState({
@@ -33,12 +29,11 @@ function Layout() {
 					username: userData.username,
 				});
 			}
-			return; // Не делаем запрос, если данные в localStorage
+			return;
 		}
 
-		// Проверяем только для защищённых маршрутов
 		if (!location.pathname.startsWith('/dashboard') && !location.pathname.startsWith('/publication') && !location.pathname.startsWith('/admin')) {
-			return; // Не делаем запрос для публичных страниц
+			return;
 		}
 
 		try {
@@ -48,7 +43,6 @@ function Layout() {
 			});
 			console.log('Auth response:', response.data);
 			const userData = response.data;
-			// Устанавливаем состояние только если оно отличается
 			if (!isAuthenticated) {
 				setIsAuthenticated(true);
 				updateAuthState({
@@ -60,7 +54,6 @@ function Layout() {
 			localStorage.setItem('user', JSON.stringify({ username: userData.username, role: userData.role }));
 		} catch (err) {
 			console.error('Auth error:', err.response?.status, err.response?.data?.error || err.message);
-			// Устанавливаем состояние только если оно отличается
 			if (isAuthenticated) {
 				setIsAuthenticated(false);
 				updateAuthState({
@@ -70,14 +63,12 @@ function Layout() {
 				});
 			}
 			localStorage.removeItem('user');
-			// Перенаправляем только если на защищённых маршрутах
 			if (location.pathname.startsWith('/dashboard') || location.pathname.startsWith('/publication') || location.pathname.startsWith('/admin')) {
 				navigate('/login');
 			}
 		}
-	}, [navigate, updateAuthState, location.pathname, isAuthenticated]); // Добавляем isAuthenticated для контроля изменений
+	}, [navigate, updateAuthState, location.pathname, isAuthenticated]);
 
-	// Выполняем проверку авторизации только один раз при монтировании или при изменении пути
 	useEffect(() => {
 		let mounted = true;
 
@@ -90,18 +81,35 @@ function Layout() {
 		return () => {
 			mounted = false;
 		};
-	}, [checkAuth]); // Используем checkAuth как зависимость
+	}, [checkAuth]);
 
-	const handleLogout = () => {
-		axios
-			.get('http://localhost:5000/api/logout', { withCredentials: true })
-			.then(() => {
-				setIsAuthenticated(false);
-				logout();
-				localStorage.removeItem('user');
-				navigate('/login');
-			})
-			.catch((err) => console.error('Ошибка выхода:', err));
+	const handleLogout = async () => {
+		try {
+			// Получаем CSRF-токен
+			const tokenResponse = await axios.get('http://localhost:5000/api/csrf-token', {
+				withCredentials: true,
+			});
+			const csrfToken = tokenResponse.data.csrf_token;
+			console.log('CSRF Token получен:', csrfToken);
+
+			// Отправляем запрос на выход с CSRF-токеном
+			await axios.post('http://localhost:5000/api/logout', {}, {
+				withCredentials: true,
+				headers: {
+					'X-CSRFToken': csrfToken,
+				},
+			});
+
+			setIsAuthenticated(false);
+			logout();
+			localStorage.removeItem('user');
+			navigate('/login');
+		} catch (err) {
+			console.error('Ошибка выхода:', err);
+			if (err.response?.status === 400) {
+				console.error('Ошибка CSRF или запроса:', err.response.data);
+			}
+		}
 	};
 
 	return (
@@ -113,7 +121,7 @@ function Layout() {
 				sx={{
 					flexGrow: 1,
 					p: 3,
-					mt: '64px', // Отступ под хедер
+					mt: '64px',
 				}}
 			>
 				<Outlet />

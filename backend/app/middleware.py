@@ -1,7 +1,7 @@
 # app/middleware.py
 from functools import wraps
 from flask import jsonify
-from flask_login import current_user, login_required
+from flask_login import current_user
 import logging
 
 logging.basicConfig(level=logging.INFO)

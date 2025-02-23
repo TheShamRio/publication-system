@@ -1,38 +1,37 @@
 import React, { useState } from 'react';
 import { TextField, Button, Container, Typography, Box, Card, CardContent, Alert } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext'; // Импортируем useAuth
-import { makeAuthenticatedRequest } from '../utils/auth'; // Импортируем новую утилиту
+import { useAuth } from '../contexts/AuthContext';
+import axios from 'axios';
 
 function Login() {
 	const [username, setUsername] = useState('');
 	const [password, setPassword] = useState('');
 	const [error, setError] = useState('');
 	const navigate = useNavigate();
-	const { login, updateAuthState } = useAuth(); // Используем updateAuthState
+	const { login, updateAuthState } = useAuth();
 
 	const handleSubmit = async (e) => {
 		e.preventDefault();
 		try {
-			const response = await makeAuthenticatedRequest('/login', 'POST', {
+			const response = await axios.post('http://localhost:5000/api/login', {
 				username,
 				password,
-			});
+			}, { withCredentials: true });
 
-			if (response.data.message === 'Вход выполнен') {
+			if (response.data.message === 'Успешная авторизация') {
 				const userData = {
 					username,
-					role: response.data.role || 'user',
+					role: response.data.user.role || 'user',
 				};
 				localStorage.setItem('user', JSON.stringify(userData));
-				login(userData); // Обновляем состояние авторизации
-				updateAuthState({ isAuthenticated: true, role: userData.role, username }); // Синхронизируем состояние
+				login(userData);
+				updateAuthState({ isAuthenticated: true, role: userData.role, username });
 				console.log('User logged in, role:', userData.role);
-				// Перенаправляем на соответствующий маршрут в зависимости от роли
 				navigate(userData.role === 'admin' ? '/admin' : '/dashboard');
 			}
 		} catch (err) {
-			if (err.response && err.response.data.error === 'Неверные учетные данные') {
+			if (err.response && err.response.data.error === 'Неверное имя пользователя или пароль') {
 				setError('Неверные учетные данные. Проверьте имя пользователя и пароль.');
 			} else {
 				setError('Произошла ошибка при входе. Попробуйте позже.');
