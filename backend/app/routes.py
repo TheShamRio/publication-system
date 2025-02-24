@@ -7,7 +7,7 @@ from werkzeug.utils import secure_filename
 from flask_wtf.csrf import generate_csrf
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, UTC
 from werkzeug.security import generate_password_hash, check_password_hash
 from .analytics import get_publications_by_year
 import bibtexparser
@@ -18,6 +18,53 @@ bp = Blueprint('api', __name__)
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+@bp.route('/register', methods=['POST', 'OPTIONS'])  # Добавляем обработку OPTIONS
+def register():
+    if request.method == 'OPTIONS':
+        # Обработка предварительного запроса CORS
+        response = make_response()
+        response.headers['Access-Control-Allow-Origin'] = 'http://localhost:3001'
+        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
+        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-CSRFToken'
+        response.headers['Access-Control-Allow-Credentials'] = 'true'
+        response.headers['Access-Control-Max-Age'] = '86400'  # Кэширование предварительного запроса на 24 часа
+        logger.debug("Обработка предварительного запроса OPTIONS для /register")
+        return response, 200
+
+    logger.debug("Получен POST запрос для /api/register")
+    logger.debug(f"Принятые данные: {request.get_json()}")  # Логируем полученные данные
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    last_name = data.get('last_name')
+    first_name = data.get('first_name')
+    middle_name = data.get('middle_name')
+
+    if not username or not password:
+        logger.error("Логин или пароль отсутствуют в запросе")
+        return jsonify({'error': 'Логин и пароль обязательны'}), 400
+
+    if User.query.filter_by(username=username).first():
+        logger.error(f"Пользователь с логином {username} уже существует")
+        return jsonify({'error': 'Пользователь с таким логином уже существует'}), 400
+
+    user = User(
+        username=username,
+        last_name=last_name,
+        first_name=first_name,
+        middle_name=middle_name
+    )
+    user.set_password(password)
+    try:
+        db.session.add(user)
+        db.session.commit()
+        logger.info(f"Пользователь {username} успешно зарегистрирован")
+        return jsonify({'message': 'Пользователь зарегистрирован', 'user': {'username': user.username, 'role': user.role}}), 201
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Ошибка регистрации пользователя {username}: {str(e)}")
+        return jsonify({'error': 'Ошибка при регистрации. Попробуйте позже.'}), 500
 
 @bp.route('/login', methods=['POST'])
 @csrf.exempt
@@ -43,8 +90,7 @@ def login():
         }), 200
     return jsonify({'error': 'Неверное имя пользователя или пароль'}), 401
 
-@bp.route('/csrf-token', methods=['GET'])
-@login_required
+@bp.route('/csrf-token', methods=['GET'])  # Убираем @login_required
 def get_csrf_token():
     logger.debug(f"Получен GET запрос для /api/csrf-token")
     token = generate_csrf()
@@ -233,6 +279,7 @@ def get_publications():
         'pages': pagination.pages,  # Общее количество страниц
         'current_page': pagination.page  # Текущая страница
     }), 200
+
 @bp.route('/publications/<int:pub_id>', methods=['PUT', 'DELETE'])
 @login_required
 def manage_publication(pub_id):
@@ -302,6 +349,7 @@ def manage_publication(pub_id):
             db.session.rollback()
             logger.error(f"Ошибка удаления публикации {pub_id}: {str(e)}")
             return jsonify({"error": "Ошибка при удалении публикации. Попробуйте позже."}), 500
+
 @bp.route('/publications/upload-file', methods=['POST'])
 @login_required
 def upload_file():

@@ -6,11 +6,15 @@ export const makeAuthenticatedRequest = async (url, method = 'POST', data = {}, 
     try {
         const fullUrl = url.startsWith('http') ? url : `${API_BASE}${url}`;
 
+        // Получаем CSRF-токен из localStorage
+        const csrfToken = localStorage.getItem('csrfToken') || '';
+
         console.log('Отправка запроса:', {
             url: fullUrl,
             method,
             headers: {
                 'Content-Type': options.headers?.['Content-Type'] || 'application/json',
+                'X-CSRFToken': csrfToken, // Добавляем CSRF-токен
                 ...options.headers
             }
         });
@@ -22,6 +26,7 @@ export const makeAuthenticatedRequest = async (url, method = 'POST', data = {}, 
             withCredentials: true,
             headers: {
                 'Content-Type': options.headers?.['Content-Type'] || 'application/json',
+                'X-CSRFToken': csrfToken, // Добавляем CSRF-токен в заголовки
                 ...options.headers
             }
         });

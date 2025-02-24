@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TextField, Button, Container, Typography, Box, Card, CardContent, Alert } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -13,18 +13,65 @@ function Register() {
 	const [error, setError] = useState('');
 	const [success, setSuccess] = useState('');
 	const navigate = useNavigate();
-	const { login } = useAuth();
+	const { login, setCsrfToken } = useAuth(); // Добавляем setCsrfToken
+
+	useEffect(() => {
+		// Получаем CSRF-токен один раз при монтировании компонента
+		let mounted = true; // Флаг для предотвращения обновлений после размонтирования
+
+		const fetchCsrfToken = async () => {
+			try {
+				console.log('Fetching CSRF token from /api/csrf-token');
+				const response = await axios.get('http://localhost:5000/api/csrf-token', { withCredentials: true });
+				if (mounted) { // Проверяем, что компонент всё ещё смонтирован
+					setCsrfToken(response.data.csrf_token);
+					console.log('CSRF token received:', response.data.csrf_token);
+				}
+			} catch (err) {
+				console.error('Ошибка получения CSRF-токена:', err);
+				if (mounted) {
+					setError('Не удалось получить CSRF-токен. Попробуйте позже.');
+				}
+			}
+		};
+
+		fetchCsrfToken();
+
+		// Очистка при размонтировании
+		return () => {
+			mounted = false;
+		};
+	}, []); // Пустой массив зависимостей — запрос выполняется только один раз при монтировании
 
 	const handleSubmit = async (e) => {
 		e.preventDefault();
+		// Проверка на пустые поля
+		if (!username.trim() || !password.trim() || !lastName.trim() || !firstName.trim() || !middleName.trim()) {
+			setError('Все поля обязательны для заполнения.');
+			return;
+		}
+
 		try {
+			console.log('Sending registration request with data:', {
+				username,
+				password,
+				last_name: lastName,
+				first_name: firstName,
+				middle_name: middleName,
+			});
 			const response = await axios.post('http://localhost:5000/api/register', {
 				username,
 				password,
 				last_name: lastName,
 				first_name: firstName,
 				middle_name: middleName,
-			}, { withCredentials: true });
+			}, {
+				withCredentials: true,
+				headers: {
+					'Content-Type': 'application/json',
+					'X-CSRFToken': localStorage.getItem('csrfToken') || '', // Отправляем CSRF-токен
+				}
+			});
 
 			if (response.data.message === 'Пользователь зарегистрирован') {
 				setSuccess('Регистрация успешна! Теперь вы можете войти.');
@@ -33,6 +80,7 @@ function Register() {
 				login({ username, role: response.data.user.role });
 			}
 		} catch (err) {
+			console.error('Registration error:', err.response?.data || err.message, err.response?.status);
 			setError(err.response?.data?.error || 'Произошла ошибка при регистрации. Попробуйте позже.');
 			setSuccess('');
 		}
@@ -65,6 +113,7 @@ function Register() {
 							variant="outlined"
 							sx={{ mb: 2, borderRadius: 8 }}
 							autoComplete="username"
+							required
 						/>
 						<TextField
 							fullWidth
@@ -76,6 +125,7 @@ function Register() {
 							variant="outlined"
 							sx={{ mb: 2, borderRadius: 8 }}
 							autoComplete="new-password"
+							required
 						/>
 						<TextField
 							fullWidth
@@ -86,6 +136,7 @@ function Register() {
 							variant="outlined"
 							sx={{ mb: 2, borderRadius: 8 }}
 							autoComplete="family-name"
+							required
 						/>
 						<TextField
 							fullWidth
@@ -96,6 +147,7 @@ function Register() {
 							variant="outlined"
 							sx={{ mb: 2, borderRadius: 8 }}
 							autoComplete="given-name"
+							required
 						/>
 						<TextField
 							fullWidth
@@ -106,6 +158,7 @@ function Register() {
 							variant="outlined"
 							sx={{ mb: 2, borderRadius: 8 }}
 							autoComplete="additional-name"
+							required
 						/>
 						<Button
 							type="submit"

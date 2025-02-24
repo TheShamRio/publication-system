@@ -5,11 +5,12 @@ const AuthContext = createContext();
 export function AuthProvider({ children }) {
     const [authState, setAuthState] = useState(() => {
         const storedUser = localStorage.getItem('user');
+        const storedCsrfToken = localStorage.getItem('csrfToken');
         return {
             isAuthenticated: !!storedUser,
             role: storedUser ? JSON.parse(storedUser).role || 'user' : 'user',
             username: storedUser ? JSON.parse(storedUser).username || '' : '',
-            csrfToken: null,
+            csrfToken: storedCsrfToken || null,
         };
     });
 
@@ -20,6 +21,7 @@ export function AuthProvider({ children }) {
             role: userData.role,
             username: userData.username,
         });
+        localStorage.setItem('user', JSON.stringify({ username: userData.username, role: userData.role }));
     };
 
     const logout = () => {
@@ -30,6 +32,7 @@ export function AuthProvider({ children }) {
             csrfToken: null,
         });
         localStorage.removeItem('user');
+        localStorage.removeItem('csrfToken');
     };
 
     const updateAuthState = (newState) => {
@@ -44,6 +47,7 @@ export function AuthProvider({ children }) {
             ...prevState,
             csrfToken: token,
         }));
+        localStorage.setItem('csrfToken', token); // Сохраняем токен в localStorage
     };
 
     return (

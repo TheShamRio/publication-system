@@ -28,11 +28,10 @@ def create_app():
         r"/admin_api/*": {"origins": ["http://localhost:3000", "http://localhost:3001"]}
     }, supports_credentials=True, methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], allow_headers=['Content-Type', 'Authorization', 'X-CSRFToken'])
 
-    # Регистрация Blueprint'ов
+    # Регистрация Blueprint'ов с отладкой
     from .routes import bp as user_bp
-    from .api import bp as admin_bp
     app.register_blueprint(user_bp, url_prefix='/api')
-    app.register_blueprint(admin_bp, url_prefix='/admin_api')
+    print(f"Registered Blueprint 'api' with URL prefix '/api'")  # Отладочное сообщение
 
     # Обработчик для загрузки файлов
     @app.route('/uploads/<path:filename>')
