@@ -1,6 +1,6 @@
 from flask import Flask, send_from_directory, jsonify, make_response, request
 from flask_cors import CORS
-from .extensions import db, migrate, login_manager, csrf
+from .extensions import db, migrate, login_manager, csrf  # Импортируем csrf из extensions
 from .models import User
 import os
 
@@ -16,7 +16,7 @@ def create_app():
     db.init_app(app)
     migrate.init_app(app, db)
     login_manager.init_app(app)
-    csrf.init_app(app)
+    csrf.init_app(app)  # Инициализируем CSRFProtect
 
     # Настройка CORS
     CORS(app, resources={

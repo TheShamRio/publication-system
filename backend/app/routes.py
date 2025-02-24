@@ -4,6 +4,7 @@ from .models import User, Publication
 from .utils import allowed_file
 from flask_login import login_user, current_user, logout_user, login_required
 from werkzeug.utils import secure_filename
+from flask_wtf.csrf import generate_csrf  # Добавляем импорт generate_csrf
 import os
 import logging
 from datetime import datetime
@@ -17,6 +18,7 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
 @bp.route('/login', methods=['POST'])
+@csrf.exempt
 def login():
     logger.debug(f"Получен POST запрос для /login")
     data = request.get_json()
@@ -43,7 +45,7 @@ def login():
 @login_required
 def get_csrf_token():
     logger.debug(f"Получен GET запрос для /api/csrf-token")
-    token = csrf.generate_csrf()
+    token = generate_csrf()  # Используем функцию generate_csrf()
     return jsonify({'csrf_token': token}), 200
 
 @bp.route('/logout', methods=['POST'])

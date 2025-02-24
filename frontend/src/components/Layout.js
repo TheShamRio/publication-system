@@ -8,6 +8,7 @@ import { useAuth } from '../contexts/AuthContext';
 
 function Layout() {
 	const [isAuthenticated, setIsAuthenticated] = useState(!!localStorage.getItem('user'));
+	const [csrfToken, setCsrfToken] = useState(null);
 	const navigate = useNavigate();
 	const location = useLocation();
 	const { logout, updateAuthState } = useAuth();
@@ -28,6 +29,15 @@ function Layout() {
 					role: userData.role || 'user',
 					username: userData.username,
 				});
+			}
+			try {
+				const tokenResponse = await axios.get('http://localhost:5000/api/csrf-token', {
+					withCredentials: true,
+				});
+				setCsrfToken(tokenResponse.data.csrf_token);
+				console.log('CSRF Token сохранён:', tokenResponse.data.csrf_token);
+			} catch (err) {
+				console.error('Ошибка получения CSRF-токена:', err);
 			}
 			return;
 		}
@@ -52,6 +62,11 @@ function Layout() {
 				});
 			}
 			localStorage.setItem('user', JSON.stringify({ username: userData.username, role: userData.role }));
+			const tokenResponse = await axios.get('http://localhost:5000/api/csrf-token', {
+				withCredentials: true,
+			});
+			setCsrfToken(tokenResponse.data.csrf_token);
+			console.log('CSRF Token сохранён:', tokenResponse.data.csrf_token);
 		} catch (err) {
 			console.error('Auth error:', err.response?.status, err.response?.data?.error || err.message);
 			if (isAuthenticated) {
@@ -63,6 +78,7 @@ function Layout() {
 				});
 			}
 			localStorage.removeItem('user');
+			setCsrfToken(null);
 			if (location.pathname.startsWith('/dashboard') || location.pathname.startsWith('/publication') || location.pathname.startsWith('/admin')) {
 				navigate('/login');
 			}
@@ -85,14 +101,14 @@ function Layout() {
 
 	const handleLogout = async () => {
 		try {
-			// Получаем CSRF-токен
-			const tokenResponse = await axios.get('http://localhost:5000/api/csrf-token', {
-				withCredentials: true,
-			});
-			const csrfToken = tokenResponse.data.csrf_token;
-			console.log('CSRF Token получен:', csrfToken);
+			if (!csrfToken) {
+				const tokenResponse = await axios.get('http://localhost:5000/api/csrf-token', {
+					withCredentials: true,
+				});
+				setCsrfToken(tokenResponse.data.csrf_token);
+				console.log('CSRF Token получен перед выходом:', tokenResponse.data.csrf_token);
+			}
 
-			// Отправляем запрос на выход с CSRF-токеном
 			await axios.post('http://localhost:5000/api/logout', {}, {
 				withCredentials: true,
 				headers: {
@@ -101,13 +117,19 @@ function Layout() {
 			});
 
 			setIsAuthenticated(false);
+			setCsrfToken(null);
 			logout();
 			localStorage.removeItem('user');
 			navigate('/login');
 		} catch (err) {
 			console.error('Ошибка выхода:', err);
-			if (err.response?.status === 400) {
-				console.error('Ошибка CSRF или запроса:', err.response.data);
+			if (err.response?.status === 401 || err.response?.status === 400) {
+				console.error('Сессия истекла или CSRF-токен недействителен. Очищаем состояние клиента.');
+				setIsAuthenticated(false);
+				setCsrfToken(null);
+				logout();
+				localStorage.removeItem('user');
+				navigate('/login');
 			}
 		}
 	};
