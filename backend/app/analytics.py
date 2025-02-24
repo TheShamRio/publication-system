@@ -9,4 +9,5 @@ def get_publications_by_year(user_id=None):
     ).group_by(Publication.year)
     if user_id:
         query = query.filter(Publication.user_id == user_id)
-    return query.all()
+    # Сортируем результаты по году в порядке возрастания
+    return query.order_by(Publication.year.asc()).all()

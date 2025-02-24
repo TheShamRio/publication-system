@@ -1,6 +1,6 @@
 from flask import Flask, send_from_directory, jsonify, make_response, request
 from flask_cors import CORS
-from .extensions import db, migrate, login_manager, csrf  # Импортируем csrf из extensions
+from .extensions import db, migrate, login_manager, csrf
 from .models import User
 import os
 
@@ -12,11 +12,15 @@ def create_app():
     import secrets
     app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(16))
 
+    # Конфигурация сессий
+    app.config['SESSION_COOKIE_HTTPONLY'] = True
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
     # Инициализация расширений
     db.init_app(app)
     migrate.init_app(app, db)
     login_manager.init_app(app)
-    csrf.init_app(app)  # Инициализируем CSRFProtect
+    csrf.init_app(app)
 
     # Настройка CORS
     CORS(app, resources={

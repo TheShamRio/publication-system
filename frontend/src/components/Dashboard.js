@@ -28,6 +28,7 @@ import {
     Accordion,
     AccordionSummary,
     AccordionDetails,
+    Pagination,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import { useNavigate } from 'react-router-dom';
@@ -37,36 +38,99 @@ import AttachFileIcon from '@mui/icons-material/AttachFile';
 import DownloadIcon from '@mui/icons-material/Download';
 import { styled } from '@mui/system';
 import axios from 'axios';
+import { useAuth } from '../contexts/AuthContext';
 
 ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend);
 
-const CancelButton = styled(Button)({
+// Кастомные стили в стиле Apple
+const AppleButton = styled(Button)(({ theme }) => ({
+    borderRadius: '12px',
+    textTransform: 'none',
+    backgroundColor: '#0071E3', // Акцентный синий цвет Apple
+    color: '#FFFFFF',
+    padding: '8px 16px',
+    fontSize: '14px',
+    fontWeight: 600,
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+    '&:hover': {
+        backgroundColor: '#0066CC',
+        boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
+    },
+    '&:disabled': {
+        backgroundColor: '#D1D1D6',
+        color: '#FFFFFF',
+    },
+}));
+
+const AppleTextField = styled(TextField)(({ theme }) => ({
+    '& .MuiOutlinedInput-root': {
+        borderRadius: '12px',
+        backgroundColor: '#F5F5F7',
+        '& fieldset': {
+            borderColor: '#D1D1D6',
+        },
+        '&:hover fieldset': {
+            borderColor: '#0071E3',
+        },
+        '&.Mui-focused fieldset': {
+            borderColor: '#0071E3',
+        },
+    },
+    '& label': {
+        color: '#6E6E73',
+    },
+    '& input': {
+        color: '#1D1D1F',
+    },
+    '& .MuiSelect-select': {
+        backgroundColor: '#F5F5F7',
+    },
+}));
+
+const AppleCard = styled(Card)(({ theme }) => ({
+    borderRadius: '16px',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+    backgroundColor: '#FFFFFF',
+}));
+
+const AppleTable = styled(Table)(({ theme }) => ({
+    borderRadius: '16px',
+    overflow: 'hidden',
+    backgroundColor: '#FFFFFF',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+}));
+
+const CancelButton = styled(Button)(({ theme }) => ({
     borderRadius: '12px',
     color: '#0071E3',
     textTransform: 'none',
+    backgroundColor: 'transparent',
     '&:hover': {
         color: '#FFFFFF',
-        backgroundColor: '#0071E3'
+        backgroundColor: '#0071E3',
     },
-});
+}));
 
-const DetailsButton = styled(Button)({
+const DetailsButton = styled(Button)(({ theme }) => ({
     borderRadius: '12px',
     border: '1px solid #D1D1D6',
     color: '#1D1D1F',
     textTransform: 'none',
+    backgroundColor: 'transparent',
     transition: 'all 0.3s ease',
     '&:hover': {
         borderColor: '#0071E3',
         color: '#0071E3',
-        backgroundColor: 'transparent'
+        backgroundColor: 'transparent',
     },
-});
+}));
 
 function Dashboard() {
+    const { csrfToken } = useAuth(); // Получаем CSRF-токен из контекста
     const [showDetailedAnalytics, setShowDetailedAnalytics] = useState(false);
     const [value, setValue] = useState(0);
     const [publications, setPublications] = useState([]);
+    const [filteredPublications, setFilteredPublications] = useState([]);
     const [analytics, setAnalytics] = useState([]);
     const [uploadType, setUploadType] = useState('file');
     const [title, setTitle] = useState('');
@@ -107,32 +171,66 @@ function Dashboard() {
     const [pubTypes, setPubTypes] = useState({ article: 0, monograph: 0, conference: 0 });
     const [pubStatuses, setPubStatuses] = useState({ draft: 0, review: 0, published: 0 });
     const [totalCitations, setTotalCitations] = useState(0);
+    const [searchQuery, setSearchQuery] = useState(''); // Для поиска
+    const [filterType, setFilterType] = useState('all'); // Фильтр по типу
+    const [filterStatus, setFilterStatus] = useState('all'); // Фильтр по статусу
+    const [currentPage, setCurrentPage] = useState(1); // Текущая страница
+    const [totalPages, setTotalPages] = useState(1); // Общее количество страниц (новое состояние)
+    const publicationsPerPage = 10; // Публикаций на страницу
     const navigate = useNavigate();
     const chartRef = useRef(null);
+
+    const validPublicationTypes = ['article', 'monograph', 'conference']; // Допустимые типы публикаций
 
     const handleTabChange = (event, newValue) => {
         setValue(newValue);
         if (newValue !== 2) setShowDetailedAnalytics(false);
     };
 
-    const fetchData = async () => {
+    const fetchData = async (page = 1, search = '', pubType = 'all', status = 'all') => {
         try {
-            const pubResponse = await axios.get('http://localhost:5000/api/publications', { withCredentials: true });
+            const pubResponse = await axios.get('http://localhost:5000/api/publications', {
+                withCredentials: true,
+                params: {
+                    page,
+                    per_page: publicationsPerPage,
+                    search,
+                    type: pubType,
+                    status
+                }
+            });
             const analyticsResponse = await axios.get('http://localhost:5000/api/analytics/yearly', { withCredentials: true });
-            setPublications(pubResponse.data);
+            setPublications(pubResponse.data.publications); // Сохраняем только текущие публикации для этой страницы
+            setFilteredPublications(pubResponse.data.publications); // Устанавливаем текущие данные для отображения
             setAnalytics(analyticsResponse.data);
 
             const types = { article: 0, monograph: 0, conference: 0 };
             const statuses = { draft: 0, review: 0, published: 0 };
             let citations = 0;
-            pubResponse.data.forEach((pub) => {
-                types[pub.type] = (types[pub.type] || 0) + 1;
+            pubResponse.data.publications.forEach((pub) => {
+                const pubType = validPublicationTypes.includes(pub.type) ? pub.type : 'article'; // Если тип неизвестен, используем 'article'
+                types[pubType] = (types[pubType] || 0) + 1;
                 statuses[pub.status] = (statuses[pub.status] || 0) + 1;
                 if (pub.citations) citations += pub.citations;
             });
             setPubTypes(types);
             setPubStatuses(statuses);
             setTotalCitations(citations);
+            setCurrentPage(page); // Устанавливаем текущую страницу
+
+            // Используем total из серверного ответа для вычисления totalPages
+            const total = pubResponse.data.total || 0;
+            const calculatedTotalPages = Math.ceil(total / publicationsPerPage);
+            setTotalPages(calculatedTotalPages); // Устанавливаем totalPages на основе серверного total
+
+            // Проверяем, чтобы currentPage не превышал totalPages
+            if (page > calculatedTotalPages && calculatedTotalPages > 0) {
+                setCurrentPage(1);
+                fetchData(1, search, pubType, status);
+                return;
+            }
+
+            console.log('Server response for page', page, ':', pubResponse.data); // Отладочная информация
         } catch (err) {
             console.error('Ошибка загрузки данных:', err);
             if (err.response?.status === 401) {
@@ -162,9 +260,16 @@ function Dashboard() {
     };
 
     useEffect(() => {
-        fetchData();
+        fetchData(1, searchQuery, filterType, filterStatus); // Загружаем первую страницу с текущими фильтрами
         fetchUserData();
-    }, [navigate]);
+    }, [navigate, searchQuery, filterType, filterStatus]);
+
+    // Пагинация: теперь просто используем filteredPublications напрямую, так как сервер уже выполняет пагинацию
+    const currentPublications = filteredPublications; // Убираем slice, полагаясь на серверную пагинацию
+
+    const handlePageChange = (event, newPage) => {
+        fetchData(newPage, searchQuery, filterType, filterStatus);
+    };
 
     const handleChangePasswordClick = () => {
         setOpenChangePasswordDialog(true);
@@ -182,7 +287,8 @@ function Dashboard() {
                 current_password: currentPassword,
                 new_password: newPassword,
             }, {
-                withCredentials: true
+                withCredentials: true,
+                headers: { 'X-CSRFToken': csrfToken }, // Добавляем CSRF-токен
             });
 
             setPasswordSuccess('Пароль успешно обновлен!');
@@ -260,7 +366,10 @@ function Dashboard() {
             console.log('Uploading file with data:', { title, authors, year, type });
             const response = await axios.post('http://localhost:5000/api/publications/upload-file', formData, {
                 withCredentials: true,
-                headers: { 'Content-Type': 'multipart/form-data' }
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                    'X-CSRFToken': csrfToken, // Добавляем CSRF-токен
+                },
             });
             setSuccess('Публикация успешно загружена!');
             setOpenSuccess(true);
@@ -307,7 +416,10 @@ function Dashboard() {
             console.log('Uploading BibTeX file');
             const response = await axios.post('http://localhost:5000/api/publications/upload-bibtex', formData, {
                 withCredentials: true,
-                headers: { 'Content-Type': 'multipart/form-data' }
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                    'X-CSRFToken': csrfToken, // Добавляем CSRF-токен
+                },
             });
             setSuccess(`Загружено ${response.data.message.split(' ')[1]} публикаций!`);
             setOpenSuccess(true);
@@ -332,7 +444,7 @@ function Dashboard() {
         setEditTitle(publication.title);
         setEditAuthors(publication.authors);
         setEditYear(publication.year);
-        setEditType(publication.type);
+        setEditType(validPublicationTypes.includes(publication.type) ? publication.type : 'article'); // Исправляем тип
         setEditStatus(publication.status);
         setEditFile(null);
         setOpenEditDialog(true);
@@ -353,6 +465,7 @@ function Dashboard() {
             data.append('type', editType || 'article');
             data.append('status', editStatus || 'draft');
             headers['Content-Type'] = 'multipart/form-data';
+            headers['X-CSRFToken'] = csrfToken; // Добавляем CSRF-токен
         } else {
             data = {
                 title: editTitle.trim() || '',
@@ -362,6 +475,7 @@ function Dashboard() {
                 status: editStatus || 'draft'
             };
             headers['Content-Type'] = 'application/json';
+            headers['X-CSRFToken'] = csrfToken; // Добавляем CSRF-токен
         }
 
         try {
@@ -424,7 +538,10 @@ function Dashboard() {
 
         try {
             console.log('Confirming deletion of publication:', publicationToDelete.id);
-            const response = await axios.delete(`http://localhost:5000/api/publications/${publicationToDelete.id}`, { withCredentials: true });
+            const response = await axios.delete(`http://localhost:5000/api/publications/${publicationToDelete.id}`, {
+                withCredentials: true,
+                headers: { 'X-CSRFToken': csrfToken }, // Добавляем CSRF-токен
+            });
             setSuccess('Публикация успешно удалена!');
             setOpenSuccess(true);
             setError('');
@@ -471,7 +588,8 @@ function Dashboard() {
                 first_name: editFirstName.trim() || null,
                 middle_name: editMiddleName.trim() || null,
             }, {
-                withCredentials: true
+                withCredentials: true,
+                headers: { 'X-CSRFToken': csrfToken }, // Добавляем CSRF-токен
             });
             setSuccess('Личные данные успешно обновлены!');
             setOpenSuccess(true);
@@ -529,7 +647,10 @@ function Dashboard() {
             console.log('Sending attach file request for publication:', publicationToAttach.id);
             const response = await axios.post(`http://localhost:5000/api/publications/${publicationToAttach.id}/attach-file`, formData, {
                 withCredentials: true,
-                headers: { 'Content-Type': 'multipart/form-data' }
+                headers: {
+                    'Content-Type': 'multipart/form-data',
+                    'X-CSRFToken': csrfToken, // Добавляем CSRF-токен
+                },
             });
             setAttachSuccess('Файл успешно прикреплен!');
             setAttachError('');
@@ -605,9 +726,11 @@ function Dashboard() {
 
     const handleExportBibTeX = async () => {
         try {
-            console.log('Exporting publications to BibTeX');
-            const response = await axios.get('http://localhost:5000/api/publications/export-bibtex', { withCredentials: true });
-            const url = window.URL.createObjectURL(new Blob([response.data]));
+            const response = await axios.get('http://localhost:5000/api/publications/export-bibtex', {
+                withCredentials: true,
+            });
+            const blob = new Blob([response.data], { type: 'application/x-bibtex' });
+            const url = window.URL.createObjectURL(blob);
             const link = document.createElement('a');
             link.href = url;
             link.download = 'publications.bib';
@@ -615,16 +738,9 @@ function Dashboard() {
             link.click();
             document.body.removeChild(link);
             window.URL.revokeObjectURL(url);
-            setSuccess('Публикации успешно выгружены в формате BibTeX!');
-            setOpenSuccess(true);
         } catch (err) {
-            console.error('Ошибка выгрузки в BibTeX:', err.response?.data || err);
-            if (err.response) {
-                setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте права доступа.'}`);
-            } else {
-                setError('Ошибка сети. Проверьте подключение и сервер.');
-            }
-            setOpenError(true);
+            console.error('Ошибка выгрузки в BibTeX:', err.response?.data || err.message);
+            alert(`Не удалось экспортировать публикации в BibTeX: ${err.response?.data?.error || 'Внутренняя ошибка сервера'}`);
         }
     };
 
@@ -665,12 +781,12 @@ function Dashboard() {
                 mt: 4,
                 minHeight: 'calc(100vh - 64px)',
                 backgroundColor: '#FFFFFF',
-                borderRadius: '12px',
-                boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
+                borderRadius: '16px',
+                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
                 fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
             }}
         >
-            <Card sx={{ p: 4, borderRadius: '12px', backgroundColor: '#FFFFFF', boxShadow: 'none' }}>
+            <AppleCard sx={{ p: 4, borderRadius: '16px', backgroundColor: '#FFFFFF', boxShadow: 'none' }}>
                 <CardContent>
                     <Typography
                         variant="h4"
@@ -693,8 +809,9 @@ function Dashboard() {
                                 color: '#6E6E73',
                                 fontSize: '1.1rem',
                                 textTransform: 'none',
-                                '&:hover': { color: '#0071E3' },
-                                '&.Mui-selected': { color: '#1D1D1F' }
+                                borderRadius: '12px',
+                                '&:hover': { color: '#0071E3', backgroundColor: '#F5F5F7' },
+                                '&.Mui-selected': { color: '#1D1D1F', backgroundColor: '#F5F5F7' }
                             },
                             '& .MuiTabs-indicator': { backgroundColor: '#0071E3' }
                         }}
@@ -709,14 +826,14 @@ function Dashboard() {
                         <Accordion
                             defaultExpanded
                             sx={{
-                                boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
-                                borderRadius: '12px',
+                                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+                                borderRadius: '16px',
                                 backgroundColor: '#FFFFFF'
                             }}
                         >
                             <AccordionSummary
-                                expandIcon={<ExpandMoreIcon sx={{ color: '#0071E3' }} />}
-                                sx={{ backgroundColor: '#0071E3', borderRadius: '12px' }}
+                                expandIcon={<ExpandMoreIcon sx={{ color: '#FFFFFF' }} />}
+                                sx={{ backgroundColor: '#0071E3', borderRadius: '16px' }}
                             >
                                 <Typography variant="h5" sx={{ color: '#FFFFFF' }}>
                                     Личные данные
@@ -734,32 +851,16 @@ function Dashboard() {
                                             Логин: {user.username}
                                         </Typography>
                                         <Box sx={{ display: 'flex', gap: 2 }}>
-                                            <Button
-                                                variant="contained"
+                                            <AppleButton
                                                 onClick={handleEditUserClick}
-                                                sx={{
-                                                    backgroundColor: '#0071E3',
-                                                    color: '#FFFFFF',
-                                                    borderRadius: '12px',
-                                                    textTransform: 'none',
-                                                    '&:hover': { backgroundColor: '#005BB5' }
-                                                }}
                                             >
                                                 Редактировать данные
-                                            </Button>
-                                            <Button
-                                                variant="contained"
+                                            </AppleButton>
+                                            <AppleButton
                                                 onClick={handleChangePasswordClick}
-                                                sx={{
-                                                    backgroundColor: '#0071E3',
-                                                    color: '#FFFFFF',
-                                                    borderRadius: '12px',
-                                                    textTransform: 'none',
-                                                    '&:hover': { backgroundColor: '#005BB5' }
-                                                }}
                                             >
                                                 Изменить пароль
-                                            </Button>
+                                            </AppleButton>
                                         </Box>
                                     </Box>
                                 ) : (
@@ -783,90 +884,57 @@ function Dashboard() {
                             >
                                 Загрузка публикаций
                             </Typography>
-                            <Box
+                            <AppleCard
                                 sx={{
                                     mb: 4,
                                     p: 3,
                                     backgroundColor: '#F5F5F7',
-                                    borderRadius: '12px',
-                                    boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)'
+                                    borderRadius: '16px',
+                                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)'
                                 }}
                             >
-                                <Box sx={{ mb: 2 }}>
-                                    <Button
-                                        variant="contained"
+                                <Box sx={{ mb: 2, display: 'flex', gap: 2 }}>
+                                    <AppleButton
                                         onClick={() => setUploadType('file')}
                                         sx={{
-                                            mr: 2,
-                                            backgroundColor: uploadType === 'file' ? '#0071E3' : '#FFFFFF',
+                                            backgroundColor: uploadType === 'file' ? '#0071E3' : '#F5F5F7',
                                             color: uploadType === 'file' ? '#FFFFFF' : '#1D1D1F',
-                                            borderRadius: '12px',
-                                            textTransform: 'none',
                                             border: '1px solid #D1D1D6',
-                                            '&:hover': {
-                                                backgroundColor: uploadType === 'file' ? '#005BB5' : '#E5E5E5',
-                                                color: uploadType === 'file' ? '#FFFFFF' : '#0071E3'
-                                            }
                                         }}
                                     >
                                         Загрузить файл (PDF/DOCX)
-                                    </Button>
-                                    <Button
-                                        variant="contained"
+                                    </AppleButton>
+                                    <AppleButton
                                         onClick={() => setUploadType('bibtex')}
                                         sx={{
-                                            backgroundColor: uploadType === 'bibtex' ? '#0071E3' : '#FFFFFF',
+                                            backgroundColor: uploadType === 'bibtex' ? '#0071E3' : '#F5F5F7',
                                             color: uploadType === 'bibtex' ? '#FFFFFF' : '#1D1D1F',
-                                            borderRadius: '12px',
-                                            textTransform: 'none',
                                             border: '1px solid #D1D1D6',
-                                            '&:hover': {
-                                                backgroundColor: uploadType === 'bibtex' ? '#005BB5' : '#E5E5E5',
-                                                color: uploadType === 'bibtex' ? '#FFFFFF' : '#0071E3'
-                                            }
                                         }}
                                     >
                                         Загрузить BibTeX
-                                    </Button>
+                                    </AppleButton>
                                 </Box>
 
                                 {uploadType === 'file' ? (
                                     <form onSubmit={handleFileUpload}>
-                                        <TextField
+                                        <AppleTextField
                                             fullWidth
                                             label="Название"
                                             value={title}
                                             onChange={(e) => setTitle(e.target.value)}
                                             margin="normal"
                                             variant="outlined"
-                                            sx={{
-                                                '& .MuiOutlinedInput-root': {
-                                                    '& fieldset': { borderColor: '#D1D1D6' },
-                                                    '&:hover fieldset': { borderColor: '#0071E3' },
-                                                    '&.Mui-focused fieldset': { borderColor: '#0071E3' }
-                                                },
-                                                '& label': { color: '#6E6E73' },
-                                                '& input': { color: '#1D1D1F' }
-                                            }}
                                         />
-                                        <TextField
+                                        <AppleTextField
                                             fullWidth
                                             label="Авторы"
                                             value={authors}
                                             onChange={(e) => setAuthors(e.target.value)}
                                             margin="normal"
                                             variant="outlined"
-                                            sx={{
-                                                '& .MuiOutlinedInput-root': {
-                                                    '& fieldset': { borderColor: '#D1D1D6' },
-                                                    '&:hover fieldset': { borderColor: '#0071E3' },
-                                                    '&.Mui-focused fieldset': { borderColor: '#0071E3' }
-                                                },
-                                                '& label': { color: '#6E6E73' },
-                                                '& input': { color: '#1D1D1F' }
-                                            }}
                                         />
-                                        <TextField
+                                        <AppleTextField
                                             fullWidth
                                             label="Год"
                                             type="number"
@@ -874,17 +942,8 @@ function Dashboard() {
                                             onChange={(e) => setYear(e.target.value)}
                                             margin="normal"
                                             variant="outlined"
-                                            sx={{
-                                                '& .MuiOutlinedInput-root': {
-                                                    '& fieldset': { borderColor: '#D1D1D6' },
-                                                    '&:hover fieldset': { borderColor: '#0071E3' },
-                                                    '&.Mui-focused fieldset': { borderColor: '#0071E3' }
-                                                },
-                                                '& label': { color: '#6E6E73' },
-                                                '& input': { color: '#1D1D1F' }
-                                            }}
                                         />
-                                        <TextField
+                                        <AppleTextField
                                             fullWidth
                                             select
                                             label="Тип публикации"
@@ -892,20 +951,11 @@ function Dashboard() {
                                             onChange={(e) => setType(e.target.value)}
                                             margin="normal"
                                             variant="outlined"
-                                            sx={{
-                                                '& .MuiOutlinedInput-root': {
-                                                    '& fieldset': { borderColor: '#D1D1D6' },
-                                                    '&:hover fieldset': { borderColor: '#0071E3' },
-                                                    '&.Mui-focused fieldset': { borderColor: '#0071E3' }
-                                                },
-                                                '& label': { color: '#6E6E73' },
-                                                '& input': { color: '#1D1D1F' }
-                                            }}
                                         >
                                             <MenuItem value="article">Статья</MenuItem>
                                             <MenuItem value="monograph">Монография</MenuItem>
                                             <MenuItem value="conference">Доклад/конференция</MenuItem>
-                                        </TextField>
+                                        </AppleTextField>
                                         <Box sx={{ mt: 2 }}>
                                             <input
                                                 type="file"
@@ -915,24 +965,16 @@ function Dashboard() {
                                                 id="upload-file"
                                             />
                                             <label htmlFor="upload-file">
-                                                <Button
-                                                    variant="outlined"
+                                                <AppleButton
                                                     component="span"
                                                     sx={{
-                                                        borderRadius: '12px',
-                                                        borderColor: '#D1D1D6',
+                                                        border: '1px solid #D1D1D6',
+                                                        backgroundColor: '#F5F5F7',
                                                         color: '#1D1D1F',
-                                                        textTransform: 'none',
-                                                        backgroundColor: '#FFFFFF',
-                                                        '&:hover': {
-                                                            borderColor: '#0071E3',
-                                                            backgroundColor: '#0071E3',
-                                                            color: '#FFFFFF'
-                                                        }
                                                     }}
                                                 >
                                                     Выбрать файл
-                                                </Button>
+                                                </AppleButton>
                                             </label>
                                             {file && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{file.name}</Typography>}
                                         </Box>
@@ -944,7 +986,8 @@ function Dashboard() {
                                                         mt: 2,
                                                         borderRadius: '12px',
                                                         backgroundColor: '#FFF1F0',
-                                                        color: '#1D1D1F'
+                                                        color: '#1D1D1F',
+                                                        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
                                                     }}
                                                     onClose={() => setOpenError(false)}
                                                 >
@@ -960,7 +1003,8 @@ function Dashboard() {
                                                         mt: 2,
                                                         borderRadius: '12px',
                                                         backgroundColor: '#E7F8E7',
-                                                        color: '#1D1D1F'
+                                                        color: '#1D1D1F',
+                                                        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
                                                     }}
                                                     onClose={() => setOpenSuccess(false)}
                                                 >
@@ -968,20 +1012,12 @@ function Dashboard() {
                                                 </Alert>
                                             )}
                                         </Collapse>
-                                        <Button
+                                        <AppleButton
                                             type="submit"
-                                            variant="contained"
-                                            sx={{
-                                                mt: 2,
-                                                backgroundColor: '#0071E3',
-                                                color: '#FFFFFF',
-                                                borderRadius: '12px',
-                                                textTransform: 'none',
-                                                '&:hover': { backgroundColor: '#005BB5' }
-                                            }}
+                                            sx={{ mt: 2 }}
                                         >
                                             Загрузить
-                                        </Button>
+                                        </AppleButton>
                                     </form>
                                 ) : (
                                     <form onSubmit={handleBibtexUpload}>
@@ -994,24 +1030,16 @@ function Dashboard() {
                                                 id="upload-bibtex"
                                             />
                                             <label htmlFor="upload-bibtex">
-                                                <Button
-                                                    variant="outlined"
+                                                <AppleButton
                                                     component="span"
                                                     sx={{
-                                                        borderRadius: '12px',
-                                                        borderColor: '#D1D1D6',
+                                                        border: '1px solid #D1D1D6',
+                                                        backgroundColor: '#F5F5F7',
                                                         color: '#1D1D1F',
-                                                        textTransform: 'none',
-                                                        backgroundColor: '#FFFFFF',
-                                                        '&:hover': {
-                                                            borderColor: '#0071E3',
-                                                            backgroundColor: '#0071E3',
-                                                            color: '#FFFFFF'
-                                                        }
                                                     }}
                                                 >
                                                     Выбрать BibTeX-файл
-                                                </Button>
+                                                </AppleButton>
                                             </label>
                                             {file && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{file.name}</Typography>}
                                         </Box>
@@ -1023,7 +1051,8 @@ function Dashboard() {
                                                         mb: 2,
                                                         borderRadius: '12px',
                                                         backgroundColor: '#FFF1F0',
-                                                        color: '#1D1D1F'
+                                                        color: '#1D1D1F',
+                                                        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
                                                     }}
                                                     onClose={() => setOpenError(false)}
                                                 >
@@ -1039,7 +1068,8 @@ function Dashboard() {
                                                         mb: 2,
                                                         borderRadius: '12px',
                                                         backgroundColor: '#E7F8E7',
-                                                        color: '#1D1D1F'
+                                                        color: '#1D1D1F',
+                                                        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
                                                     }}
                                                     onClose={() => setOpenSuccess(false)}
                                                 >
@@ -1047,23 +1077,15 @@ function Dashboard() {
                                                 </Alert>
                                             )}
                                         </Collapse>
-                                        <Button
+                                        <AppleButton
                                             type="submit"
-                                            variant="contained"
-                                            sx={{
-                                                mt: 2,
-                                                backgroundColor: '#0071E3',
-                                                color: '#FFFFFF',
-                                                borderRadius: '12px',
-                                                textTransform: 'none',
-                                                '&:hover': { backgroundColor: '#005BB5' }
-                                            }}
+                                            sx={{ mt: 2 }}
                                         >
                                             Загрузить
-                                        </Button>
+                                        </AppleButton>
                                     </form>
                                 )}
-                            </Box>
+                            </AppleCard>
                             <Typography
                                 variant="h5"
                                 gutterBottom
@@ -1076,123 +1098,207 @@ function Dashboard() {
                             >
                                 Ваши публикации
                             </Typography>
-                            <Table
+                            {/* Панель поиска и фильтрации в стиле Apple */}
+                            <AppleCard sx={{ mt: 2, mb: 2, p: 2, backgroundColor: '#F5F5F7', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
+                                <AppleTextField
+                                    fullWidth
+                                    label="Поиск по названию, авторам или году"
+                                    value={searchQuery}
+                                    onChange={(e) => setSearchQuery(e.target.value)}
+                                    margin="normal"
+                                    variant="outlined"
+                                    InputProps={{
+                                        endAdornment: (
+                                            <IconButton sx={{ color: '#0071E3' }}>
+                                                {/* Можно добавить иконку поиска, например, SearchIcon из @mui/icons-material */}
+                                            </IconButton>
+                                        ),
+                                    }}
+                                />
+                                <Box sx={{ mt: 2, display: 'flex', gap: 2 }}>
+                                    <AppleTextField
+                                        select
+                                        label="Тип публикации"
+                                        value={filterType}
+                                        onChange={(e) => setFilterType(e.target.value)}
+                                        margin="normal"
+                                        variant="outlined"
+                                    >
+                                        <MenuItem value="all">Все</MenuItem>
+                                        <MenuItem value="article">Статья</MenuItem>
+                                        <MenuItem value="monograph">Монография</MenuItem>
+                                        <MenuItem value="conference">Доклад/конференция</MenuItem>
+                                    </AppleTextField>
+                                    <AppleTextField
+                                        select
+                                        label="Статус"
+                                        value={filterStatus}
+                                        onChange={(e) => setFilterStatus(e.target.value)}
+                                        margin="normal"
+                                        variant="outlined"
+                                    >
+                                        <MenuItem value="all">Все</MenuItem>
+                                        <MenuItem value="draft">Черновик</MenuItem>
+                                        <MenuItem value="review">На проверке</MenuItem>
+                                        <MenuItem value="published">Опубликованные</MenuItem>
+                                    </AppleTextField>
+                                </Box>
+                            </AppleCard>
+                            <AppleTable
                                 sx={{
                                     mt: 2,
-                                    boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
-                                    borderRadius: '12px',
-                                    overflow: 'hidden',
-                                    backgroundColor: '#FFFFFF'
+                                    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
                                 }}
                             >
                                 <TableHead>
                                     <TableRow sx={{ backgroundColor: '#0071E3' }}>
-                                        <TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>ID</TableCell>
+                                        <TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
                                         <TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Название</TableCell>
                                         <TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Авторы</TableCell>
                                         <TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
                                         <TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Тип</TableCell>
                                         <TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
-                                        <TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center' }}>Действия</TableCell>
+                                        <TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>Действия</TableCell>
                                     </TableRow>
                                 </TableHead>
                                 <TableBody>
-                                    {publications.map((pub) => (
-                                        <TableRow
-                                            key={pub.id}
-                                            sx={{
-                                                '&:hover': { backgroundColor: '#E5E5E5', transition: 'background-color 0.3s ease' }
-                                            }}
-                                        >
-                                            <TableCell sx={{ color: '#1D1D1F' }}>{pub.id}</TableCell>
-                                            <TableCell sx={{ color: '#1D1D1F' }}>{pub.title}</TableCell>
-                                            <TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
-                                            <TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
-                                            <TableCell sx={{ color: '#1D1D1F' }}>
-                                                {pub.type === 'article'
-                                                    ? 'Статья'
-                                                    : pub.type === 'monograph'
+                                    {currentPublications.length > 0 ? (
+                                        currentPublications.map((pub) => (
+                                            <TableRow
+                                                key={pub.id}
+                                                sx={{
+                                                    '&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' }
+                                                }}
+                                            >
+                                                <TableCell sx={{ color: '#1D1D1F' }}>{pub.id}</TableCell>
+                                                <TableCell sx={{ color: '#1D1D1F' }}>{pub.title}</TableCell>
+                                                <TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
+                                                <TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
+                                                <TableCell sx={{ color: '#1D1D1F' }}>
+                                                    {pub.type === 'article'
+                                                        ? 'Статья'
+                                                        : pub.type === 'monograph'
                                                         ? 'Монография'
                                                         : pub.type === 'conference'
-                                                            ? 'Доклад/конференция'
-                                                            : pub.type}
-                                            </TableCell>
-                                            <TableCell sx={{ color: '#1D1D1F' }}>
-                                                {pub.status === 'draft'
-                                                    ? 'Черновик'
-                                                    : pub.status === 'review'
+                                                        ? 'Доклад/конференция'
+                                                        : 'Неизвестный тип'}
+                                                </TableCell>
+                                                <TableCell sx={{ color: '#1D1D1F' }}>
+                                                    {pub.status === 'draft'
+                                                        ? 'Черновик'
+                                                        : pub.status === 'review'
                                                         ? 'На проверке'
                                                         : pub.status === 'published'
-                                                            ? 'Опубликованные'
-                                                            : pub.status}
-                                            </TableCell>
-                                            <TableCell sx={{ textAlign: 'center' }}>
-                                                <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-                                                    <IconButton
-                                                        aria-label="edit"
-                                                        onClick={() => handleEditClick(pub)}
-                                                        sx={{
-                                                            color: '#0071E3',
-                                                            '&:hover': {
-                                                                color: '#FFFFFF',
-                                                                backgroundColor: '#0071E3',
-                                                                borderRadius: '12px'
-                                                            }
-                                                        }}
-                                                    >
-                                                        <EditIcon />
-                                                    </IconButton>
-                                                    <IconButton
-                                                        aria-label="delete"
-                                                        onClick={() => handleDeleteClick(pub)}
-                                                        sx={{
-                                                            color: '#0071E3',
-                                                            '&:hover': {
-                                                                color: '#FFFFFF',
-                                                                backgroundColor: '#0071E3',
-                                                                borderRadius: '12px'
-                                                            }
-                                                        }}
-                                                    >
-                                                        <DeleteIcon />
-                                                    </IconButton>
-                                                    {!pub.file_url ? (
+                                                        ? 'Опубликованные'
+                                                        : pub.status}
+                                                </TableCell>
+                                                <TableCell sx={{ textAlign: 'center' }}>
+                                                    <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
                                                         <IconButton
-                                                            aria-label="attach"
-                                                            onClick={() => handleAttachFileClick(pub)}
+                                                            aria-label="edit"
+                                                            onClick={() => handleEditClick(pub)}
                                                             sx={{
                                                                 color: '#0071E3',
+                                                                borderRadius: '8px',
                                                                 '&:hover': {
                                                                     color: '#FFFFFF',
                                                                     backgroundColor: '#0071E3',
-                                                                    borderRadius: '12px'
+                                                                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
                                                                 }
                                                             }}
                                                         >
-                                                            <AttachFileIcon />
+                                                            <EditIcon />
                                                         </IconButton>
-                                                    ) : (
                                                         <IconButton
-                                                            aria-label="download"
-                                                            onClick={() => handleDownloadClick(pub)}
+                                                            aria-label="delete"
+                                                            onClick={() => handleDeleteClick(pub)}
                                                             sx={{
                                                                 color: '#0071E3',
+                                                                borderRadius: '8px',
                                                                 '&:hover': {
                                                                     color: '#FFFFFF',
                                                                     backgroundColor: '#0071E3',
-                                                                    borderRadius: '12px'
+                                                                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
                                                                 }
                                                             }}
                                                         >
-                                                            <DownloadIcon />
+                                                            <DeleteIcon />
                                                         </IconButton>
-                                                    )}
-                                                </Box>
+                                                        {!pub.file_url ? (
+                                                            <IconButton
+                                                                aria-label="attach"
+                                                                onClick={() => handleAttachFileClick(pub)}
+                                                                sx={{
+                                                                    color: '#0071E3',
+                                                                    borderRadius: '8px',
+                                                                    '&:hover': {
+                                                                        color: '#FFFFFF',
+                                                                        backgroundColor: '#0071E3',
+                                                                        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <AttachFileIcon />
+                                                            </IconButton>
+                                                        ) : (
+                                                            <IconButton
+                                                                aria-label="download"
+                                                                onClick={() => handleDownloadClick(pub)}
+                                                                sx={{
+                                                                    color: '#0071E3',
+                                                                    borderRadius: '8px',
+                                                                    '&:hover': {
+                                                                        color: '#FFFFFF',
+                                                                        backgroundColor: '#0071E3',
+                                                                        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+                                                                    }
+                                                                }}
+                                                            >
+                                                                <DownloadIcon />
+                                                            </IconButton>
+                                                        )}
+                                                    </Box>
+                                                </TableCell>
+                                            </TableRow>
+                                        ))
+                                    ) : (
+                                        <TableRow>
+                                            <TableCell colSpan={7} sx={{ textAlign: 'center', color: '#6E6E73' }}>
+                                                Нет доступных публикаций на этой странице.
                                             </TableCell>
                                         </TableRow>
-                                    ))}
+                                    )}
                                 </TableBody>
-                            </Table>
+                            </AppleTable>
+                            {/* Пагинация в стиле Apple с отладочной информацией */}
+                            <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                                <Pagination
+                                    count={totalPages || 1}  // Убедимся, что count всегда больше 0
+                                    page={currentPage}
+                                    onChange={handlePageChange}
+                                    color="primary"
+                                    shape="rounded"
+                                    sx={{
+                                        '& .MuiPaginationItem-root': {
+                                            color: '#1D1D1F',
+                                            borderRadius: '12px',
+                                            border: '1px solid #D1D1D6',
+                                            backgroundColor: '#F5F5F7',
+                                            '&.Mui-selected': {
+                                                backgroundColor: '#0071E3',
+                                                color: '#FFFFFF',
+                                                borderColor: '#0071E3',
+                                                '&:hover': { backgroundColor: '#0066CC' }
+                                            },
+                                            '&:hover': { backgroundColor: '#E5E5EA', borderColor: '#0071E3' }
+                                        }
+                                    }}
+                                />
+                                {/* Отладочная информация */}
+                                <Typography sx={{ ml: 2, color: '#6E6E73' }}>
+                                    Current Page: {currentPage}, Total Pages: {totalPages || 1}, Publications: {filteredPublications.length}
+                                </Typography>
+                            </Box>
                         </>
                     )}
 
@@ -1211,42 +1317,43 @@ function Dashboard() {
                                 Аналитика публикаций
                             </Typography>
                             {analytics.length === 0 ? (
-                                <Card
+                                <AppleCard
                                     elevation={2}
                                     sx={{
                                         p: 4,
                                         mt: 2,
-                                        borderRadius: '12px',
+                                        borderRadius: '16px',
                                         backgroundColor: '#FFFFFF',
-                                        boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)'
+                                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)'
                                     }}
                                 >
                                     <Typography variant="body1" sx={{ color: '#6E6E73', textAlign: 'center' }}>
                                         У вас ещё нет ни одной публикации.{' '}
-                                        <Button
+                                        <AppleButton
                                             variant="text"
                                             onClick={() => setUploadType('file')}
                                             sx={{
                                                 p: 0.5,
                                                 textTransform: 'none',
                                                 color: '#0071E3',
-                                                '&:hover': { color: '#005BB5', backgroundColor: 'transparent' }
+                                                backgroundColor: 'transparent',
+                                                '&:hover': { color: '#0066CC', backgroundColor: 'transparent' }
                                             }}
                                         >
                                             Загрузите публикации
-                                        </Button>
+                                        </AppleButton>
                                         , чтобы вести аналитику по своим работам.
                                     </Typography>
-                                </Card>
+                                </AppleCard>
                             ) : (
-                                <Card
+                                <AppleCard
                                     elevation={2}
                                     sx={{
                                         p: 4,
                                         mt: 2,
-                                        borderRadius: '12px',
+                                        borderRadius: '16px',
                                         backgroundColor: '#FFFFFF',
-                                        boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)'
+                                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)'
                                     }}
                                 >
                                     <CardContent>
@@ -1274,13 +1381,13 @@ function Dashboard() {
                                                 <Grid container spacing={2} sx={{ mb: 4 }}>
                                                     {Object.entries(pubTypes).map(([type, count]) => (
                                                         <Grid item xs={12} sm={4} key={type}>
-                                                            <Card
+                                                            <AppleCard
                                                                 elevation={1}
                                                                 sx={{
                                                                     p: 2,
                                                                     borderRadius: '12px',
                                                                     backgroundColor: '#FFFFFF',
-                                                                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
+                                                                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)'
                                                                 }}
                                                             >
                                                                 <CardContent>
@@ -1288,7 +1395,7 @@ function Dashboard() {
                                                                         {type === 'article' ? 'Статьи' : type === 'monograph' ? 'Монографии' : 'Доклады'}: {count}
                                                                     </Typography>
                                                                 </CardContent>
-                                                            </Card>
+                                                            </AppleCard>
                                                         </Grid>
                                                     ))}
                                                 </Grid>
@@ -1299,13 +1406,13 @@ function Dashboard() {
                                                 <Grid container spacing={2} sx={{ mb: 4 }}>
                                                     {Object.entries(pubStatuses).map(([status, count]) => (
                                                         <Grid item xs={12} sm={4} key={status}>
-                                                            <Card
+                                                            <AppleCard
                                                                 elevation={1}
                                                                 sx={{
                                                                     p: 2,
                                                                     borderRadius: '12px',
                                                                     backgroundColor: '#FFFFFF',
-                                                                    boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)'
+                                                                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)'
                                                                 }}
                                                             >
                                                                 <CardContent>
@@ -1313,7 +1420,7 @@ function Dashboard() {
                                                                         {status === 'draft' ? 'Черновики' : status === 'review' ? 'На проверке' : 'Опубликованные'}: {count}
                                                                     </Typography>
                                                                 </CardContent>
-                                                            </Card>
+                                                            </AppleCard>
                                                         </Grid>
                                                     ))}
                                                 </Grid>
@@ -1328,7 +1435,7 @@ function Dashboard() {
                                             </>
                                         </Collapse>
                                     </CardContent>
-                                </Card>
+                                </AppleCard>
                             )}
                         </Box>
                     )}
@@ -1347,20 +1454,12 @@ function Dashboard() {
                             >
                                 Экспорт публикаций
                             </Typography>
-                            <Button
-                                variant="contained"
+                            <AppleButton
                                 onClick={handleExportBibTeX}
-                                sx={{
-                                    mt: 2,
-                                    backgroundColor: '#0071E3',
-                                    color: '#FFFFFF',
-                                    borderRadius: '12px',
-                                    textTransform: 'none',
-                                    '&:hover': { backgroundColor: '#005BB5' }
-                                }}
+                                sx={{ mt: 2 }}
                             >
                                 Выгрузить публикации в BibTeX
-                            </Button>
+                            </AppleButton>
                         </Box>
                     )}
 
@@ -1370,13 +1469,13 @@ function Dashboard() {
                         sx={{
                             '& .MuiDialog-paper': {
                                 backgroundColor: '#FFFFFF',
-                                boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
-                                borderRadius: '12px',
+                                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+                                borderRadius: '16px',
                                 fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
                             }
                         }}
                     >
-                        <DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5E5' }}>
+                        <DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
                             Подтвердите удаление
                         </DialogTitle>
                         <DialogContent sx={{ padding: '24px' }}>
@@ -1384,23 +1483,15 @@ function Dashboard() {
                                 Вы уверены, что хотите удалить публикацию «{publicationToDelete?.title}»?
                             </Typography>
                         </DialogContent>
-                        <DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5E5' }}>
+                        <DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5EA' }}>
                             <CancelButton onClick={handleDeleteCancel}>
                                 Отмена
                             </CancelButton>
-                            <Button
+                            <AppleButton
                                 onClick={handleDeleteConfirm}
-                                variant="contained"
-                                sx={{
-                                    backgroundColor: '#0071E3',
-                                    color: '#FFFFFF',
-                                    borderRadius: '12px',
-                                    textTransform: 'none',
-                                    '&:hover': { backgroundColor: '#005BB5' }
-                                }}
                             >
                                 Удалить
-                            </Button>
+                            </AppleButton>
                         </DialogActions>
                     </Dialog>
 
@@ -1410,52 +1501,34 @@ function Dashboard() {
                         sx={{
                             '& .MuiDialog-paper': {
                                 backgroundColor: '#FFFFFF',
-                                boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
-                                borderRadius: '12px',
+                                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+                                borderRadius: '16px',
                                 fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
                             }
                         }}
                     >
-                        <DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5E5' }}>
+                        <DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
                             Редактировать публикацию
                         </DialogTitle>
                         <DialogContent sx={{ padding: '24px' }}>
                             <form onSubmit={handleEditSubmit}>
-                                <TextField
+                                <AppleTextField
                                     fullWidth
                                     label="Название"
                                     value={editTitle}
                                     onChange={(e) => setEditTitle(e.target.value)}
                                     margin="normal"
                                     variant="outlined"
-                                    sx={{
-                                        '& .MuiOutlinedInput-root': {
-                                            '& fieldset': { borderColor: '#D1D1D6' },
-                                            '&:hover fieldset': { borderColor: '#0071E3' },
-                                            '&.Mui-focused fieldset': { borderColor: '#0071E3' }
-                                        },
-                                        '& label': { color: '#6E6E73' },
-                                        '& input': { color: '#1D1D1F' }
-                                    }}
                                 />
-                                <TextField
+                                <AppleTextField
                                     fullWidth
                                     label="Авторы"
                                     value={editAuthors}
                                     onChange={(e) => setEditAuthors(e.target.value)}
                                     margin="normal"
                                     variant="outlined"
-                                    sx={{
-                                        '& .MuiOutlinedInput-root': {
-                                            '& fieldset': { borderColor: '#D1D1D6' },
-                                            '&:hover fieldset': { borderColor: '#0071E3' },
-                                            '&.Mui-focused fieldset': { borderColor: '#0071E3' }
-                                        },
-                                        '& label': { color: '#6E6E73' },
-                                        '& input': { color: '#1D1D1F' }
-                                    }}
                                 />
-                                <TextField
+                                <AppleTextField
                                     fullWidth
                                     label="Год"
                                     type="number"
@@ -1463,17 +1536,8 @@ function Dashboard() {
                                     onChange={(e) => setEditYear(e.target.value)}
                                     margin="normal"
                                     variant="outlined"
-                                    sx={{
-                                        '& .MuiOutlinedInput-root': {
-                                            '& fieldset': { borderColor: '#D1D1D6' },
-                                            '&:hover fieldset': { borderColor: '#0071E3' },
-                                            '&.Mui-focused fieldset': { borderColor: '#0071E3' }
-                                        },
-                                        '& label': { color: '#6E6E73' },
-                                        '& input': { color: '#1D1D1F' }
-                                    }}
                                 />
-                                <TextField
+                                <AppleTextField
                                     fullWidth
                                     select
                                     label="Тип публикации"
@@ -1481,21 +1545,12 @@ function Dashboard() {
                                     onChange={(e) => setEditType(e.target.value)}
                                     margin="normal"
                                     variant="outlined"
-                                    sx={{
-                                        '& .MuiOutlinedInput-root': {
-                                            '& fieldset': { borderColor: '#D1D1D6' },
-                                            '&:hover fieldset': { borderColor: '#0071E3' },
-                                            '&.Mui-focused fieldset': { borderColor: '#0071E3' }
-                                        },
-                                        '& label': { color: '#6E6E73' },
-                                        '& input': { color: '#1D1D1F' }
-                                    }}
                                 >
                                     <MenuItem value="article">Статья</MenuItem>
                                     <MenuItem value="monograph">Монография</MenuItem>
                                     <MenuItem value="conference">Доклад/конференция</MenuItem>
-                                </TextField>
-                                <TextField
+                                </AppleTextField>
+                                <AppleTextField
                                     fullWidth
                                     select
                                     label="Статус"
@@ -1503,20 +1558,11 @@ function Dashboard() {
                                     onChange={(e) => setEditStatus(e.target.value)}
                                     margin="normal"
                                     variant="outlined"
-                                    sx={{
-                                        '& .MuiOutlinedInput-root': {
-                                            '& fieldset': { borderColor: '#D1D1D6' },
-                                            '&:hover fieldset': { borderColor: '#0071E3' },
-                                            '&.Mui-focused fieldset': { borderColor: '#0071E3' }
-                                        },
-                                        '& label': { color: '#6E6E73' },
-                                        '& input': { color: '#1D1D1F' }
-                                    }}
                                 >
                                     <MenuItem value="draft">Черновик</MenuItem>
                                     <MenuItem value="review">На проверке</MenuItem>
                                     <MenuItem value="published">Опубликовано</MenuItem>
-                                </TextField>
+                                </AppleTextField>
                                 <Box sx={{ mt: 2 }}>
                                     <Typography variant="body2" sx={{ color: '#6E6E73', mb: 1 }}>
                                         Текущий файл: {editPublication?.file_url || 'Нет файла'}
@@ -1529,44 +1575,62 @@ function Dashboard() {
                                         id="edit-upload-file"
                                     />
                                     <label htmlFor="edit-upload-file">
-                                        <Button
-                                            variant="outlined"
+                                        <AppleButton
                                             component="span"
                                             sx={{
-                                                borderRadius: '12px',
-                                                borderColor: '#D1D1D6',
+                                                border: '1px solid #D1D1D6',
+                                                backgroundColor: '#F5F5F7',
                                                 color: '#1D1D1F',
-                                                textTransform: 'none',
-                                                backgroundColor: '#FFFFFF',
-                                                '&:hover': {
-                                                    borderColor: '#0071E3',
-                                                    backgroundColor: '#0071E3',
-                                                    color: '#FFFFFF'
-                                                }
                                             }}
                                         >
                                             Выбрать файл
-                                        </Button>
+                                        </AppleButton>
                                     </label>
                                     {editFile && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{editFile.name}</Typography>}
                                 </Box>
-                                <DialogActions sx={{ mt: 2, padding: '16px 0', borderTop: '1px solid #E5E5E5' }}>
+                                <Collapse in={openError}>
+                                    {error && (
+                                        <Alert
+                                            severity="error"
+                                            sx={{
+                                                mt: 2,
+                                                borderRadius: '12px',
+                                                backgroundColor: '#FFF1F0',
+                                                color: '#1D1D1F',
+                                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+                                            }}
+                                            onClose={() => setOpenError(false)}
+                                        >
+                                            {error}
+                                        </Alert>
+                                    )}
+                                </Collapse>
+                                <Collapse in={openSuccess}>
+                                    {success && (
+                                        <Alert
+                                            severity="success"
+                                            sx={{
+                                                mt: 2,
+                                                borderRadius: '12px',
+                                                backgroundColor: '#E7F8E7',
+                                                color: '#1D1D1F',
+                                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+                                            }}
+                                            onClose={() => setOpenSuccess(false)}
+                                        >
+                                            {success}
+                                        </Alert>
+                                    )}
+                                </Collapse>
+                                <DialogActions sx={{ padding: '16px 0', borderTop: '1px solid #E5E5EA' }}>
                                     <CancelButton onClick={handleEditCancel}>
                                         Отмена
                                     </CancelButton>
-                                    <Button
+                                    <AppleButton
                                         type="submit"
-                                        variant="contained"
-                                        sx={{
-                                            backgroundColor: '#0071E3',
-                                            color: '#FFFFFF',
-                                            borderRadius: '12px',
-                                            textTransform: 'none',
-                                            '&:hover': { backgroundColor: '#005BB5' }
-                                        }}
                                     >
                                         Сохранить
-                                    </Button>
+                                    </AppleButton>
                                 </DialogActions>
                             </form>
                         </DialogContent>
@@ -1578,88 +1642,87 @@ function Dashboard() {
                         sx={{
                             '& .MuiDialog-paper': {
                                 backgroundColor: '#FFFFFF',
-                                boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
-                                borderRadius: '12px',
+                                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+                                borderRadius: '16px',
                                 fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
                             }
                         }}
                     >
-                        <DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5E5' }}>
+                        <DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
                             Редактировать личные данные
                         </DialogTitle>
                         <DialogContent sx={{ padding: '24px' }}>
                             <form onSubmit={handleEditUserSubmit}>
-                                <TextField
+                                <AppleTextField
                                     fullWidth
                                     label="Фамилия"
                                     value={editLastName}
                                     onChange={(e) => setEditLastName(e.target.value)}
                                     margin="normal"
                                     variant="outlined"
-                                    sx={{
-                                        '& .MuiOutlinedInput-root': {
-                                            '& fieldset': { borderColor: '#D1D1D6' },
-                                            '&:hover fieldset': { borderColor: '#0071E3' },
-                                            '&.Mui-focused fieldset': { borderColor: '#0071E3' }
-                                        },
-                                        '& label': { color: '#6E6E73' },
-                                        '& input': { color: '#1D1D1F' }
-                                    }}
                                     autoComplete="family-name"
                                 />
-                                <TextField
+                                <AppleTextField
                                     fullWidth
                                     label="Имя"
                                     value={editFirstName}
                                     onChange={(e) => setEditFirstName(e.target.value)}
                                     margin="normal"
                                     variant="outlined"
-                                    sx={{
-                                        '& .MuiOutlinedInput-root': {
-                                            '& fieldset': { borderColor: '#D1D1D6' },
-                                            '&:hover fieldset': { borderColor: '#0071E3' },
-                                            '&.Mui-focused fieldset': { borderColor: '#0071E3' }
-                                        },
-                                        '& label': { color: '#6E6E73' },
-                                        '& input': { color: '#1D1D1F' }
-                                    }}
                                     autoComplete="given-name"
                                 />
-                                <TextField
+                                <AppleTextField
                                     fullWidth
                                     label="Отчество"
                                     value={editMiddleName}
                                     onChange={(e) => setEditMiddleName(e.target.value)}
                                     margin="normal"
                                     variant="outlined"
-                                    sx={{
-                                        '& .MuiOutlinedInput-root': {
-                                            '& fieldset': { borderColor: '#D1D1D6' },
-                                            '&:hover fieldset': { borderColor: '#0071E3' },
-                                            '&.Mui-focused fieldset': { borderColor: '#0071E3' }
-                                        },
-                                        '& label': { color: '#6E6E73' },
-                                        '& input': { color: '#1D1D1F' }
-                                    }}
                                     autoComplete="additional-name"
                                 />
-                                <DialogActions sx={{ padding: '16px 0', borderTop: '1px solid #E5E5E5' }}>
+                                <Collapse in={openError}>
+                                    {error && (
+                                        <Alert
+                                            severity="error"
+                                            sx={{
+                                                mt: 2,
+                                                borderRadius: '12px',
+                                                backgroundColor: '#FFF1F0',
+                                                color: '#1D1D1F',
+                                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+                                            }}
+                                            onClose={() => setOpenError(false)}
+                                        >
+                                            {error}
+                                        </Alert>
+                                    )}
+                                </Collapse>
+                                <Collapse in={openSuccess}>
+                                    {success && (
+                                        <Alert
+                                            severity="success"
+                                            sx={{
+                                                mt: 2,
+                                                borderRadius: '12px',
+                                                backgroundColor: '#E7F8E7',
+                                                color: '#1D1D1F',
+                                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+                                            }}
+                                            onClose={() => setOpenSuccess(false)}
+                                        >
+                                            {success}
+                                        </Alert>
+                                    )}
+                                </Collapse>
+                                <DialogActions sx={{ padding: '16px 0', borderTop: '1px solid #E5E5EA' }}>
                                     <CancelButton onClick={handleEditUserCancel}>
                                         Отмена
                                     </CancelButton>
-                                    <Button
+                                    <AppleButton
                                         type="submit"
-                                        variant="contained"
-                                        sx={{
-                                            backgroundColor: '#0071E3',
-                                            color: '#FFFFFF',
-                                            borderRadius: '12px',
-                                            textTransform: 'none',
-                                            '&:hover': { backgroundColor: '#005BB5' }
-                                        }}
                                     >
                                         Сохранить
-                                    </Button>
+                                    </AppleButton>
                                 </DialogActions>
                             </form>
                         </DialogContent>
@@ -1671,13 +1734,13 @@ function Dashboard() {
                         sx={{
                             '& .MuiDialog-paper': {
                                 backgroundColor: '#FFFFFF',
-                                boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
-                                borderRadius: '12px',
+                                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+                                borderRadius: '16px',
                                 fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
                             }
                         }}
                     >
-                        <DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5E5' }}>
+                        <DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
                             Прикрепить файл к публикации
                         </DialogTitle>
                         <DialogContent sx={{ padding: '24px' }}>
@@ -1690,24 +1753,16 @@ function Dashboard() {
                                     id="attach-file"
                                 />
                                 <label htmlFor="attach-file">
-                                    <Button
-                                        variant="outlined"
+                                    <AppleButton
                                         component="span"
                                         sx={{
-                                            borderRadius: '12px',
-                                            borderColor: '#D1D1D6',
+                                            border: '1px solid #D1D1D6',
+                                            backgroundColor: '#F5F5F7',
                                             color: '#1D1D1F',
-                                            textTransform: 'none',
-                                            backgroundColor: '#FFFFFF',
-                                            '&:hover': {
-                                                borderColor: '#0071E3',
-                                                backgroundColor: '#0071E3',
-                                                color: '#FFFFFF'
-                                            }
                                         }}
                                     >
                                         Выбрать файл
-                                    </Button>
+                                    </AppleButton>
                                 </label>
                                 {attachFile && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{attachFile.name}</Typography>}
                             </Box>
@@ -1719,7 +1774,8 @@ function Dashboard() {
                                             mb: 2,
                                             borderRadius: '12px',
                                             backgroundColor: '#FFF1F0',
-                                            color: '#1D1D1F'
+                                            color: '#1D1D1F',
+                                            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
                                         }}
                                         onClose={() => setAttachError('')}
                                     >
@@ -1735,7 +1791,8 @@ function Dashboard() {
                                             mb: 2,
                                             borderRadius: '12px',
                                             backgroundColor: '#E7F8E7',
-                                            color: '#1D1D1F'
+                                            color: '#1D1D1F',
+                                            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
                                         }}
                                         onClose={() => setAttachSuccess('')}
                                     >
@@ -1743,25 +1800,17 @@ function Dashboard() {
                                     </Alert>
                                 )}
                             </Collapse>
+                            <DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5EA' }}>
+                                <CancelButton onClick={handleAttachFileCancel}>
+                                    Отмена
+                                </CancelButton>
+                                <AppleButton
+                                    onClick={handleAttachFileSubmit}
+                                >
+                                    Прикрепить
+                                </AppleButton>
+                            </DialogActions>
                         </DialogContent>
-                        <DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5E5' }}>
-                            <CancelButton onClick={handleAttachFileCancel}>
-                                Отмена
-                            </CancelButton>
-                            <Button
-                                onClick={handleAttachFileSubmit}
-                                variant="contained"
-                                sx={{
-                                    backgroundColor: '#0071E3',
-                                    color: '#FFFFFF',
-                                    borderRadius: '12px',
-                                    textTransform: 'none',
-                                    '&:hover': { backgroundColor: '#005BB5' }
-                                }}
-                            >
-                                Прикрепить
-                            </Button>
-                        </DialogActions>
                     </Dialog>
 
                     <Dialog
@@ -1770,18 +1819,18 @@ function Dashboard() {
                         sx={{
                             '& .MuiDialog-paper': {
                                 backgroundColor: '#FFFFFF',
-                                boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
-                                borderRadius: '12px',
+                                boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+                                borderRadius: '16px',
                                 fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif"
                             }
                         }}
                     >
-                        <DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5E5' }}>
+                        <DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
                             Изменить пароль
                         </DialogTitle>
                         <DialogContent sx={{ padding: '24px' }}>
                             <form onSubmit={handleChangePasswordSubmit}>
-                                <TextField
+                                <AppleTextField
                                     fullWidth
                                     label="Текущий пароль"
                                     type="password"
@@ -1789,18 +1838,9 @@ function Dashboard() {
                                     onChange={(e) => setCurrentPassword(e.target.value)}
                                     margin="normal"
                                     variant="outlined"
-                                    sx={{
-                                        '& .MuiOutlinedInput-root': {
-                                            '& fieldset': { borderColor: '#D1D1D6' },
-                                            '&:hover fieldset': { borderColor: '#0071E3' },
-                                            '&.Mui-focused fieldset': { borderColor: '#0071E3' }
-                                        },
-                                        '& label': { color: '#6E6E73' },
-                                        '& input': { color: '#1D1D1F' }
-                                    }}
                                     autoComplete="current-password"
                                 />
-                                <TextField
+                                <AppleTextField
                                     fullWidth
                                     label="Новый пароль"
                                     type="password"
@@ -1808,15 +1848,6 @@ function Dashboard() {
                                     onChange={(e) => setNewPassword(e.target.value)}
                                     margin="normal"
                                     variant="outlined"
-                                    sx={{
-                                        '& .MuiOutlinedInput-root': {
-                                            '& fieldset': { borderColor: '#D1D1D6' },
-                                            '&:hover fieldset': { borderColor: '#0071E3' },
-                                            '&.Mui-focused fieldset': { borderColor: '#0071E3' }
-                                        },
-                                        '& label': { color: '#6E6E73' },
-                                        '& input': { color: '#1D1D1F' }
-                                    }}
                                     autoComplete="new-password"
                                 />
                                 <Collapse in={!!passwordError}>
@@ -1827,7 +1858,8 @@ function Dashboard() {
                                                 mb: 2,
                                                 borderRadius: '12px',
                                                 backgroundColor: '#FFF1F0',
-                                                color: '#1D1D1F'
+                                                color: '#1D1D1F',
+                                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
                                             }}
                                             onClose={() => setPasswordError('')}
                                         >
@@ -1843,7 +1875,8 @@ function Dashboard() {
                                                 mb: 2,
                                                 borderRadius: '12px',
                                                 backgroundColor: '#E7F8E7',
-                                                color: '#1D1D1F'
+                                                color: '#1D1D1F',
+                                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
                                             }}
                                             onClose={() => setPasswordSuccess('')}
                                         >
@@ -1851,29 +1884,21 @@ function Dashboard() {
                                         </Alert>
                                     )}
                                 </Collapse>
-                                <DialogActions sx={{ padding: '16px 0', borderTop: '1px solid #E5E5E5' }}>
+                                <DialogActions sx={{ padding: '16px 0', borderTop: '1px solid #E5E5EA' }}>
                                     <CancelButton onClick={handleChangePasswordCancel}>
                                         Отмена
                                     </CancelButton>
-                                    <Button
+                                    <AppleButton
                                         type="submit"
-                                        variant="contained"
-                                        sx={{
-                                            backgroundColor: '#0071E3',
-                                            color: '#FFFFFF',
-                                            borderRadius: '12px',
-                                            textTransform: 'none',
-                                            '&:hover': { backgroundColor: '#005BB5' }
-                                        }}
                                     >
                                         Сохранить
-                                    </Button>
+                                    </AppleButton>
                                 </DialogActions>
                             </form>
                         </DialogContent>
                     </Dialog>
                 </CardContent>
-            </Card>
+            </AppleCard>
         </Container>
     );
 }

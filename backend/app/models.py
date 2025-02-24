@@ -46,6 +46,7 @@ class Publication(db.Model):
     file_url = db.Column(db.String(200))
     user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)  # Разрешаем NULL
     updated_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow(), nullable=False)
+    published_at = db.Column(db.DateTime, nullable=True)  # Добавляем поле для даты публикации
 
     user = db.relationship('User', back_populates='publications', lazy=True)
 
