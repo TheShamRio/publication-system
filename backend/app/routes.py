@@ -169,14 +169,17 @@ def get_public_publications():
     per_page = request.args.get('per_page', 10, type=int)  # Публикаций на страницу, по умолчанию 10
 
     # Базовый запрос для опубликованных работ
-    query = Publication.query.filter_by(status='published').order_by(Publication.published_at.desc(), Publication.updated_at.desc())
+    # Используем coalesce для обработки NULL в published_at, чтобы приоритет был у updated_at
+    query = Publication.query.filter_by(status='published').order_by(
+        db.func.coalesce(Publication.published_at, Publication.updated_at).desc()
+    )
 
     # Пагинация
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     publications = pagination.items
 
     # Отладочный лог для проверки порядка
-    logger.debug(f"Returning {len(publications)} published publications, sorted by published_at: {[pub.published_at.isoformat() if pub.published_at else 'NULL' for pub in publications]}")
+    logger.debug(f"Returning {len(publications)} published publications, sorted by published_at/updated_at: {[pub.published_at.isoformat() if pub.published_at else pub.updated_at.isoformat() for pub in publications]}")
     logger.debug(f"Total published publications: {pagination.total}, pages: {pagination.pages}, current page: {pagination.page}")
 
     # Форматирование ответа с данными пользователя
@@ -311,7 +314,13 @@ def manage_publication(pub_id):
         publication.authors = data.get('authors', publication.authors)
         publication.year = data.get('year', publication.year)
         publication.type = data.get('type', publication.type)
-        publication.status = data.get('status', publication.status)
+        new_status = data.get('status', publication.status)
+
+        # Проверка: нельзя установить статус "published", если файл не прикреплён
+        if new_status == 'published' and not publication.file_url:
+            return jsonify({'error': 'Нельзя опубликовать работу без прикреплённого файла.'}), 400
+
+        publication.status = new_status
 
         # Обновляем published_at только если статус меняется на 'published'
         if publication.status == 'published' and old_status != 'published':
@@ -358,53 +367,53 @@ def upload_file():
         return jsonify({'error': 'Файл не предоставлен'}), 400
 
     file = request.files['file']
-    if file and allowed_file(file.filename):
-        title = request.form.get('title')
-        authors = request.form.get('authors')
-        year = request.form.get('year')
-        type = request.form.get('type', 'article')
-        
-        if not title or not authors or not year:
-            return jsonify({'error': 'Название, авторы и год обязательны'}), 400
+    if not file or not allowed_file(file.filename):
+        return jsonify({'error': 'Недопустимый файл'}), 400
 
-        try:
-            year = int(year)
-            if year < 1900 or year > datetime.now().year:
-                return jsonify({'error': 'Недопустимый год'}), 400
-        except ValueError:
-            return jsonify({'error': 'Год должен быть числом'}), 400
+    title = request.form.get('title')
+    authors = request.form.get('authors')
+    year = request.form.get('year')
+    type = request.form.get('type', 'article')
+    
+    if not title or not authors or not year:
+        return jsonify({'error': 'Название, авторы и год обязательны'}), 400
 
-        filename = secure_filename(file.filename)
-        file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-        file.save(file_path)
+    try:
+        year = int(year)
+        if year < 1900 or year > datetime.now().year:
+            return jsonify({'error': 'Недопустимый год'}), 400
+    except ValueError:
+        return jsonify({'error': 'Год должен быть числом'}), 400
 
-        publication = Publication(
-            title=title,
-            authors=authors,
-            year=year,
-            type=type,
-            status='draft',
-            file_url=file_path,
-            user_id=current_user.id
-        )
-        db.session.add(publication)
-        db.session.commit()
+    filename = secure_filename(file.filename)
+    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+    file.save(file_path)
 
-        return jsonify({
-            'message': 'Публикация успешно загружена',
-            'publication': {
-                'id': publication.id,
-                'title': publication.title,
-                'authors': publication.authors,
-                'year': publication.year,
-                'type': publication.type,
-                'status': publication.status,
-                'file_url': publication.file_url,
-                'updated_at': publication.updated_at.isoformat() if publication.updated_at else None
-            }
-        }), 200
-    return jsonify({'error': 'Недопустимый файл'}), 400
+    publication = Publication(
+        title=title,
+        authors=authors,
+        year=year,
+        type=type,
+        status='draft',  # По умолчанию статус "draft", даже если файл есть
+        file_url=file_path,
+        user_id=current_user.id
+    )
+    db.session.add(publication)
+    db.session.commit()
 
+    return jsonify({
+        'message': 'Публикация успешно загружена',
+        'publication': {
+            'id': publication.id,
+            'title': publication.title,
+            'authors': publication.authors,
+            'year': publication.year,
+            'type': publication.type,
+            'status': publication.status,
+            'file_url': publication.file_url,
+            'updated_at': publication.updated_at.isoformat() if publication.updated_at else None
+        }
+    }), 200
 @bp.route('/publications/upload-bibtex', methods=['POST'])
 @login_required
 def upload_bibtex():
@@ -434,7 +443,7 @@ def upload_bibtex():
                     authors=authors,
                     year=year,
                     type=type,
-                    status='draft',
+                    status='draft',  # По умолчанию статус "draft", так как файла нет
                     user_id=current_user.id
                 )
                 db.session.add(publication)

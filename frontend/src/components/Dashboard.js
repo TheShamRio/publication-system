@@ -481,12 +481,12 @@ function Dashboard() {
 
 	const handleEditClick = (publication) => {
 		console.log('Editing publication:', publication.id);
-		setEditPublication(publication);
-		setEditTitle(publication.title);
-		setEditAuthors(publication.authors);
-		setEditYear(publication.year);
-		setEditType(validPublicationTypes.includes(publication.type) ? publication.type : 'article'); // Исправляем тип
-		setEditStatus(publication.status);
+		setEditPublication(publication || {}); // Устанавливаем пустой объект, если publication null
+		setEditTitle(publication?.title || '');
+		setEditAuthors(publication?.authors || '');
+		setEditYear(publication?.year || '');
+		setEditType(validPublicationTypes.includes(publication?.type) ? publication.type : 'article'); // Исправляем тип
+		setEditStatus(publication?.status || 'draft');
 		setEditFile(null);
 		setOpenEditDialog(true);
 	};
@@ -519,6 +519,13 @@ function Dashboard() {
 			headers['X-CSRFToken'] = csrfToken; // Добавляем CSRF-токен
 		}
 
+		// Проверка: нельзя установить статус "published", если файл не прикреплён
+		if (editStatus === 'published' && !editPublication.file_url && !editFile) {
+			setError('Нельзя опубликовать работу без прикреплённого файла.');
+			setOpenError(true);
+			return;
+		}
+
 		try {
 			console.log('Updating publication with:', {
 				title: editTitle,
@@ -529,7 +536,7 @@ function Dashboard() {
 				file: editFile ? editFile.name : 'No new file'
 			});
 			const response = await axios.put(
-				`http://localhost:5000/api/publications/${editPublication.id}`,
+				`http://localhost:5000/api/publications/${editPublication.id || ''}`,
 				data,
 				{ withCredentials: true, headers }
 			);
@@ -1327,7 +1334,6 @@ function Dashboard() {
 										},
 									}}
 								/>
-								
 							</Box>
 						</>
 					)}
@@ -1588,10 +1594,13 @@ function Dashboard() {
 									onChange={(e) => setEditStatus(e.target.value)}
 									margin="normal"
 									variant="outlined"
+									disabled={!editPublication?.file_url && !editFile} // Проверяем editPublication?.file_url
 								>
 									<MenuItem value="draft">Черновик</MenuItem>
 									<MenuItem value="review">На проверке</MenuItem>
-									<MenuItem value="published">Опубликовано</MenuItem>
+									<MenuItem value="published" disabled={!editPublication?.file_url && !editFile}>
+										Опубликовано
+									</MenuItem>
 								</AppleTextField>
 								<Box sx={{ mt: 2 }}>
 									<Typography variant="body2" sx={{ color: '#6E6E73', mb: 1 }}>
@@ -1890,47 +1899,47 @@ function Dashboard() {
 												backgroundColor: '#FFF1F0',
 												color: '#1D1D1F',
 												boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-			}}
-			onClose={() => setPasswordError('')}
-		>
-			{passwordError}
-		</Alert>
-	)}
-</Collapse>
-<Collapse in={!!passwordSuccess}>
-	{passwordSuccess && (
-		<Alert
-			severity="success"
-			sx={{
-				mb: 2,
-				borderRadius: '12px',
-				backgroundColor: '#E7F8E7',
-				color: '#1D1D1F',
-				boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-			}}
-			onClose={() => setPasswordSuccess('')}
-		>
-			{passwordSuccess}
-		</Alert>
-	)}
-</Collapse>
-<DialogActions sx={{ padding: '16px 0', borderTop: '1px solid #E5E5EA' }}>
-	<CancelButton onClick={handleChangePasswordCancel}>
-		Отмена
-	</CancelButton>
-	<AppleButton
-		type="submit"
-	>
-		Сохранить
-	</AppleButton>
-</DialogActions>
-</form>
-</DialogContent>
-</Dialog>
-</CardContent>
-</AppleCard>
-</Container>
-);
+											}}
+											onClose={() => setPasswordError('')}
+										>
+											{passwordError}
+										</Alert>
+									)}
+								</Collapse>
+								<Collapse in={!!passwordSuccess}>
+									{passwordSuccess && (
+										<Alert
+											severity="success"
+											sx={{
+												mb: 2,
+												borderRadius: '12px',
+												backgroundColor: '#E7F8E7',
+												color: '#1D1D1F',
+												boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+											}}
+											onClose={() => setPasswordSuccess('')}
+										>
+											{passwordSuccess}
+										</Alert>
+									)}
+								</Collapse>
+								<DialogActions sx={{ padding: '16px 0', borderTop: '1px solid #E5E5EA' }}>
+									<CancelButton onClick={handleChangePasswordCancel}>
+										Отмена
+									</CancelButton>
+									<AppleButton
+										type="submit"
+									>
+										Сохранить
+									</AppleButton>
+								</DialogActions>
+							</form>
+						</DialogContent>
+					</Dialog>
+				</CardContent>
+			</AppleCard>
+		</Container>
+	);
 }
 
 export default Dashboard;
