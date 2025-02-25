@@ -56,6 +56,40 @@ function Home() {
     const publicationsPerPage = 10;
     const navigate = useNavigate();
 
+    // Функция для форматирования времени публикации
+    const formatTimeAgo = (dateStr) => {
+        if (!dateStr) return 'Неизвестное время';
+
+        const date = new Date(dateStr);
+        const now = new Date();
+        const diffMs = now - date;
+        const diffMinutes = Math.floor(diffMs / 60000); // Минуты
+        const diffHours = Math.floor(diffMs / 3600000); // Часы
+        const diffDays = Math.floor(diffMs / 86400000); // Дни
+
+        // Форматирование минут
+        if (diffMinutes < 60) {
+            if (diffMinutes === 1) return '1 минуту назад';
+            if (diffMinutes >= 2 && diffMinutes <= 4) return `${diffMinutes} минуты назад`;
+            if (diffMinutes >= 5 && diffMinutes <= 20) return `${diffMinutes} минут назад`;
+            if (diffMinutes % 10 === 1 && diffMinutes !== 11) return `${diffMinutes} минуту назад`;
+            if (diffMinutes % 10 >= 2 && diffMinutes % 10 <= 4 && (diffMinutes < 10 || diffMinutes > 20))
+                return `${diffMinutes} минуты назад`;
+            return `${diffMinutes} минут назад`;
+        }
+
+        // Форматирование часов
+        if (diffHours < 24) {
+            if (diffHours === 1) return '1 час назад';
+            if (diffHours >= 2 && diffHours <= 4) return `${diffHours} часа назад`;
+            return `${diffHours} часов назад`;
+        }
+
+        // Форматирование дней
+        if (diffDays === 1) return '1 день назад';
+        return `${diffDays} дней назад`;
+    };
+
     useEffect(() => {
         const fetchPublishedPublications = async (page = 1) => {
             try {
@@ -238,6 +272,13 @@ function Home() {
                                                     sx={{ color: '#757575', display: 'block', mt: 0.5 }}
                                                 >
                                                     Опубликовал: {pub.user?.full_name || 'Не указан'}
+                                                </Typography>
+                                                <Typography
+                                                    variant="body2"
+                                                    component="span"
+                                                    sx={{ color: '#757575', display: 'block', mt: 0.5 }}
+                                                >
+                                                    Опубликовано: {formatTimeAgo(pub.published_at || pub.updated_at)}
                                                 </Typography>
                                             </React.Fragment>
                                         }

@@ -16,7 +16,7 @@ class User(db.Model, UserMixin):
     
     @property
     def full_name(self):
-        return f"{self.first_name or ''} {self.middle_name or ''} {self.last_name or ''}".strip()
+        return f"{self.last_name or ''} {self.first_name or ''} {self.middle_name or ''}".strip()
     
     def set_password(self, password):
         self.password_hash = generate_password_hash(password)

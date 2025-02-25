@@ -534,7 +534,7 @@ def export_bibtex():
 @login_required
 def get_analytics_yearly():
     logger.debug(f"Получен GET запрос для /analytics/yearly")
-    analytics = get_publications_by_year(current_user.id)
+    analytics = get_publications_by_year(current_user.id)  # Используем ID текущего пользователя
     return jsonify([{
         'year': year,
         'count': count
