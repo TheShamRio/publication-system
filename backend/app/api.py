@@ -20,27 +20,68 @@ bp = Blueprint('admin_api', __name__)
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
-@bp.route('/admin/users', methods=['GET'])
+@bp.before_request
+def log_request():
+    logger.debug(f"Received request for {request.path} with method {request.method}")
+
+@bp.route('/admin/users', methods=['GET', 'OPTIONS'])
 @login_required
 @admin_required
 def get_all_users():
-    logger.debug(f"Получен GET запрос для /admin/users")
-    users = User.query.all()
-    return jsonify([{
-        'id': user.id,
-        'username': user.username,
-        'role': user.role,
-        'last_name': user.last_name,
-        'first_name': user.first_name,
-        'middle_name': user.middle_name,
-        'created_at': user.created_at.isoformat() if user.created_at else None
-    } for user in users]), 200
+    if request.method == 'OPTIONS':
+        logger.debug("Handling OPTIONS for /admin_api/admin/users")
+        return jsonify({}), 200
 
-@bp.route('/admin/users/<int:user_id>', methods=['PUT', 'DELETE'])
+    logger.debug(f"Получен GET запрос для /admin_api/admin/users")
+    logger.debug(f"Current user: {current_user}, Role: {current_user.role if current_user.is_authenticated else 'Not authenticated'}")
+    
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    search = request.args.get('search', '').lower()
+    
+    # Базовый запрос
+    query = User.query
+    
+    # Фильтрация по поиску
+    if search:
+        query = query.filter(
+            db.or_(
+                User.username.ilike(f'%{search}%'),
+                User.last_name.ilike(f'%{search}%'),
+                User.first_name.ilike(f'%{search}%'),
+                User.middle_name.ilike(f'%{search}%')
+            )
+        )
+    
+    # Сортировка по updated_at или created_at от новых к старым
+    pagination = query.order_by(db.func.coalesce(User.updated_at, User.created_at).desc()).paginate(page=page, per_page=per_page, error_out=False)
+    users = pagination.items
+    
+    return jsonify({
+        'users': [{
+            'id': user.id,
+            'username': user.username,
+            'role': user.role,
+            'last_name': user.last_name,
+            'first_name': user.first_name,
+            'middle_name': user.middle_name,
+            'created_at': user.created_at.isoformat() if user.created_at else None,
+            'updated_at': user.updated_at.isoformat() if hasattr(user, 'updated_at') and user.updated_at else None
+        } for user in users],
+        'total': pagination.total,
+        'pages': pagination.pages,
+        'current_page': pagination.page
+    }), 200
+
+@bp.route('/admin/users/<int:user_id>', methods=['PUT', 'DELETE', 'OPTIONS'])
 @login_required
 @admin_required
 def user_management(user_id):
-    logger.debug(f"Получен {request.method} запрос для /admin/users/{user_id}")
+    if request.method == 'OPTIONS':
+        logger.debug(f"Handling OPTIONS for /admin_api/admin/users/{user_id}")
+        return jsonify({}), 200  # CORS уже обрабатывается в __init__.py
+
+    logger.debug(f"Получен {request.method} запрос для /admin_api/admin/users/{user_id}")
     user = User.query.get_or_404(user_id)
     
     if request.method == 'PUT':
@@ -90,57 +131,94 @@ def user_management(user_id):
             logger.error(f"Ошибка удаления пользователя {user_id}: {str(e)}")
             return jsonify({"error": "Ошибка при удалении пользователя. Попробуйте позже."}), 500
 
-@bp.route('/admin/publications', methods=['GET'])
+@bp.route('/admin/publications', methods=['GET', 'OPTIONS'])
 @login_required
 @admin_required
 def get_all_publications():
-    logger.debug(f"Получен GET запрос для /admin/publications")
-    publications = Publication.query.all()
-    return jsonify([{
-        'id': pub.id,
-        'title': pub.title,
-        'authors': pub.authors,
-        'year': pub.year,
-        'type': pub.type,
-        'status': pub.status,
-        'file_url': pub.file_url,
-        'user_id': pub.user_id,
-        'updated_at': pub.updated_at.isoformat() if pub.updated_at else None
-    } for pub in publications]), 200
+    if request.method == 'OPTIONS':
+        logger.debug("Handling OPTIONS for /admin_api/admin/publications")
+        return jsonify({}), 200
 
-@bp.route('/admin/publications/<int:pub_id>', methods=['PUT', 'DELETE'])
+    logger.debug(f"Получен GET запрос для /admin_api/admin/publications")
+    
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    search = request.args.get('search', '').lower()
+    pub_type = request.args.get('type', 'all')
+    status = request.args.get('status', 'all')
+    
+    # Базовый запрос
+    query = Publication.query
+    
+    # Фильтрация по поиску
+    if search:
+        query = query.filter(
+            db.or_(
+                Publication.title.ilike(f'%{search}%'),
+                Publication.authors.ilike(f'%{search}%'),
+                db.cast(Publication.year, db.String).ilike(f'%{search}%')
+            )
+        )
+    
+    # Фильтрация по типу
+    if pub_type != 'all':
+        query = query.filter(Publication.type == pub_type)
+    
+    # Фильтрация по статусу
+    if status != 'all':
+        query = query.filter(Publication.status == status)
+    
+    # Сортировка по updated_at или published_at от новых к старым
+    pagination = query.order_by(db.func.coalesce(Publication.updated_at, Publication.published_at).desc()).paginate(page=page, per_page=per_page, error_out=False)
+    publications = pagination.items
+    
+    return jsonify({
+        'publications': [{
+            'id': pub.id,
+            'title': pub.title,
+            'authors': pub.authors,
+            'year': pub.year,
+            'type': pub.type,
+            'status': pub.status,
+            'file_url': pub.file_url,
+            'user_id': pub.user_id,
+            'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
+            'published_at': pub.published_at.isoformat() if pub.published_at else None
+        } for pub in publications],
+        'total': pagination.total,
+        'pages': pagination.pages,
+        'current_page': pagination.page
+    }), 200
+@bp.route('/admin/publications/<int:pub_id>', methods=['PUT', 'DELETE', 'OPTIONS'])
 @login_required
 @admin_required
 def publication_management(pub_id):
-    logger.debug(f"Получен {request.method} запрос для /admin/publications/{pub_id}")
+    if request.method == 'OPTIONS':
+        logger.debug(f"Handling OPTIONS for /admin_api/admin/publications/{pub_id}")
+        return jsonify({}), 200  # CORS уже обрабатывается в __init__.py
+
+    logger.debug(f"Получен {request.method} запрос для /admin_api/admin/publications/{pub_id}")
     publication = Publication.query.get_or_404(pub_id)
     
     if request.method == 'PUT':
-        # Проверяем, отправлен ли запрос с JSON или FormData
         if request.content_type == 'application/json':
-            # Обработка JSON
             data = request.get_json()
         elif 'file' in request.files or request.content_type.startswith('multipart/form-data'):
-            # Обработка FormData (для файлов)
             data = request.form
         else:
             return jsonify({"error": "Неподдерживаемый формат данных. Используйте application/json или multipart/form-data."}), 415
 
-        # Проверяем, есть ли файл в запросе
         if 'file' in request.files:
             file = request.files['file']
             if file and allowed_file(file.filename):
-                # Удаляем старый файл, если он существует
                 if publication.file_url and os.path.exists(publication.file_url):
                     os.remove(publication.file_url)
-                # Сохраняем новый файл
                 filename = secure_filename(file.filename)
                 file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
                 file.save(file_path)
                 publication.file_url = file_path
                 logger.debug(f"Файл обновлён для публикации {pub_id}: {file_path}")
         
-        # Обновляем остальные поля из данных (даже если файл не выбран)
         publication.title = data.get('title', publication.title)
         publication.authors = data.get('authors', publication.authors)
         publication.year = data.get('year', publication.year)

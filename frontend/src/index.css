@@ -11,3 +11,14 @@ code {
   font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
     monospace;
 }
+
+:root {
+  --scale-factor: 0.75; /* Масштаб 75% */
+  --base-font-size: 16px; /* Базовый размер шрифта */
+}
+
+body {
+  font-size: calc(var(--base-font-size) * var(--scale-factor));
+  margin: 0;
+  padding: 0;
+}

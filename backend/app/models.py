@@ -13,7 +13,7 @@ class User(db.Model, UserMixin):
     first_name = db.Column(db.String(100), nullable=True)
     middle_name = db.Column(db.String(100), nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), nullable=False)
-    
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # Добавлено
     @property
     def full_name(self):
         return f"{self.last_name or ''} {self.first_name or ''} {self.middle_name or ''}".strip()
