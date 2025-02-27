@@ -3,6 +3,19 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from .extensions import db
 from flask_login import UserMixin
 
+
+class Comment(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    content = db.Column(db.Text, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    publication_id = db.Column(db.Integer, db.ForeignKey('publication.id'), nullable=False)
+    parent_id = db.Column(db.Integer, db.ForeignKey('comment.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), nullable=False)
+
+    user = db.relationship('User', backref='comments', lazy=True)
+    publication = db.relationship('Publication', backref='comments', lazy=True)
+    parent = db.relationship('Comment', remote_side=[id], backref='replies', lazy=True)
+
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)
     username = db.Column(db.String(50), unique=True, nullable=False)

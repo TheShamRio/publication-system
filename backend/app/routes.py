@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request, make_response, current_app
+from flask import Blueprint, jsonify, request, make_response, current_app, send_from_directory
 from .extensions import db, login_manager, csrf
 from .models import User, Publication
 from .utils import allowed_file
@@ -6,18 +6,120 @@ from flask_login import login_user, current_user, logout_user, login_required
 from werkzeug.utils import secure_filename
 from flask_wtf.csrf import generate_csrf
 import os
+from .models import User, Publication, Comment  # Добавляем Comment
 import logging
 from datetime import datetime, UTC
 from werkzeug.security import generate_password_hash, check_password_hash
 from .analytics import get_publications_by_year
 import bibtexparser
+from docx import Document
+from reportlab.platypus import SimpleDocTemplate, Paragraph
+from reportlab.lib.pagesizes import letter
 from bibtexparser.bibdatabase import BibDatabase
 from bibtexparser.bwriter import BibTexWriter
-
+from flask import send_file
 bp = Blueprint('api', __name__)
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+
+@bp.route('/uploads/<path:filename>')
+def download_file(filename):
+    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+    logger.debug(f"Requested filename: '{filename}' (raw), full path: {file_path}")
+    logger.debug(f"Does filename end with '.docx'? {filename.endswith('.docx')}")
+    
+    if filename.endswith('.docx'):
+        pdf_path = file_path.replace('.docx', '.pdf')
+        logger.debug(f"Converting .docx to PDF: {pdf_path}")
+        
+        if not os.path.exists(pdf_path):
+            try:
+                logger.debug(f"Opening .docx file: {file_path}")
+                doc = Document(file_path)
+                pdf = SimpleDocTemplate(pdf_path, pagesize=letter)
+                story = [Paragraph(p.text) for p in doc.paragraphs if p.text.strip()]
+                logger.debug(f"Building PDF with {len(story)} paragraphs")
+                pdf.build(story)
+                logger.debug(f"PDF created at: {pdf_path}")
+            except Exception as e:
+                logger.error(f"Error converting .docx to PDF: {str(e)}")
+                # Возвращаем ошибку клиенту вместо отправки .docx
+                return jsonify({'error': f'Ошибка конверсии .docx в PDF: {str(e)}'}), 500
+        
+        response = send_file(pdf_path, mimetype='application/pdf', as_attachment=False)
+    else:
+        logger.debug(f"Serving file directly: {file_path}")
+        if not os.path.exists(file_path):
+            logger.error(f"File not found: {file_path}")
+            return jsonify({'error': 'Файл не найден'}), 404
+        response = send_file(file_path, mimetype='application/pdf', as_attachment=False)
+    
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+
+@bp.route('/publications/<int:pub_id>', methods=['GET'])
+def get_publication(pub_id):
+    publication = Publication.query.get_or_404(pub_id)
+    comments = Comment.query.filter_by(publication_id=pub_id, parent_id=None).order_by(Comment.created_at.asc()).all()
+    
+    def build_comment_tree(comment):
+        return {
+            'id': comment.id,
+            'content': comment.content,
+            'user': {'username': comment.user.username, 'full_name': comment.user.full_name},
+            'created_at': comment.created_at.isoformat(),
+            'replies': [build_comment_tree(reply) for reply in comment.replies]
+        }
+
+    return jsonify({
+        'id': publication.id,
+        'title': publication.title,
+        'authors': publication.authors,
+        'year': publication.year,
+        'type': publication.type,
+        'status': publication.status,
+        'file_url': f"/uploads/{os.path.basename(publication.file_url)}",  # Используем basename
+        'user': {'full_name': publication.user.full_name if publication.user else 'Не указан'},
+        'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
+        'published_at': publication.published_at.isoformat() if publication.published_at else None,
+        'comments': [build_comment_tree(comment) for comment in comments]
+    }), 200
+
+@bp.route('/publications/<int:pub_id>/comments', methods=['POST'])
+@login_required
+def add_comment(pub_id):
+    publication = Publication.query.get_or_404(pub_id)
+    data = request.get_json()
+    content = data.get('content')
+    parent_id = data.get('parent_id')
+
+    if not content:
+        return jsonify({'error': 'Комментарий не может быть пустым'}), 400
+
+    comment = Comment(
+        content=content,
+        user_id=current_user.id,
+        publication_id=pub_id,
+        parent_id=parent_id if parent_id else None
+    )
+    db.session.add(comment)
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Комментарий добавлен',
+        'comment': {
+            'id': comment.id,
+            'content': comment.content,
+            'user': {'username': current_user.username, 'full_name': current_user.full_name},
+            'created_at': comment.created_at.isoformat(),
+            'replies': []
+        }
+    }), 201
 
 @bp.route('/register', methods=['POST', 'OPTIONS'])  # Добавляем обработку OPTIONS
 def register():

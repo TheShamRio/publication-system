@@ -85,7 +85,7 @@ function Layout() {
                 navigate('/login', { replace: true });
             }
         }
-    }, [navigate, updateAuthState, isAuthenticated, csrfToken, setCsrfToken, publicRoutes]); // Добавляем publicRoutes в зависимости, если она нужна
+    }, [navigate, updateAuthState, isAuthenticated, csrfToken, setCsrfToken, publicRoutes, location.pathname]); // Добавляем publicRoutes в зависимости, если она нужна
 
     useEffect(() => {
         let mounted = true;

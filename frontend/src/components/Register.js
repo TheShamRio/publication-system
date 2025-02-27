@@ -41,7 +41,7 @@ function Register() {
 		return () => {
 			mounted = false;
 		};
-	}, []); // Пустой массив зависимостей — запрос выполняется только один раз при монтировании
+	}, [setCsrfToken]); // Пустой массив зависимостей — запрос выполняется только один раз при монтировании
 
 	const handleSubmit = async (e) => {
 		e.preventDefault();
