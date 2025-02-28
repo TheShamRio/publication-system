@@ -1,11 +1,31 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
-import { Container, Typography, Card, CardContent, Box, TextField, List, ListItem, ListItemText, Button } from '@mui/material';
+import {
+	Container,
+	Typography,
+	Card,
+	CardContent,
+	Box,
+	TextField,
+	List,
+	ListItem,
+	ListItemText,
+	Button,
+	Pagination,
+} from '@mui/material';
 import { styled } from '@mui/system';
+import { Document, Page, pdfjs } from 'react-pdf';
+import 'react-pdf/dist/Page/AnnotationLayer.css';
+import 'react-pdf/dist/Page/TextLayer.css';
 import axios from 'axios';
 import ReplyIcon from '@mui/icons-material/Reply';
 import { useAuth } from '../contexts/AuthContext';
+import DocxViewer from './DocxViewer'; // Импорт компонента для DOCX
 
+// Указываем путь к worker для pdfjs
+pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+
+// Стилизация компонентов
 const AppleButton = styled(Button)({
 	borderRadius: '12px',
 	textTransform: 'none',
@@ -36,28 +56,54 @@ const AppleCard = styled(Card)({
 	backgroundColor: '#FFFFFF',
 });
 
+const DocumentViewer = styled(Box)({
+	mb: 4,
+	border: '1px solid #E5E5EA',
+	borderRadius: '12px',
+	overflow: 'hidden',
+	backgroundColor: '#FFFFFF',
+	boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+	width: '100%',
+	height: '850px', // Фиксированная высота для страницы
+	display: 'flex',
+	justifyContent: 'center',
+	alignItems: 'flex-start',
+	'&::-webkit-scrollbar': { display: 'none' },
+	'-ms-overflow-style': 'none',
+	'scrollbar-width': 'none',
+});
+
 function Publication() {
 	const { id } = useParams();
 	const [publication, setPublication] = useState(null);
 	const [error, setError] = useState('');
 	const [comment, setComment] = useState('');
 	const [replyTo, setReplyTo] = useState(null);
+	const [numPages, setNumPages] = useState(null);
+	const [pageNumber, setPageNumber] = useState(1);
 	const { isAuthenticated, csrfToken } = useAuth();
 
-	useEffect(() => {
-		const fetchPublication = async () => {
-			try {
-				const response = await axios.get(`http://localhost:5000/api/publications/${id}`, { withCredentials: true });
-				console.log('Данные публикации:', response.data);
-				setPublication(response.data);
-			} catch (err) {
-				console.error('Ошибка загрузки публикации:', err);
-				setError('Не удалось загрузить публикацию. Попробуйте позже.');
-			}
-		};
-		fetchPublication();
+	// Функция загрузки публикации
+	const fetchPublication = useCallback(async () => {
+		try {
+			const response = await axios.get(`http://localhost:5000/api/publications/${id}`, { withCredentials: true });
+			setPublication(response.data);
+		} catch (err) {
+			console.error('Ошибка загрузки публикации:', err);
+			setError('Не удалось загрузить публикацию. Попробуйте позже.');
+		}
 	}, [id]);
 
+	useEffect(() => {
+		fetchPublication();
+	}, [fetchPublication]);
+
+	// Успешная загрузка PDF
+	const onDocumentLoadSuccess = ({ numPages }) => {
+		setNumPages(numPages);
+	};
+
+	// Отправка комментария
 	const handleCommentSubmit = async (e) => {
 		e.preventDefault();
 		if (!comment.trim()) return;
@@ -66,10 +112,7 @@ function Publication() {
 			const response = await axios.post(
 				`http://localhost:5000/api/publications/${id}/comments`,
 				{ content: comment, parent_id: replyTo },
-				{
-					withCredentials: true,
-					headers: { 'X-CSRFToken': csrfToken },
-				}
+				{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
 			);
 			setPublication((prev) => ({
 				...prev,
@@ -85,6 +128,7 @@ function Publication() {
 		}
 	};
 
+	// Рендеринг комментариев
 	const renderComments = (comments, level = 0) => (
 		<List sx={{ pl: level * 4 }}>
 			{comments.map((comment) => (
@@ -118,16 +162,16 @@ function Publication() {
 		</List>
 	);
 
+	// Обработка ошибок и загрузки
 	if (error) return <Typography color="error">{error}</Typography>;
 	if (!publication) return <Typography sx={{ color: '#212121' }}>Загрузка...</Typography>;
 
-	// Определяем fileUrl здесь
-	const fileUrl = `http://localhost:5000${publication.file_url}`;
+	const fileUrl = publication.file_url ? `http://localhost:5000${publication.file_url}` : null;
 
 	return (
-		<Container maxWidth="lg" sx={{ mt: 4 }}>
+		<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
 			<AppleCard elevation={4}>
-				<CardContent>
+				<CardContent sx={{ pt: 4, pb: 4 }}>
 					<Typography variant="h4" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 600 }}>
 						{publication.title}
 					</Typography>
@@ -147,10 +191,53 @@ function Publication() {
 						Опубликовал: {publication.user.full_name}
 					</Typography>
 
-					{publication.file_url && (
-						<Box sx={{ mb: 4, height: '500px', border: '1px solid #E5E5EA', borderRadius: '12px', overflow: 'hidden' }}>
-							<embed src={fileUrl} type="application/pdf" width="100%" height="100%" />
-						</Box>
+					{fileUrl ? (
+						fileUrl.endsWith('.pdf') ? (
+							<>
+								<DocumentViewer>
+									<Document
+										file={fileUrl}
+										onLoadSuccess={onDocumentLoadSuccess}
+										onLoadError={(err) => setError(`Ошибка загрузки PDF: ${err.message}`)}
+									>
+										<Page
+											pageNumber={pageNumber}
+											scale={1}
+											renderTextLayer={false}
+											renderAnnotationLayer={false}
+										/>
+									</Document>
+								</DocumentViewer>
+								{numPages > 1 && (
+									<Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, mb: 4 }}>
+										<Pagination
+											count={numPages}
+											page={pageNumber}
+											onChange={(event, newPage) => setPageNumber(newPage)}
+											color="primary"
+											sx={{
+												'& .MuiPaginationItem-root': {
+													borderRadius: 20,
+													transition: 'all 0.3s ease',
+													'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
+													'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
+												},
+											}}
+										/>
+									</Box>
+								)}
+							</>
+						) : fileUrl.endsWith('.docx') ? (
+							<DocxViewer fileUrl={fileUrl} />
+						) : (
+							<Typography sx={{ color: '#6E6E73', mb: 2 }}>
+								Формат файла не поддерживается для отображения (только PDF и DOCX).
+							</Typography>
+						)
+					) : (
+						<Typography sx={{ color: '#6E6E73', mb: 2 }}>
+							Файл не прикреплен к этой публикации.
+						</Typography>
 					)}
 
 					<Typography variant="h5" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 600 }}>

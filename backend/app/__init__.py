@@ -31,7 +31,8 @@ def create_app():
     CORS(app, resources={
         r"/api/*": {"origins": ["http://localhost:3000", "http://localhost:3001"]},
         r"/admin_api/*": {"origins": ["http://localhost:3000", "http://localhost:3001"]},
-        r"/uploads/*": {"origins": ["http://localhost:3000", "http://localhost:3001"]}
+        r"/uploads/*": {"origins": ["http://localhost:3000", "http://localhost:3001"]},
+        r"/convert": {"origins": "http://localhost:3001"}
     }, supports_credentials=True, methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], 
     allow_headers=['Content-Type', 'Authorization', 'X-CSRFToken'])
 

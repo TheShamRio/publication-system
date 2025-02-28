@@ -18,49 +18,49 @@ from reportlab.lib.pagesizes import letter
 from bibtexparser.bibdatabase import BibDatabase
 from bibtexparser.bwriter import BibTexWriter
 from flask import send_file
+from spire.doc import Document, FileFormat
+import tempfile
 bp = Blueprint('api', __name__)
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
 
+@bp.route('/convert', methods=['POST'])
+def convert_docx_to_pdf():
+    try:
+        if 'file' not in request.files:
+            return {"error": "No file part in the request"}, 400
+        
+        file = request.files['file']
+        if file.filename == '':
+            return {"error": "No selected file"}, 400
+        
+        if file and file.filename.lower().endswith('.docx'):
+            with tempfile.TemporaryDirectory() as temp_dir:
+                input_path = os.path.join(temp_dir, file.filename)
+                output_path = os.path.join(temp_dir, "converted.pdf")
+                file.save(input_path)
+                document = Document()
+                document.LoadFromFile(input_path)
+                document.SaveToFile(output_path, FileFormat.PDF)
+                document.Close()
+                return send_file(output_path, as_attachment=True, download_name='converted.pdf', mimetype='application/pdf')
+        return {"error": "Invalid file format, only .docx is supported"}, 400
+    except Exception as e:
+        return {"error": f"Error converting file: {str(e)}"}, 500
 
 @bp.route('/uploads/<path:filename>')
 def download_file(filename):
     file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-    logger.debug(f"Requested filename: '{filename}' (raw), full path: {file_path}")
-    logger.debug(f"Does filename end with '.docx'? {filename.endswith('.docx')}")
-    
-    if filename.endswith('.docx'):
-        pdf_path = file_path.replace('.docx', '.pdf')
-        logger.debug(f"Converting .docx to PDF: {pdf_path}")
-        
-        if not os.path.exists(pdf_path):
-            try:
-                logger.debug(f"Opening .docx file: {file_path}")
-                doc = Document(file_path)
-                pdf = SimpleDocTemplate(pdf_path, pagesize=letter)
-                story = [Paragraph(p.text) for p in doc.paragraphs if p.text.strip()]
-                logger.debug(f"Building PDF with {len(story)} paragraphs")
-                pdf.build(story)
-                logger.debug(f"PDF created at: {pdf_path}")
-            except Exception as e:
-                logger.error(f"Error converting .docx to PDF: {str(e)}")
-                # Возвращаем ошибку клиенту вместо отправки .docx
-                return jsonify({'error': f'Ошибка конверсии .docx в PDF: {str(e)}'}), 500
-        
-        response = send_file(pdf_path, mimetype='application/pdf', as_attachment=False)
-    else:
-        logger.debug(f"Serving file directly: {file_path}")
-        if not os.path.exists(file_path):
-            logger.error(f"File not found: {file_path}")
-            return jsonify({'error': 'Файл не найден'}), 404
-        response = send_file(file_path, mimetype='application/pdf', as_attachment=False)
-    
+    logger.debug(f"Serving file from {file_path}")
+    if not os.path.exists(file_path):
+        logger.error(f"File not found: {file_path}")
+        return jsonify({'error': 'Файл не найден'}), 404
+    response = send_file(file_path, as_attachment=False)
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
     return response
-
 
 @bp.route('/publications/<int:pub_id>', methods=['GET'])
 def get_publication(pub_id):
