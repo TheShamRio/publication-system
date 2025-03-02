@@ -12,42 +12,15 @@ from datetime import datetime, UTC
 from werkzeug.security import generate_password_hash, check_password_hash
 from .analytics import get_publications_by_year
 import bibtexparser
-from docx import Document
 from reportlab.platypus import SimpleDocTemplate, Paragraph
 from reportlab.lib.pagesizes import letter
 from bibtexparser.bibdatabase import BibDatabase
 from bibtexparser.bwriter import BibTexWriter
 from flask import send_file
-from spire.doc import Document, FileFormat
-import tempfile
 bp = Blueprint('api', __name__)
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
-
-@bp.route('/convert', methods=['POST'])
-def convert_docx_to_pdf():
-    try:
-        if 'file' not in request.files:
-            return {"error": "No file part in the request"}, 400
-        
-        file = request.files['file']
-        if file.filename == '':
-            return {"error": "No selected file"}, 400
-        
-        if file and file.filename.lower().endswith('.docx'):
-            with tempfile.TemporaryDirectory() as temp_dir:
-                input_path = os.path.join(temp_dir, file.filename)
-                output_path = os.path.join(temp_dir, "converted.pdf")
-                file.save(input_path)
-                document = Document()
-                document.LoadFromFile(input_path)
-                document.SaveToFile(output_path, FileFormat.PDF)
-                document.Close()
-                return send_file(output_path, as_attachment=True, download_name='converted.pdf', mimetype='application/pdf')
-        return {"error": "Invalid file format, only .docx is supported"}, 400
-    except Exception as e:
-        return {"error": f"Error converting file: {str(e)}"}, 500
 
 @bp.route('/uploads/<path:filename>')
 def download_file(filename):
@@ -56,7 +29,7 @@ def download_file(filename):
     if not os.path.exists(file_path):
         logger.error(f"File not found: {file_path}")
         return jsonify({'error': 'Файл не найден'}), 404
-    response = send_file(file_path, as_attachment=False)
+    response = send_file(file_path, as_attachment=True)
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
@@ -120,53 +93,6 @@ def add_comment(pub_id):
             'replies': []
         }
     }), 201
-
-@bp.route('/register', methods=['POST', 'OPTIONS'])  # Добавляем обработку OPTIONS
-def register():
-    if request.method == 'OPTIONS':
-        # Обработка предварительного запроса CORS
-        response = make_response()
-        response.headers['Access-Control-Allow-Origin'] = 'http://localhost:3001'
-        response.headers['Access-Control-Allow-Methods'] = 'POST, OPTIONS'
-        response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-CSRFToken'
-        response.headers['Access-Control-Allow-Credentials'] = 'true'
-        response.headers['Access-Control-Max-Age'] = '86400'  # Кэширование предварительного запроса на 24 часа
-        logger.debug("Обработка предварительного запроса OPTIONS для /register")
-        return response, 200
-
-    logger.debug("Получен POST запрос для /api/register")
-    logger.debug(f"Принятые данные: {request.get_json()}")  # Логируем полученные данные
-    data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
-    last_name = data.get('last_name')
-    first_name = data.get('first_name')
-    middle_name = data.get('middle_name')
-
-    if not username or not password:
-        logger.error("Логин или пароль отсутствуют в запросе")
-        return jsonify({'error': 'Логин и пароль обязательны'}), 400
-
-    if User.query.filter_by(username=username).first():
-        logger.error(f"Пользователь с логином {username} уже существует")
-        return jsonify({'error': 'Пользователь с таким логином уже существует'}), 400
-
-    user = User(
-        username=username,
-        last_name=last_name,
-        first_name=first_name,
-        middle_name=middle_name
-    )
-    user.set_password(password)
-    try:
-        db.session.add(user)
-        db.session.commit()
-        logger.info(f"Пользователь {username} успешно зарегистрирован")
-        return jsonify({'message': 'Пользователь зарегистрирован', 'user': {'username': user.username, 'role': user.role}}), 201
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Ошибка регистрации пользователя {username}: {str(e)}")
-        return jsonify({'error': 'Ошибка при регистрации. Попробуйте позже.'}), 500
 
 @bp.route('/login', methods=['POST'])
 @csrf.exempt
@@ -516,6 +442,7 @@ def upload_file():
             'updated_at': publication.updated_at.isoformat() if publication.updated_at else None
         }
     }), 200
+
 @bp.route('/publications/upload-bibtex', methods=['POST'])
 @login_required
 def upload_bibtex():

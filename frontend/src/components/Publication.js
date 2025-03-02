@@ -19,8 +19,8 @@ import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import axios from 'axios';
 import ReplyIcon from '@mui/icons-material/Reply';
+import DownloadIcon from '@mui/icons-material/Download'; // Импортируем иконку для скачивания
 import { useAuth } from '../contexts/AuthContext';
-import DocxViewer from './DocxViewer'; // Импорт компонента для DOCX
 
 // Указываем путь к worker для pdfjs
 pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
@@ -101,6 +101,19 @@ function Publication() {
 	// Успешная загрузка PDF
 	const onDocumentLoadSuccess = ({ numPages }) => {
 		setNumPages(numPages);
+	};
+
+	// Функция для скачивания файла
+	const handleDownload = () => {
+		if (publication && publication.file_url) {
+			const fileUrl = `http://localhost:5000${publication.file_url}`;
+			const link = document.createElement('a');
+			link.href = fileUrl;
+			link.download = publication.file_url.split('/').pop(); // Имя файла для скачивания
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+		}
 	};
 
 	// Отправка комментария
@@ -191,6 +204,9 @@ function Publication() {
 						Опубликовал: {publication.user.full_name}
 					</Typography>
 
+					<Typography variant="h6" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 500 }}>
+						Предпросмотр:
+					</Typography>
 					{fileUrl ? (
 						fileUrl.endsWith('.pdf') ? (
 							<>
@@ -228,7 +244,9 @@ function Publication() {
 								)}
 							</>
 						) : fileUrl.endsWith('.docx') ? (
-							<DocxViewer fileUrl={fileUrl} />
+							<Typography sx={{ color: '#6E6E73', mb: 2 }}>
+								Файл загружен в формате DOCX, предпросмотр недоступен.
+							</Typography>
 						) : (
 							<Typography sx={{ color: '#6E6E73', mb: 2 }}>
 								Формат файла не поддерживается для отображения (только PDF и DOCX).
@@ -238,6 +256,16 @@ function Publication() {
 						<Typography sx={{ color: '#6E6E73', mb: 2 }}>
 							Файл не прикреплен к этой публикации.
 						</Typography>
+					)}
+					{fileUrl && (
+						<Box sx={{ mb: 2 }}>
+							<AppleButton
+								startIcon={<DownloadIcon />}
+								onClick={handleDownload}
+							>
+								Скачать
+							</AppleButton>
+						</Box>
 					)}
 
 					<Typography variant="h5" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 600 }}>

@@ -11,6 +11,7 @@ import {
 	TableCell,
 	TableBody,
 	Button,
+	Collapse,
 	Dialog,
 	DialogTitle,
 	DialogContent,
@@ -28,6 +29,10 @@ import { useAuth } from '../contexts/AuthContext';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DownloadIcon from '@mui/icons-material/Download';
+import RefreshIcon from '@mui/icons-material/Refresh'; // Иконка для генерации
+import Visibility from '@mui/icons-material/Visibility'; // Иконка для показа пароля
+import VisibilityOff from '@mui/icons-material/VisibilityOff'; // Иконка для скрытия пароля
+import ContentCopyIcon from '@mui/icons-material/ContentCopy'; // Иконка для копирования
 import axios from 'axios';
 import { styled } from '@mui/system';
 
@@ -105,281 +110,426 @@ function AdminDashboard() {
 	const [value, setValue] = useState(0);
 	const [users, setUsers] = useState([]);
 	const [publications, setPublications] = useState([]);
+	const [currentPageUsers, setCurrentPageUsers] = useState(1);
+	const [totalPagesUsers, setTotalPagesUsers] = useState(1);
+	const [currentPagePublications, setCurrentPagePublications] = useState(1);
+	const [totalPagesPublications, setTotalPagesPublications] = useState(1);
 	const [loadingInitial, setLoadingInitial] = useState(true);
-	const [error, setError] = useState(null);
-	const [openEditUser, setOpenEditUser] = useState(false);
-	const [openEditPublication, setOpenEditPublication] = useState(false);
-	const [selectedUser, setSelectedUser] = useState(null);
-	const [selectedPublication, setSelectedPublication] = useState(null);
-	const [editUserData, setEditUserData] = useState({});
-	const [editPublicationData, setEditPublicationData] = useState({});
-	const [newFile, setNewFile] = useState(null);
-	const [usersCurrentPage, setUsersCurrentPage] = useState(1);
-	const [usersTotalPages, setUsersTotalPages] = useState(1);
-	const [publicationsCurrentPage, setPublicationsCurrentPage] = useState(1);
-	const [publicationsTotalPages, setPublicationsTotalPages] = useState(1);
-	const [usersTransitionKey, setUsersTransitionKey] = useState(0);
-	const [publicationsTransitionKey, setPublicationsTransitionKey] = useState(0);
-	const itemsPerPage = 10;
+	const [searchQuery, setSearchQuery] = useState('');
+	const [filterType, setFilterType] = useState('all');
+	const [filterStatus, setFilterStatus] = useState('all');
+	const [error, setError] = useState('');
+	const [success, setSuccess] = useState('');
+	const [openError, setOpenError] = useState(false);
+	const [openSuccess, setOpenSuccess] = useState(false);
+	const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
+	const [openEditDialog, setOpenEditDialog] = useState(false);
+	const [userToDelete, setUserToDelete] = useState(null);
+	const [publicationToDelete, setPublicationToDelete] = useState(null);
+	const [editUser, setEditUser] = useState(null);
+	const [editPublication, setEditPublication] = useState(null);
+	const [editUsername, setEditUsername] = useState('');
+	const [editRole, setEditRole] = useState('');
+	const [editLastName, setEditLastName] = useState('');
+	const [editFirstName, setEditFirstName] = useState('');
+	const [editMiddleName, setEditMiddleName] = useState('');
+	const [editNewPassword, setEditNewPassword] = useState(''); // Новое поле для пароля
+	const [showEditPassword, setShowEditPassword] = useState(false); // Состояние для показа/скрытия пароля при редактировании
+	const [editTitle, setEditTitle] = useState('');
+	const [editAuthors, setEditAuthors] = useState('');
+	const [editYear, setEditYear] = useState('');
+	const [editType, setEditType] = useState('');
+	const [editStatus, setEditStatus] = useState('');
+	const [editFile, setEditFile] = useState(null);
 	const navigate = useNavigate();
-	const { isAuthenticated, role, csrfToken } = useAuth();
+	const { logout, csrfToken } = useAuth();
 
-	// Состояния для поиска и фильтров
-	const [usersSearchQuery, setUsersSearchQuery] = useState('');
-	const [publicationsSearchQuery, setPublicationsSearchQuery] = useState('');
-	const [publicationsFilterType, setPublicationsFilterType] = useState('all');
-	const [publicationsFilterStatus, setPublicationsFilterStatus] = useState('all');
-
-	const fetchUsers = async (page = 1, search = '') => {
-		try {
-			console.log(`Fetching users from http://localhost:5000/admin_api/admin/users?page=${page}&per_page=${itemsPerPage}&search=${search}...`);
-			const response = await axios.get('http://localhost:5000/admin_api/admin/users', {
-				withCredentials: true,
-				params: {
-					page,
-					per_page: itemsPerPage,
-					search,
-				},
-			});
-			console.log('Users response data:', response.data);
-			const usersData = Array.isArray(response.data.users) ? response.data.users : response.data;
-			setUsers(usersData);
-			setUsersTotalPages(Math.ceil(response.data.total / itemsPerPage) || 1);
-			setUsersTransitionKey((prev) => prev + 1);
-			setError(null);
-		} catch (err) {
-			console.error('Ошибка загрузки пользователей:', err.response?.status, err.response?.data || err.message);
-			setError(err.response?.data?.error || `Ошибка: ${err.response?.status || 'Неизвестная ошибка'}`);
-		} finally {
-			setLoadingInitial(false);
-		}
-	};
-
-	const fetchPublications = async (page = 1, search = '', pubType = 'all', status = 'all') => {
-		try {
-			console.log(`Fetching publications from http://localhost:5000/admin_api/admin/publications?page=${page}&per_page=${itemsPerPage}&search=${search}&type=${pubType}&status=${status}...`);
-			const response = await axios.get('http://localhost:5000/admin_api/admin/publications', {
-				withCredentials: true,
-				params: {
-					page,
-					per_page: itemsPerPage,
-					search,
-					type: pubType,
-					status,
-				},
-			});
-			console.log('Publications response data:', response.data);
-			const publicationsData = Array.isArray(response.data.publications) ? response.data.publications : response.data;
-			setPublications(publicationsData);
-			setPublicationsTotalPages(Math.ceil(response.data.total / itemsPerPage) || 1);
-			setPublicationsTransitionKey((prev) => prev + 1);
-			setError(null);
-		} catch (err) {
-			console.error('Ошибка загрузки публикаций:', err.response?.status, err.response?.data || err.message);
-			setError(err.response?.data?.error || `Ошибка: ${err.response?.status || 'Неизвестная ошибка'}`);
-		} finally {
-			setLoadingInitial(false);
-		}
-	};
+	// Состояние для создания нового пользователя
+	const [newUsername, setNewUsername] = useState('');
+	const [newPassword, setNewPassword] = useState('');
+	const [newLastName, setNewLastName] = useState('');
+	const [newFirstName, setNewFirstName] = useState('');
+	const [newMiddleName, setNewMiddleName] = useState('');
+	const [showPassword, setShowPassword] = useState(false); // Состояние для показа/скрытия пароля
 
 	useEffect(() => {
-		if (!isAuthenticated || role !== 'admin') {
-			navigate('/login');
-			return;
-		}
-		fetchUsers(usersCurrentPage, usersSearchQuery);
-		fetchPublications(publicationsCurrentPage, publicationsSearchQuery, publicationsFilterType, publicationsFilterStatus);
-	}, [isAuthenticated, role, navigate]);
+		const fetchData = async () => {
+			setLoadingInitial(true);
+			try {
+				const usersResponse = await axios.get('http://localhost:5000/admin_api/admin/users', {
+					withCredentials: true,
+					params: { page: currentPageUsers, per_page: 10, search: searchQuery },
+				});
+				setUsers(usersResponse.data.users || []);
+				setTotalPagesUsers(usersResponse.data.pages || 1);
 
-	useEffect(() => {
-		fetchUsers(usersCurrentPage, usersSearchQuery);
-	}, [usersCurrentPage, usersSearchQuery]);
+				const publicationsResponse = await axios.get('http://localhost:5000/admin_api/admin/publications', {
+					withCredentials: true,
+					params: { page: currentPagePublications, per_page: 10, search: searchQuery, type: filterType, status: filterStatus },
+				});
+				setPublications(publicationsResponse.data.publications || []);
+				setTotalPagesPublications(publicationsResponse.data.pages || 1);
+			} catch (err) {
+				setError('Ошибка загрузки данных. Попробуйте позже.');
+				setOpenError(true);
+			} finally {
+				setLoadingInitial(false);
+			}
+		};
 
-	useEffect(() => {
-		fetchPublications(publicationsCurrentPage, publicationsSearchQuery, publicationsFilterType, publicationsFilterStatus);
-	}, [publicationsCurrentPage, publicationsSearchQuery, publicationsFilterType, publicationsFilterStatus]);
+		fetchData();
+	}, [currentPageUsers, currentPagePublications, searchQuery, filterType, filterStatus]);
 
 	const handleTabChange = (event, newValue) => {
 		setValue(newValue);
+		setSearchQuery('');
+		setFilterType('all');
+		setFilterStatus('all');
+		setCurrentPageUsers(1);
+		setCurrentPagePublications(1);
 	};
 
-	const handleUsersPageChange = (event, newPage) => {
-		setUsersCurrentPage(newPage);
+	const handlePageChangeUsers = (event, newPage) => {
+		setCurrentPageUsers(newPage);
 	};
 
-	const handlePublicationsPageChange = (event, newPage) => {
-		setPublicationsCurrentPage(newPage);
+	const handlePageChangePublications = (event, newPage) => {
+		setCurrentPagePublications(newPage);
 	};
 
-	const handleEditUser = (user) => {
-		setSelectedUser(user);
-		setEditUserData({ ...user });
-		setOpenEditUser(true);
+	const handleSearchChange = async (e) => {
+		setSearchQuery(e.target.value);
+		setCurrentPageUsers(1);
+		setCurrentPagePublications(1);
 	};
 
-	const handleEditPublication = (publication) => {
-		setSelectedPublication(publication);
-		setEditPublicationData({ ...publication });
-		setNewFile(null);
-		setOpenEditPublication(true);
+	const handleFilterTypeChange = (e) => {
+		setFilterType(e.target.value);
+		setCurrentPagePublications(1);
 	};
 
-	const handleSaveUser = async () => {
-		try {
-			console.log('Updating user:', editUserData);
-			const response = await axios.put(
-				`http://localhost:5000/admin_api/admin/users/${selectedUser.id}`,
-				editUserData,
-				{
-					withCredentials: true,
-					headers: {
-						'X-CSRFToken': csrfToken,
-					},
-				}
-			);
-			console.log('User update response:', response.data);
-			setUsers(users.map((u) => (u.id === selectedUser.id ? { ...u, ...editUserData } : u)));
-			setOpenEditUser(false);
-			fetchUsers(usersCurrentPage, usersSearchQuery);
-		} catch (err) {
-			console.error('Ошибка обновления пользователя:', err.response?.status, err.response?.data || err.message);
-			setError(err.response?.data?.error || `Ошибка: ${err.response?.status || 'Неизвестная ошибка'}`);
+	const handleFilterStatusChange = (e) => {
+		setFilterStatus(e.target.value);
+		setCurrentPagePublications(1);
+	};
+
+	const handleDeleteClick = (type, item) => {
+		if (type === 'user') {
+			setUserToDelete(item);
+		} else {
+			setPublicationToDelete(item);
 		}
+		setOpenDeleteDialog(true);
 	};
 
-	const handleSavePublication = async () => {
+	const handleDeleteCancel = () => {
+		setOpenDeleteDialog(false);
+		setUserToDelete(null);
+		setPublicationToDelete(null);
+	};
+
+	const handleDeleteConfirm = async () => {
 		try {
-			console.log('Updating publication:', editPublicationData);
-			let data;
-			let headers = {
-				'X-CSRFToken': csrfToken,
-			};
-			if (newFile) {
-				data = new FormData();
-				data.append('title', editPublicationData.title || '');
-				data.append('authors', editPublicationData.authors || '');
-				data.append('year', editPublicationData.year || '');
-				data.append('type', editPublicationData.type || 'article');
-				data.append('status', editPublicationData.status || 'draft');
-				data.append('file', newFile);
-				headers['Content-Type'] = 'multipart/form-data';
-			} else {
-				data = {
-					title: editPublicationData.title || '',
-					authors: editPublicationData.authors || '',
-					year: editPublicationData.year || '',
-					type: editPublicationData.type || 'article',
-					status: editPublicationData.status || 'draft',
-				};
-				headers['Content-Type'] = 'application/json';
+			if (userToDelete) {
+				await axios.delete(`http://localhost:5000/admin_api/admin/users/${userToDelete.id}`, {
+					withCredentials: true,
+					headers: { 'X-CSRFToken': csrfToken },
+				});
+				setUsers(users.filter((user) => user.id !== userToDelete.id));
+				setSuccess('Пользователь успешно удалён.');
+				setOpenSuccess(true);
+			} else if (publicationToDelete) {
+				await axios.delete(`http://localhost:5000/admin_api/admin/publications/${publicationToDelete.id}`, {
+					withCredentials: true,
+					headers: { 'X-CSRFToken': csrfToken },
+				});
+				setPublications(publications.filter((pub) => pub.id !== publicationToDelete.id));
+				setSuccess('Публикация успешно удалена.');
+				setOpenSuccess(true);
 			}
-
-			const response = await axios.put(
-				`http://localhost:5000/admin_api/admin/publications/${selectedPublication.id}`,
-				data,
-				{
-					withCredentials: true,
-					headers,
-				}
-			);
-			console.log('Publication update response:', response.data);
-			setPublications(publications.map((p) => (p.id === selectedPublication.id ? { ...p, ...response.data.publication } : p)));
-			setOpenEditPublication(false);
-			fetchPublications(publicationsCurrentPage, publicationsSearchQuery, publicationsFilterType, publicationsFilterStatus);
 		} catch (err) {
-			console.error('Ошибка обновления публикации:', err.response?.status, err.response?.data || err.message);
-			setError(err.response?.data?.error || `Ошибка: ${err.response?.status || 'Неизвестная ошибка'}`);
+			setError('Ошибка при удалении. Попробуйте позже.');
+			setOpenError(true);
+		} finally {
+			setOpenDeleteDialog(false);
+			setUserToDelete(null);
+			setPublicationToDelete(null);
 		}
 	};
 
-	const handleDeleteUser = async (userId) => {
+	const handleEditClick = (type, item) => {
+		if (type === 'user') {
+			setEditUser(item);
+			setEditUsername(item.username);
+			setEditRole(item.role);
+			setEditLastName(item.last_name);
+			setEditFirstName(item.first_name);
+			setEditMiddleName(item.middle_name || '');
+			setEditNewPassword(''); // Сбрасываем поле пароля
+			setShowEditPassword(false); // Сбрасываем видимость пароля
+		} else {
+			setEditPublication(item);
+			setEditTitle(item.title);
+			setEditAuthors(item.authors);
+			setEditYear(item.year);
+			setEditType(item.type);
+			setEditStatus(item.status);
+			setEditFile(null);
+		}
+		setOpenEditDialog(true);
+	};
+
+	const handleEditCancel = () => {
+		setOpenEditDialog(false);
+		setEditUser(null);
+		setEditPublication(null);
+		setEditUsername('');
+		setEditRole('');
+		setEditLastName('');
+		setEditFirstName('');
+		setEditMiddleName('');
+		setEditNewPassword(''); // Сбрасываем поле пароля
+		setShowEditPassword(false); // Сбрасываем видимость пароля
+		setEditTitle('');
+		setEditAuthors('');
+		setEditYear('');
+		setEditType('');
+		setEditStatus('');
+		setEditFile(null);
+		setError('');
+		setSuccess('');
+		setOpenError(false);
+		setOpenSuccess(false);
+	};
+
+	const handleEditSubmit = async (e) => {
+		e.preventDefault();
 		try {
-			console.log('Deleting user with ID:', userId);
-			const response = await axios.delete(
-				`http://localhost:5000/admin_api/admin/users/${userId}`,
-				{
-					withCredentials: true,
-					headers: {
-						'X-CSRFToken': csrfToken,
-					},
+			if (editUser) {
+				const updatedUser = {
+					username: editUsername,
+					role: editRole,
+					last_name: editLastName,
+					first_name: editFirstName,
+					middle_name: editMiddleName,
+				};
+				// Если пароль указан, добавляем его в данные для обновления
+				if (editNewPassword) {
+					updatedUser.new_password = editNewPassword;
 				}
-			);
-			console.log('User deletion response:', response.data);
-			fetchUsers(usersCurrentPage, usersSearchQuery);
+				const response = await axios.put(`http://localhost:5000/admin_api/admin/users/${editUser.id}`, updatedUser, {
+					withCredentials: true,
+					headers: { 'X-CSRFToken': csrfToken },
+				});
+				setUsers(users.map((user) => (user.id === editUser.id ? response.data.user : user)));
+				setSuccess('Пользователь успешно обновлён.');
+				setOpenSuccess(true);
+				setTimeout(() => handleEditCancel(), 2000);
+			} else if (editPublication) {
+				const formData = new FormData();
+				formData.append('title', editTitle);
+				formData.append('authors', editAuthors);
+				formData.append('year', editYear);
+				formData.append('type', editType);
+				formData.append('status', editStatus);
+				if (editFile) {
+					formData.append('file', editFile);
+				}
+
+				const response = await axios.put(`http://localhost:5000/admin_api/admin/publications/${editPublication.id}`, formData, {
+					withCredentials: true,
+					headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'multipart/form-data' },
+				});
+				setPublications(publications.map((pub) => (pub.id === editPublication.id ? response.data.publication : pub)));
+				setSuccess('Публикация успешно обновлена.');
+				setOpenSuccess(true);
+				setTimeout(() => handleEditCancel(), 2000);
+			}
 		} catch (err) {
-			console.error('Ошибка удаления пользователя:', err.response?.status, err.response?.data || err.message);
-			setError(err.response?.data?.error || `Ошибка: ${err.response?.status || 'Неизвестная ошибка'}`);
+			setError(err.response?.data?.error || 'Ошибка при обновлении. Попробуйте позже.');
+			setOpenError(true);
 		}
 	};
 
-	const handleDeletePublication = async (publicationId) => {
+	const handleLogout = async () => {
 		try {
-			console.log('Deleting publication with ID:', publicationId);
-			const response = await axios.delete(
-				`http://localhost:5000/admin_api/admin/publications/${publicationId}`,
-				{
-					withCredentials: true,
-					headers: {
-						'X-CSRFToken': csrfToken,
-					},
-				}
-			);
-			console.log('Publication deletion response:', response.data);
-			fetchPublications(publicationsCurrentPage, publicationsSearchQuery, publicationsFilterType, publicationsFilterStatus);
+			await axios.post('http://localhost:5000/api/logout', {}, {
+				withCredentials: true,
+				headers: { 'X-CSRFToken': csrfToken },
+			});
+			logout();
+			localStorage.removeItem('user');
+			navigate('/login', { replace: true });
 		} catch (err) {
-			console.error('Ошибка удаления публикации:', err.response?.status, err.response?.data || err.message);
-			setError(err.response?.data?.error || `Ошибка: ${err.response?.status || 'Неизвестная ошибка'}`);
+			setError('Ошибка при выходе. Попробуйте снова.');
+			setOpenError(true);
 		}
 	};
 
-	const handleDownloadClick = (publication) => {
-		console.log('Downloading file for publication:', publication.id);
-		if (!publication.file_url) {
-			setError('Файл не прикреплен к этой публикации.');
+	// Функция генерации логина на фронтенде (пароль генерируется на бэкенде)
+	const generateUsername = async () => {
+		if (!newLastName || !newFirstName || !newMiddleName) {
+			setError('Для генерации логина необходимо заполнить ФИО.');
+			setOpenError(true);
+			return null;
+		}
+
+		// Транслитерация русских букв в английские
+		const transliterate = (text) => {
+			const ruToEn = {
+				'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd',
+				'е': 'e', 'ё': 'e', 'ж': 'zh', 'з': 'z', 'и': 'i',
+				'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n',
+				'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't',
+				'у': 'u', 'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch',
+				'ш': 'sh', 'щ': 'sch', 'ъ': '', 'ы': 'y', 'ь': '',
+				'э': 'e', 'ю': 'yu', 'я': 'ya'
+			};
+			return text.toLowerCase().split('').map(char => ruToEn[char] || char).join('');
+		};
+
+		// Функция для преобразования первой буквы в заглавную
+		const capitalizeFirstLetter = (string) => {
+			if (!string) return '';
+			return string.charAt(0).toUpperCase() + string.slice(1);
+		};
+
+		// Формируем базовый логин: Фамилия + Первая буква имени + Первая буква отчества
+		// Каждая часть начинается с заглавной буквы
+		const baseUsername = `${capitalizeFirstLetter(transliterate(newLastName))}${capitalizeFirstLetter(transliterate(newFirstName[0]))}${capitalizeFirstLetter(transliterate(newMiddleName[0]))}`;
+		let generatedUsername = baseUsername;
+		let suffix = 1;
+
+		// Проверяем уникальность логина
+		while (true) {
+			try {
+				const response = await axios.post('http://localhost:5000/admin_api/admin/check-username', { username: generatedUsername }, {
+					withCredentials: true,
+					headers: { 'X-CSRFToken': csrfToken },
+				});
+				if (!response.data.exists) {
+					break; // Логин уникален, выходим из цикла
+				}
+				// Если логин уже существует, добавляем суффикс и проверяем снова
+				generatedUsername = `${baseUsername}${suffix}`;
+				suffix++;
+			} catch (err) {
+				setError('Ошибка проверки логина. Попробуйте снова.');
+				setOpenError(true);
+				return null;
+			}
+		}
+
+		return generatedUsername;
+	};
+
+	// Функция генерации логина и запроса пароля с сервера
+	const generateCredentials = async () => {
+		// Генерируем логин
+		const generatedUsername = await generateUsername();
+		if (!generatedUsername) return; // Если ошибка при генерации логина, прерываем
+
+		// Запрашиваем пароль с сервера
+		try {
+			const response = await axios.get('http://localhost:5000/admin_api/admin/generate-password', {
+				withCredentials: true,
+				headers: { 'X-CSRFToken': csrfToken },
+			});
+			const generatedPassword = response.data.password;
+
+			// Устанавливаем сгенерированные значения в поля
+			setNewUsername(generatedUsername);
+			setNewPassword(generatedPassword);
+			setSuccess('Логин и пароль успешно сгенерированы.');
+			setOpenSuccess(true);
+		} catch (err) {
+			setError('Ошибка генерации пароля. Попробуйте снова.');
+			setOpenError(true);
+		}
+	};
+
+	// Функция создания нового пользователя
+	const handleCreateUser = async (e) => {
+		e.preventDefault();
+		if (!newUsername || !newPassword || !newLastName || !newFirstName || !newMiddleName) {
+			setError('Все поля обязательны для заполнения.');
+			setOpenError(true);
 			return;
 		}
-		const normalizedUrl = publication.file_url.replace(/^.*uploads/, 'uploads');
-		const link = document.createElement('a');
-		link.href = `http://localhost:5000/${normalizedUrl}`;
-		link.download = normalizedUrl.split('/').pop();
-		document.body.appendChild(link);
-		link.click();
-		document.body.removeChild(link);
+
+		try {
+			const response = await axios.post('http://localhost:5000/admin_api/admin/register', {
+				username: newUsername,
+				password: newPassword,
+				last_name: newLastName,
+				first_name: newFirstName,
+				middle_name: newMiddleName,
+			}, {
+				withCredentials: true,
+				headers: { 'X-CSRFToken': csrfToken },
+			});
+
+			if (response.data.message === 'Пользователь успешно зарегистрирован') {
+				setSuccess('Пользователь успешно создан.');
+				setOpenSuccess(true);
+				// Очищаем поля после создания
+				setNewUsername('');
+				setNewPassword('');
+				setNewLastName('');
+				setNewFirstName('');
+				setNewMiddleName('');
+				// Обновляем список пользователей
+				const usersResponse = await axios.get('http://localhost:5000/admin_api/admin/users', {
+					withCredentials: true,
+					params: { page: currentPageUsers, per_page: 10, search: searchQuery },
+				});
+				setUsers(usersResponse.data.users || []);
+				setTotalPagesUsers(usersResponse.data.pages || 1);
+			}
+		} catch (err) {
+			setError(err.response?.data?.error || 'Ошибка при создании пользователя. Попробуйте позже.');
+			setOpenError(true);
+		}
 	};
 
-	if (!isAuthenticated || role !== 'admin') {
-		return null;
-	}
+	// Функция переключения видимости пароля
+	const handleTogglePasswordVisibility = () => {
+		setShowPassword(!showPassword);
+	};
+
+	// Функция переключения видимости пароля при редактировании
+	const handleToggleEditPasswordVisibility = () => {
+		setShowEditPassword(!showEditPassword);
+	};
+
+	// Функция копирования данных в буфер обмена
+	const handleCopyToClipboard = () => {
+		const dataToCopy = `Фамилия: ${newLastName}, Имя: ${newFirstName}, Отчество: ${newMiddleName}, Логин: ${newUsername}, Пароль: ${newPassword}`;
+		navigator.clipboard.writeText(dataToCopy)
+			.then(() => {
+				setSuccess('Данные скопированы в буфер обмена.');
+				setOpenSuccess(true);
+			})
+			.catch(() => {
+				setError('Ошибка при копировании данных.');
+				setOpenError(true);
+			});
+	};
 
 	return (
-		<Container
-			maxWidth="lg"
-			sx={{
-				mt: 4,
-				minHeight: 'calc(100vh - 64px)',
-				backgroundColor: '#FFFFFF',
-				borderRadius: '12px',
-				boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
-				fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif",
-			}}
-		>
-			<Box sx={{ p: 4 }}>
+		<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
+			<AppleCard sx={{ p: 4, backgroundColor: '#FFFFFF', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
 				<Typography variant="h4" gutterBottom sx={{ color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
 					Панель администратора
 				</Typography>
-
 				<Tabs
 					value={value}
 					onChange={handleTabChange}
+					centered
 					sx={{
 						mb: 4,
-						'& .MuiTab-root': {
-							color: '#6E6E73',
-							fontSize: '1.1rem',
-							textTransform: 'none',
-							'&:hover': { color: '#0071E3' },
-							'&.Mui-selected': { color: '#1D1D1F' },
-						},
+						'& .MuiTab-root': { color: '#6E6E73', fontWeight: 600 },
+						'& .MuiTab-root.Mui-selected': { color: '#0071E3' },
 						'& .MuiTabs-indicator': { backgroundColor: '#0071E3' },
 					}}
 				>
@@ -393,117 +543,281 @@ function AdminDashboard() {
 					</Box>
 				) : (
 					<>
-						{error && (
-							<Alert
-								severity="error"
-								sx={{ mt: 4, borderRadius: '12px', backgroundColor: '#FFF1F0', color: '#1D1D1F' }}
-							>
-								{error}
-							</Alert>
-						)}
-
 						{value === 0 && (
 							<>
-								<AppleCard sx={{ mb: 2 }}>
+								<Typography
+									variant="h5"
+									gutterBottom
+									sx={{
+										mt: 4,
+										color: '#1D1D1F',
+										fontWeight: 600,
+										textAlign: 'center',
+									}}
+								>
+									Создание нового пользователя
+								</Typography>
+								<AppleCard sx={{ mb: 4, p: 3, backgroundColor: '#F5F5F7', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
+									<form onSubmit={handleCreateUser}>
+										<AppleTextField
+											fullWidth
+											label="Фамилия"
+											value={newLastName}
+											onChange={(e) => setNewLastName(e.target.value)}
+											margin="normal"
+											variant="outlined"
+											autoComplete="family-name"
+										/>
+										<AppleTextField
+											fullWidth
+											label="Имя"
+											value={newFirstName}
+											onChange={(e) => setNewFirstName(e.target.value)}
+											margin="normal"
+											variant="outlined"
+											autoComplete="given-name"
+										/>
+										<AppleTextField
+											fullWidth
+											label="Отчество"
+											value={newMiddleName}
+											onChange={(e) => setNewMiddleName(e.target.value)}
+											margin="normal"
+											variant="outlined"
+											autoComplete="additional-name"
+										/>
+										<AppleTextField
+											fullWidth
+											label="Логин"
+											value={newUsername}
+											onChange={(e) => setNewUsername(e.target.value)}
+											margin="normal"
+											variant="outlined"
+											autoComplete="username"
+										/>
+										<AppleTextField
+											fullWidth
+											label="Пароль"
+											type={showPassword ? 'text' : 'password'}
+											value={newPassword}
+											onChange={(e) => setNewPassword(e.target.value)}
+											margin="normal"
+											variant="outlined"
+											autoComplete="new-password"
+											InputProps={{
+												endAdornment: (
+													<IconButton onClick={handleTogglePasswordVisibility}>
+														{showPassword ? <VisibilityOff /> : <Visibility />}
+													</IconButton>
+												),
+											}}
+										/>
+										<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+											<AppleButton
+												startIcon={<RefreshIcon />}
+												onClick={generateCredentials}
+											>
+												Сгенерировать логин и пароль
+											</AppleButton>
+											<AppleButton
+												startIcon={<ContentCopyIcon />}
+												onClick={handleCopyToClipboard}
+											>
+												Скопировать в буфер обмена
+											</AppleButton>
+											<AppleButton type="submit">
+												Создать
+											</AppleButton>
+										</Box>
+										<Collapse in={openError}>
+											{error && (
+												<Alert
+													severity="error"
+													sx={{
+														mt: 2,
+														borderRadius: '12px',
+														backgroundColor: '#FFF1F0',
+														color: '#1D1D1F',
+														boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+													}}
+													onClose={() => setOpenError(false)}
+												>
+													{error}
+												</Alert>
+											)}
+										</Collapse>
+										<Collapse in={openSuccess}>
+											{success && (
+												<Alert
+													severity="success"
+													sx={{
+														mt: 2,
+														borderRadius: '12px',
+														backgroundColor: '#E7F8E7',
+														color: '#1D1D1F',
+														boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+													}}
+													onClose={() => setOpenSuccess(false)}
+												>
+													{success}
+												</Alert>
+											)}
+										</Collapse>
+									</form>
+								</AppleCard>
+
+								<Typography
+									variant="h5"
+									gutterBottom
+									sx={{
+										mt: 4,
+										color: '#1D1D1F',
+										fontWeight: 600,
+										textAlign: 'center',
+									}}
+								>
+									Управление пользователями
+								</Typography>
+								<AppleCard sx={{ mt: 2, mb: 2, p: 2, backgroundColor: '#F5F5F7', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
 									<AppleTextField
 										fullWidth
-										label="Поиск по логину, ФИО"
-										value={usersSearchQuery}
-										onChange={(e) => setUsersSearchQuery(e.target.value)}
+										label="Поиск по логину или ФИО"
+										value={searchQuery}
+										onChange={handleSearchChange}
 										margin="normal"
 										variant="outlined"
+										InputProps={{
+											endAdornment: <IconButton sx={{ color: '#0071E3' }}>{/* Можно добавить иконку поиска */}</IconButton>,
+										}}
 									/>
 								</AppleCard>
-								{users.length === 0 ? (
-									<Typography sx={{ mt: 4, textAlign: 'center', color: '#6E6E73' }}>
-										Нет пользователей для отображения.
-									</Typography>
-								) : (
-									<>
-										<AppleTable>
-											<TableHead>
-												<TableRow sx={{ backgroundColor: '#0071E3' }}>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>ID</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Логин</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Роль</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center' }}>Действия</TableCell>
+								<AppleTable sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
+									<TableHead>
+										<TableRow sx={{ backgroundColor: '#0071E3' }}>
+											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
+											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Логин</TableCell>
+											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Роль</TableCell>
+											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Фамилия</TableCell>
+											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Имя</TableCell>
+											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Отчество</TableCell>
+											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>
+												Действия
+											</TableCell>
+										</TableRow>
+									</TableHead>
+									<Fade in={true} timeout={500}>
+										<TableBody>
+											{users.length > 0 ? (
+												users.map((user) => (
+													<TableRow
+														key={user.id}
+														sx={{
+															'&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' },
+														}}
+													>
+														<TableCell sx={{ color: '#1D1D1F' }}>{user.id}</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>{user.username}</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>{user.role}</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>{user.last_name}</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>{user.first_name}</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>{user.middle_name || '-'}</TableCell>
+														<TableCell sx={{ textAlign: 'center' }}>
+															<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
+																<IconButton
+																	aria-label="edit"
+																	onClick={() => handleEditClick('user', user)}
+																	sx={{
+																		color: '#0071E3',
+																		borderRadius: '8px',
+																		'&:hover': {
+																			color: '#FFFFFF',
+																			backgroundColor: '#0071E3',
+																			boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+																		},
+																	}}
+																>
+																	<EditIcon />
+																</IconButton>
+																<IconButton
+																	aria-label="delete"
+																	onClick={() => handleDeleteClick('user', user)}
+																	sx={{
+																		color: '#0071E3',
+																		borderRadius: '8px',
+																		'&:hover': {
+																			color: '#FFFFFF',
+																			backgroundColor: '#0071E3',
+																			boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+																		},
+																	}}
+																>
+																	<DeleteIcon />
+																</IconButton>
+															</Box>
+														</TableCell>
+													</TableRow>
+												))
+											) : (
+												<TableRow>
+													<TableCell colSpan={7} sx={{ textAlign: 'center', color: '#6E6E73' }}>
+														Нет пользователей.
+													</TableCell>
 												</TableRow>
-											</TableHead>
-											<Fade in={true} timeout={500} key={usersTransitionKey}>
-												<TableBody>
-													{users.map((user) => (
-														<TableRow
-															key={user.id}
-															sx={{ '&:hover': { backgroundColor: '#E5E5E5', transition: 'background-color 0.3s ease' } }}
-														>
-															<TableCell sx={{ color: '#1D1D1F' }}>{user.id}</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>{user.username}</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>{user.role}</TableCell>
-															<TableCell sx={{ textAlign: 'center' }}>
-																<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-																	<IconButton
-																		onClick={() => handleEditUser(user)}
-																		sx={{
-																			color: '#0071E3',
-																			'&:hover': { color: '#FFFFFF', backgroundColor: '#0071E3', borderRadius: '12px' },
-																		}}
-																	>
-																		<EditIcon />
-																	</IconButton>
-																	<IconButton
-																		onClick={() => handleDeleteUser(user.id)}
-																		sx={{
-																			color: '#0071E3',
-																			'&:hover': { color: '#FFFFFF', backgroundColor: '#0071E3', borderRadius: '12px' },
-																		}}
-																	>
-																		<DeleteIcon />
-																	</IconButton>
-																</Box>
-															</TableCell>
-														</TableRow>
-													))}
-												</TableBody>
-											</Fade>
-										</AppleTable>
-										<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-											<Pagination
-												count={usersTotalPages}
-												page={usersCurrentPage}
-												onChange={handleUsersPageChange}
-												color="primary"
-												sx={{
-													'& .MuiPaginationItem-root': {
-														borderRadius: 20,
-														transition: 'all 0.3s ease',
-														'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
-														'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
-													},
-												}}
-											/>
-										</Box>
-									</>
-								)}
+											)}
+										</TableBody>
+									</Fade>
+								</AppleTable>
+								<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+									<Pagination
+										count={totalPagesUsers}
+										page={currentPageUsers}
+										onChange={handlePageChangeUsers}
+										color="primary"
+										sx={{
+											'& .MuiPaginationItem-root': {
+												borderRadius: 20,
+												transition: 'all 0.3s ease',
+												'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
+												'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
+											},
+										}}
+									/>
+								</Box>
 							</>
 						)}
 
 						{value === 1 && (
 							<>
-								<AppleCard sx={{ mb: 2 }}>
+								<Typography
+									variant="h5"
+									gutterBottom
+									sx={{
+										mt: 4,
+										color: '#1D1D1F',
+										fontWeight: 600,
+										textAlign: 'center',
+									}}
+								>
+									Управление публикациями
+								</Typography>
+								<AppleCard sx={{ mt: 2, mb: 2, p: 2, backgroundColor: '#F5F5F7', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
 									<AppleTextField
 										fullWidth
 										label="Поиск по названию, авторам или году"
-										value={publicationsSearchQuery}
-										onChange={(e) => setPublicationsSearchQuery(e.target.value)}
+										value={searchQuery}
+										onChange={handleSearchChange}
 										margin="normal"
 										variant="outlined"
+										InputProps={{
+											endAdornment: <IconButton sx={{ color: '#0071E3' }}>{/* Можно добавить иконку поиска */}</IconButton>,
+										}}
 									/>
 									<Box sx={{ mt: 2, display: 'flex', gap: 2 }}>
 										<AppleTextField
 											select
 											label="Тип публикации"
-											value={publicationsFilterType}
-											onChange={(e) => setPublicationsFilterType(e.target.value)}
+											value={filterType}
+											onChange={handleFilterTypeChange}
 											margin="normal"
 											variant="outlined"
 										>
@@ -515,8 +829,8 @@ function AdminDashboard() {
 										<AppleTextField
 											select
 											label="Статус"
-											value={publicationsFilterStatus}
-											onChange={(e) => setPublicationsFilterStatus(e.target.value)}
+											value={filterStatus}
+											onChange={handleFilterStatusChange}
 											margin="normal"
 											variant="outlined"
 										>
@@ -527,256 +841,371 @@ function AdminDashboard() {
 										</AppleTextField>
 									</Box>
 								</AppleCard>
-								{publications.length === 0 ? (
-									<Typography sx={{ mt: 4, textAlign: 'center', color: '#6E6E73' }}>
-										Нет публикаций для отображения.
-									</Typography>
-								) : (
-									<>
-										<AppleTable>
-											<TableHead>
-												<TableRow sx={{ backgroundColor: '#0071E3' }}>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>ID</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Название</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Автор</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center' }}>Действия</TableCell>
-												</TableRow>
-											</TableHead>
-											<Fade in={true} timeout={500} key={publicationsTransitionKey}>
-												<TableBody>
-													{publications.map((pub) => (
-														<TableRow
-															key={pub.id}
-															sx={{ '&:hover': { backgroundColor: '#E5E5E5', transition: 'background-color 0.3s ease' } }}
-														>
-															<TableCell sx={{ color: '#1D1D1F' }}>{pub.id}</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>{pub.title}</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>{pub.status}</TableCell>
-															<TableCell sx={{ textAlign: 'center' }}>
-																<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
+								<AppleTable sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
+									<TableHead>
+										<TableRow sx={{ backgroundColor: '#0071E3' }}>
+											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
+											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Название</TableCell>
+											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Авторы</TableCell>
+											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
+											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Тип</TableCell>
+											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
+											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>
+												Действия
+											</TableCell>
+										</TableRow>
+									</TableHead>
+									<Fade in={true} timeout={500}>
+										<TableBody>
+											{publications.length > 0 ? (
+												publications.map((pub) => (
+													<TableRow
+														key={pub.id}
+														sx={{
+															'&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' },
+														}}
+													>
+														<TableCell sx={{ color: '#1D1D1F' }}>{pub.id}</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>{pub.title}</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>
+															{pub.type === 'article'
+																? 'Статья'
+																: pub.type === 'monograph'
+																	? 'Монография'
+																	: pub.type === 'conference'
+																		? 'Доклад/конференция'
+																		: 'Неизвестный тип'}
+														</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>
+															{pub.status === 'draft'
+																? 'Черновик'
+																: pub.status === 'review'
+																	? 'На проверке'
+																	: pub.status === 'published'
+																		? 'Опубликованные'
+																		: pub.status}
+														</TableCell>
+														<TableCell sx={{ textAlign: 'center' }}>
+															<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
+																<IconButton
+																	aria-label="edit"
+																	onClick={() => handleEditClick('publication', pub)}
+																	sx={{
+																		color: '#0071E3',
+																		borderRadius: '8px',
+																		'&:hover': {
+																			color: '#FFFFFF',
+																			backgroundColor: '#0071E3',
+																			boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+																		},
+																	}}
+																>
+																	<EditIcon />
+																</IconButton>
+																<IconButton
+																	aria-label="delete"
+																	onClick={() => handleDeleteClick('publication', pub)}
+																	sx={{
+																		color: '#0071E3',
+																		borderRadius: '8px',
+																		'&:hover': {
+																			color: '#FFFFFF',
+																			backgroundColor: '#0071E3',
+																			boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+																		},
+																	}}
+																>
+																	<DeleteIcon />
+																</IconButton>
+																{pub.file_url && (
 																	<IconButton
-																		onClick={() => handleEditPublication(pub)}
+																		aria-label="download"
+																		onClick={() => {
+																			const link = document.createElement('a');
+																			link.href = `http://localhost:5000${pub.file_url}`;
+																			link.download = pub.file_url.split('/').pop();
+																			document.body.appendChild(link);
+																			link.click();
+																			document.body.removeChild(link);
+																		}}
 																		sx={{
 																			color: '#0071E3',
-																			'&:hover': { color: '#FFFFFF', backgroundColor: '#0071E3', borderRadius: '12px' },
-																		}}
-																	>
-																		<EditIcon />
-																	</IconButton>
-																	<IconButton
-																		onClick={() => handleDeletePublication(pub.id)}
-																		sx={{
-																			color: '#0071E3',
-																			'&:hover': { color: '#FFFFFF', backgroundColor: '#0071E3', borderRadius: '12px' },
-																		}}
-																	>
-																		<DeleteIcon />
-																	</IconButton>
-																	<IconButton
-																		onClick={() => handleDownloadClick(pub)}
-																		disabled={!pub.file_url}
-																		sx={{
-																			color: pub.file_url ? '#0071E3' : '#D1D1D6',
-																			'&:hover': pub.file_url
-																				? { color: '#FFFFFF', backgroundColor: '#0071E3', borderRadius: '12px' }
-																				: {},
+																			borderRadius: '8px',
+																			'&:hover': {
+																				color: '#FFFFFF',
+																				backgroundColor: '#0071E3',
+																				boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+																			},
 																		}}
 																	>
 																		<DownloadIcon />
 																	</IconButton>
-																</Box>
-															</TableCell>
-														</TableRow>
-													))}
-												</TableBody>
-											</Fade>
-										</AppleTable>
-										<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-											<Pagination
-												count={publicationsTotalPages}
-												page={publicationsCurrentPage}
-												onChange={handlePublicationsPageChange}
-												color="primary"
-												sx={{
-													'& .MuiPaginationItem-root': {
-														borderRadius: 20,
-														transition: 'all 0.3s ease',
-														'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
-														'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
-													},
-												}}
-											/>
-										</Box>
-									</>
-								)}
+																)}
+															</Box>
+														</TableCell>
+													</TableRow>
+												))
+											) : (
+												<TableRow>
+													<TableCell colSpan={7} sx={{ textAlign: 'center', color: '#6E6E73' }}>
+														Нет публикаций.
+													</TableCell>
+												</TableRow>
+											)}
+										</TableBody>
+									</Fade>
+								</AppleTable>
+								<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+									<Pagination
+										count={totalPagesPublications}
+										page={currentPagePublications}
+										onChange={handlePageChangePublications}
+										color="primary"
+										sx={{
+											'& .MuiPaginationItem-root': {
+												borderRadius: 20,
+												transition: 'all 0.3s ease',
+												'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
+												'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
+											},
+										}}
+									/>
+								</Box>
 							</>
 						)}
+
+						<Dialog
+							open={openDeleteDialog}
+							onClose={handleDeleteCancel}
+							sx={{
+								'& .MuiDialog-paper': {
+									backgroundColor: '#FFFFFF',
+									boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+									borderRadius: '16px',
+									fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif",
+								},
+							}}
+						>
+							<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>Подтвердите удаление</DialogTitle>
+							<DialogContent sx={{ padding: '24px' }}>
+								<Typography sx={{ color: '#6E6E73' }}>
+									Вы уверены, что хотите удалить{' '}
+									{userToDelete ? `пользователя «${userToDelete.username}»` : `публикацию «${publicationToDelete?.title}»`}?
+								</Typography>
+							</DialogContent>
+							<DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5EA' }}>
+								<CancelButton onClick={handleDeleteCancel}>Отмена</CancelButton>
+								<AppleButton onClick={handleDeleteConfirm}>Удалить</AppleButton>
+							</DialogActions>
+						</Dialog>
+
+						<Dialog
+							open={openEditDialog}
+							onClose={handleEditCancel}
+							sx={{
+								'& .MuiDialog-paper': {
+									backgroundColor: '#FFFFFF',
+									boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+									borderRadius: '16px',
+									fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif",
+								},
+							}}
+						>
+							<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
+								{editUser ? 'Редактировать пользователя' : 'Редактировать публикацию'}
+							</DialogTitle>
+							<DialogContent sx={{ padding: '24px' }}>
+								<form onSubmit={handleEditSubmit}>
+									{editUser ? (
+										<>
+											<AppleTextField
+												fullWidth
+												label="Логин"
+												value={editUsername}
+												onChange={(e) => setEditUsername(e.target.value)}
+												margin="normal"
+												variant="outlined"
+												autoComplete="username"
+											/>
+											<AppleTextField
+												fullWidth
+												select
+												label="Роль"
+												value={editRole}
+												onChange={(e) => setEditRole(e.target.value)}
+												margin="normal"
+												variant="outlined"
+											>
+												<MenuItem value="user">Пользователь</MenuItem>
+												<MenuItem value="admin">Администратор</MenuItem>
+											</AppleTextField>
+											<AppleTextField
+												fullWidth
+												label="Фамилия"
+												value={editLastName}
+												onChange={(e) => setEditLastName(e.target.value)}
+												margin="normal"
+												variant="outlined"
+												autoComplete="family-name"
+											/>
+											<AppleTextField
+												fullWidth
+												label="Имя"
+												value={editFirstName}
+												onChange={(e) => setEditFirstName(e.target.value)}
+												margin="normal"
+												variant="outlined"
+												autoComplete="given-name"
+											/>
+											<AppleTextField
+												fullWidth
+												label="Отчество"
+												value={editMiddleName}
+												onChange={(e) => setEditMiddleName(e.target.value)}
+												margin="normal"
+												variant="outlined"
+												autoComplete="additional-name"
+											/>
+											<AppleTextField
+												fullWidth
+												label="Новый пароль (если нужно изменить)"
+												type={showEditPassword ? 'text' : 'password'}
+												value={editNewPassword}
+												onChange={(e) => setEditNewPassword(e.target.value)}
+												margin="normal"
+												variant="outlined"
+												autoComplete="new-password"
+												InputProps={{
+													endAdornment: (
+														<IconButton onClick={handleToggleEditPasswordVisibility}>
+															{showEditPassword ? <VisibilityOff /> : <Visibility />}
+														</IconButton>
+													),
+												}}
+											/>
+										</>
+									) : (
+										<>
+											<AppleTextField
+												fullWidth
+												label="Название"
+												value={editTitle}
+												onChange={(e) => setEditTitle(e.target.value)}
+												margin="normal"
+												variant="outlined"
+											/>
+											<AppleTextField
+												fullWidth
+												label="Авторы"
+												value={editAuthors}
+												onChange={(e) => setEditAuthors(e.target.value)}
+												margin="normal"
+												variant="outlined"
+											/>
+											<AppleTextField
+												fullWidth
+												label="Год"
+												type="number"
+												value={editYear}
+												onChange={(e) => setEditYear(e.target.value)}
+												margin="normal"
+												variant="outlined"
+											/>
+											<AppleTextField
+												fullWidth
+												select
+												label="Тип публикации"
+												value={editType}
+												onChange={(e) => setEditType(e.target.value)}
+												margin="normal"
+												variant="outlined"
+											>
+												<MenuItem value="article">Статья</MenuItem>
+												<MenuItem value="monograph">Монография</MenuItem>
+												<MenuItem value="conference">Доклад/конференция</MenuItem>
+											</AppleTextField>
+											<AppleTextField
+												fullWidth
+												select
+												label="Статус"
+												value={editStatus}
+												onChange={(e) => setEditStatus(e.target.value)}
+												margin="normal"
+												variant="outlined"
+												disabled={!editPublication?.file_url && !editFile}
+											>
+												<MenuItem value="draft">Черновик</MenuItem>
+												<MenuItem value="review">На проверке</MenuItem>
+												<MenuItem value="published" disabled={!editPublication?.file_url && !editFile}>
+													Опубликовано
+												</MenuItem>
+											</AppleTextField>
+											<Box sx={{ mt: 2 }}>
+												<Typography variant="body2" sx={{ color: '#6E6E73', mb: 1 }}>
+													Текущий файл: {editPublication?.file_url || 'Нет файла'}
+												</Typography>
+												<input
+													type="file"
+													accept=".pdf,.docx"
+													onChange={(e) => setEditFile(e.target.files[0])}
+													style={{ display: 'none' }}
+													id="edit-upload-file"
+												/>
+												<label htmlFor="edit-upload-file">
+													<AppleButton sx={{ border: '1px solid #D1D1D6', backgroundColor: '#F5F5F7', color: '#1D1D1F' }} component="span">
+														Выбрать файл
+													</AppleButton>
+												</label>
+												{editFile && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{editFile.name}</Typography>}
+											</Box>
+										</>
+									)}
+									<Collapse in={openError}>
+										{error && (
+											<Alert
+												severity="error"
+												sx={{
+													mt: 2,
+													borderRadius: '12px',
+													backgroundColor: '#FFF1F0',
+													color: '#1D1D1F',
+													boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+												}}
+												onClose={() => setOpenError(false)}
+											>
+												{error}
+											</Alert>
+										)}
+									</Collapse>
+									<Collapse in={openSuccess}>
+										{success && (
+											<Alert
+												severity="success"
+												sx={{
+													mt: 2,
+													borderRadius: '12px',
+													backgroundColor: '#E7F8E7',
+													color: '#1D1D1F',
+													boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+												}}
+												onClose={() => setOpenSuccess(false)}
+											>
+												{success}
+											</Alert>
+										)}
+									</Collapse>
+									<DialogActions sx={{ padding: '16px 0', borderTop: '1px solid #E5E5EA' }}>
+										<CancelButton onClick={handleEditCancel}>Отмена</CancelButton>
+										<AppleButton type="submit">Сохранить</AppleButton>
+									</DialogActions>
+								</form>
+							</DialogContent>
+						</Dialog>
 					</>
 				)}
-
-				<Dialog
-					open={openEditUser}
-					onClose={() => setOpenEditUser(false)}
-					sx={{
-						'& .MuiDialog-paper': {
-							backgroundColor: '#FFFFFF',
-							boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
-							borderRadius: '12px',
-							fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif",
-						},
-					}}
-				>
-					<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5E5' }}>
-						Редактировать пользователя
-					</DialogTitle>
-					<DialogContent sx={{ padding: '24px' }}>
-						<AppleTextField
-							fullWidth
-							label="Логин"
-							value={editUserData.username || ''}
-							onChange={(e) => setEditUserData({ ...editUserData, username: e.target.value })}
-							margin="normal"
-							variant="outlined"
-						/>
-						<AppleTextField
-							fullWidth
-							select
-							label="Роль"
-							value={editUserData.role || 'user'}
-							onChange={(e) => setEditUserData({ ...editUserData, role: e.target.value })}
-							margin="normal"
-							variant="outlined"
-						>
-							<MenuItem value="user">Пользователь</MenuItem>
-							<MenuItem value="admin">Администратор</MenuItem>
-						</AppleTextField>
-						<AppleTextField
-							fullWidth
-							label="Фамилия"
-							value={editUserData.last_name || ''}
-							onChange={(e) => setEditUserData({ ...editUserData, last_name: e.target.value })}
-							margin="normal"
-							variant="outlined"
-						/>
-						<AppleTextField
-							fullWidth
-							label="Имя"
-							value={editUserData.first_name || ''}
-							onChange={(e) => setEditUserData({ ...editUserData, first_name: e.target.value })}
-							margin="normal"
-							variant="outlined"
-						/>
-						<AppleTextField
-							fullWidth
-							label="Отчество"
-							value={editUserData.middle_name || ''}
-							onChange={(e) => setEditUserData({ ...editUserData, middle_name: e.target.value })}
-							margin="normal"
-							variant="outlined"
-						/>
-					</DialogContent>
-					<DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5E5' }}>
-						<CancelButton onClick={() => setOpenEditUser(false)}>Отмена</CancelButton>
-						<AppleButton onClick={handleSaveUser}>Сохранить</AppleButton>
-					</DialogActions>
-				</Dialog>
-
-				<Dialog
-					open={openEditPublication}
-					onClose={() => setOpenEditPublication(false)}
-					sx={{
-						'& .MuiDialog-paper': {
-							backgroundColor: '#FFFFFF',
-							boxShadow: '0 4px 12px 0 rgb(0 0 0 / 15%)',
-							borderRadius: '12px',
-							fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif",
-						},
-					}}
-				>
-					<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5E5' }}>
-						Редактировать публикацию
-					</DialogTitle>
-					<DialogContent sx={{ padding: '24px' }}>
-						<AppleTextField
-							fullWidth
-							label="Название"
-							value={editPublicationData.title || ''}
-							onChange={(e) => setEditPublicationData({ ...editPublicationData, title: e.target.value })}
-							margin="normal"
-							variant="outlined"
-						/>
-						<AppleTextField
-							fullWidth
-							label="Авторы"
-							value={editPublicationData.authors || ''}
-							onChange={(e) => setEditPublicationData({ ...editPublicationData, authors: e.target.value })}
-							margin="normal"
-							variant="outlined"
-						/>
-						<AppleTextField
-							fullWidth
-							label="Год"
-							type="number"
-							value={editPublicationData.year || ''}
-							onChange={(e) => setEditPublicationData({ ...editPublicationData, year: parseInt(e.target.value) || '' })}
-							margin="normal"
-							variant="outlined"
-						/>
-						<AppleTextField
-							fullWidth
-							select
-							label="Тип"
-							value={editPublicationData.type || 'article'}
-							onChange={(e) => setEditPublicationData({ ...editPublicationData, type: e.target.value })}
-							margin="normal"
-							variant="outlined"
-						>
-							<MenuItem value="article">Статья</MenuItem>
-							<MenuItem value="monograph">Монография</MenuItem>
-							<MenuItem value="conference">Доклад/конференция</MenuItem>
-						</AppleTextField>
-						<AppleTextField
-							fullWidth
-							select
-							label="Статус"
-							value={editPublicationData.status || 'draft'}
-							onChange={(e) => setEditPublicationData({ ...editPublicationData, status: e.target.value })}
-							margin="normal"
-							variant="outlined"
-						>
-							<MenuItem value="draft">Черновик</MenuItem>
-							<MenuItem value="review">На проверке</MenuItem>
-							<MenuItem value="published">Опубликовано</MenuItem>
-						</AppleTextField>
-						<Box sx={{ mt: 2 }}>
-							<Typography variant="body2" sx={{ color: '#6E6E73', mb: 1 }}>
-								Текущий файл: {editPublicationData.file_url || 'Нет файла'}
-							</Typography>
-							<input
-								type="file"
-								accept=".pdf,.doc,.docx"
-								onChange={(e) => setNewFile(e.target.files[0])}
-								style={{ display: 'none' }}
-								id="upload-file"
-							/>
-							<label htmlFor="upload-file">
-								<AppleButton sx={{ border: '1px solid #D1D1D6', backgroundColor: '#F5F5F7', color: '#1D1D1F' }} component="span">
-									Выбрать файл
-								</AppleButton>
-							</label>
-							{newFile && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{newFile.name}</Typography>}
-						</Box>
-					</DialogContent>
-					<DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5E5' }}>
-						<CancelButton onClick={() => setOpenEditPublication(false)}>Отмена</CancelButton>
-						<AppleButton onClick={handleSavePublication}>Сохранить</AppleButton>
-					</DialogActions>
-				</Dialog>
-			</Box>
+			</AppleCard>
 		</Container>
 	);
 }

@@ -10,6 +10,7 @@ from flask import current_app
 from werkzeug.utils import secure_filename
 import os
 import logging
+import secrets
 from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
 from sqlalchemy import func, desc
@@ -23,6 +24,94 @@ logger = logging.getLogger(__name__)
 @bp.before_request
 def log_request():
     logger.debug(f"Received request for {request.path} with method {request.method}")
+
+@bp.route('/admin/register', methods=['POST', 'OPTIONS'])
+@login_required
+@admin_required
+def admin_register():
+    if request.method == 'OPTIONS':
+        logger.debug("Handling OPTIONS for /admin_api/admin/register")
+        return jsonify({}), 200
+
+    logger.debug("Получен POST запрос для /admin_api/admin/register")
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    last_name = data.get('last_name')
+    first_name = data.get('first_name')
+    middle_name = data.get('middle_name')
+
+    if not username or not password or not last_name or not first_name or not middle_name:
+        logger.error("Не все обязательные поля заполнены")
+        return jsonify({'error': 'Все поля (логин, пароль, ФИО) обязательны'}), 400
+
+    if User.query.filter_by(username=username).first():
+        logger.error(f"Пользователь с логином {username} уже существует")
+        return jsonify({'error': 'Пользователь с таким логином уже существует'}), 400
+
+    user = User(
+        username=username,
+        last_name=last_name,
+        first_name=first_name,
+        middle_name=middle_name,
+        role='user'  # Устанавливаем роль user по умолчанию
+    )
+    user.set_password(password)
+    try:
+        db.session.add(user)
+        db.session.commit()
+        logger.info(f"Пользователь {username} успешно зарегистрирован администратором")
+        return jsonify({
+            'message': 'Пользователь успешно зарегистрирован',
+            'user': {
+                'username': user.username,
+                'role': user.role,
+                'last_name': user.last_name,
+                'first_name': user.first_name,
+                'middle_name': user.middle_name
+            }
+        }), 201
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Ошибка регистрации пользователя {username}: {str(e)}")
+        return jsonify({'error': 'Ошибка при регистрации. Попробуйте позже.'}), 500
+
+@bp.route('/admin/check-username', methods=['POST', 'OPTIONS'])
+@login_required
+@admin_required
+def check_username():
+    if request.method == 'OPTIONS':
+        logger.debug("Handling OPTIONS for /admin_api/admin/check-username")
+        return jsonify({}), 200
+
+    logger.debug("Получен POST запрос для /admin_api/admin/check-username")
+    data = request.get_json()
+    username = data.get('username')
+
+    if not username:
+        return jsonify({'error': 'Логин не указан'}), 400
+
+    user = User.query.filter_by(username=username).first()
+    if user:
+        return jsonify({'exists': True, 'message': 'Пользователь с таким логином уже существует'}), 200
+    return jsonify({'exists': False, 'message': 'Логин доступен'}), 200
+
+@bp.route('/admin/generate-password', methods=['GET', 'OPTIONS'])
+@login_required
+@admin_required
+def generate_password():
+    if request.method == 'OPTIONS':
+        logger.debug("Handling OPTIONS for /admin_api/admin/generate-password")
+        return jsonify({}), 200
+
+    logger.debug("Получен GET запрос для /admin_api/admin/generate-password")
+    
+    # Генерация надёжного пароля
+    chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+'
+    password_length = 12
+    password = ''.join(secrets.choice(chars) for _ in range(password_length))
+    
+    return jsonify({'password': password}), 200
 
 @bp.route('/admin/users', methods=['GET', 'OPTIONS'])
 @login_required
@@ -92,6 +181,12 @@ def user_management(user_id):
         user.first_name = data.get('first_name', user.first_name)
         user.middle_name = data.get('middle_name', user.middle_name)
         
+        # Обновление пароля, если он указан
+        new_password = data.get('new_password')
+        if new_password:
+            user.set_password(new_password)
+            logger.debug(f"Пароль пользователя {user.username} обновлён администратором")
+
         try:
             db.session.commit()
             return jsonify({
@@ -189,6 +284,7 @@ def get_all_publications():
         'pages': pagination.pages,
         'current_page': pagination.page
     }), 200
+
 @bp.route('/admin/publications/<int:pub_id>', methods=['PUT', 'DELETE', 'OPTIONS'])
 @login_required
 @admin_required
