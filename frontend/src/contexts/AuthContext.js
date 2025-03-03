@@ -1,62 +1,151 @@
-import React, { createContext, useContext, useState } from 'react';
+import React, { createContext, useContext, useState, useEffect } from 'react';
+import axios from 'axios';
 
 const AuthContext = createContext();
 
 export function AuthProvider({ children }) {
-    const [authState, setAuthState] = useState(() => {
-        const storedUser = localStorage.getItem('user');
-        const storedCsrfToken = localStorage.getItem('csrfToken');
-        return {
-            isAuthenticated: !!storedUser,
-            role: storedUser ? JSON.parse(storedUser).role || 'user' : 'user',
-            username: storedUser ? JSON.parse(storedUser).username || '' : '',
-            csrfToken: storedCsrfToken || null,
-        };
-    });
+	const [authState, setAuthState] = useState(() => {
+		const storedUser = localStorage.getItem('user');
+		const storedCsrfToken = localStorage.getItem('csrfToken');
+		const parsedUser = storedUser ? JSON.parse(storedUser) : null;
+		console.log('AuthContext: Инициализация состояния:', {
+			isAuthenticated: !!storedUser,
+			user: parsedUser,
+			role: parsedUser?.role || null,
+			csrfToken: storedCsrfToken,
+		});
+		return {
+			isAuthenticated: !!storedUser,
+			user: parsedUser || null,
+			role: parsedUser?.role || null,
+			csrfToken: storedCsrfToken || null,
+			isLoading: true,
+		};
+	});
 
-    const login = (userData) => {
-        setAuthState({
-            ...authState,
-            isAuthenticated: true,
-            role: userData.role,
-            username: userData.username,
-        });
-        localStorage.setItem('user', JSON.stringify({ username: userData.username, role: userData.role }));
-    };
+	useEffect(() => {
+		const checkAuthStatus = async () => {
+			try {
+				console.log('AuthContext: Проверка аутентификации на сервере...');
+				const response = await axios.get('http://localhost:5000/api/user', {
+					withCredentials: true,
+				});
+				console.log('AuthContext: Ответ от /api/user:', response.data);
+				const userData = {
+					id: response.data.id,
+					username: response.data.username,
+					role: response.data.role || 'user',
+					first_name: response.data.first_name || '',
+					last_name: response.data.last_name || '',
+					middle_name: response.data.middle_name || '',
+					created_at: response.data.created_at,
+				};
+				console.log('AuthContext: Извлечённый role:', userData.role);
+				setAuthState({
+					isAuthenticated: true,
+					user: userData,
+					role: userData.role, // Убедимся, что role обновляется
+					csrfToken: authState.csrfToken,
+					isLoading: false,
+				});
+				localStorage.setItem('user', JSON.stringify(userData));
+				console.log('AuthContext: Состояние после обновления:', {
+					isAuthenticated: true,
+					user: userData,
+					role: userData.role,
+				});
 
-    const logout = () => {
-        setAuthState({
-            isAuthenticated: false,
-            role: 'user',
-            username: '',
-            csrfToken: null,
-        });
-        localStorage.removeItem('user');
-        localStorage.removeItem('csrfToken');
-    };
+				if (!authState.csrfToken) {
+					const tokenResponse = await axios.get('http://localhost:5000/api/csrf-token', {
+						withCredentials: true,
+					});
+					setCsrfToken(tokenResponse.data.csrf_token);
+					console.log('AuthContext: CSRF Token сохранён:', tokenResponse.data.csrf_token);
+				}
+			} catch (err) {
+				console.error('AuthContext: Ошибка проверки состояния аутентификации:', err.response?.status, err.response?.data?.error || err.message);
+				if (err.response && err.response.status === 401) {
+					console.log('AuthContext: Пользователь не аутентифицирован (401), вызываем logout...');
+					logout();
+				} else {
+					console.error('AuthContext: Другая ошибка при проверке аутентификации:', err);
+				}
+				setAuthState((prevState) => ({
+					...prevState,
+					isLoading: false,
+				}));
+			}
+		};
 
-    const updateAuthState = (newState) => {
-        setAuthState((prevState) => ({
-            ...prevState,
-            ...newState,
-        }));
-    };
+		if (authState.isAuthenticated) {
+			console.log('AuthContext: Запускаем проверку аутентификации...');
+			checkAuthStatus();
+		} else {
+			console.log('AuthContext: Пользователь не аутентифицирован в localStorage, пропускаем проверку.');
+			setAuthState((prevState) => ({
+				...prevState,
+				isLoading: false,
+			}));
+		}
+	}, []);
 
-    const setCsrfToken = (token) => {
-        setAuthState((prevState) => ({
-            ...prevState,
-            csrfToken: token,
-        }));
-        localStorage.setItem('csrfToken', token); // Сохраняем токен в localStorage
-    };
+	const login = (userData) => {
+		const user = {
+			id: userData.id,
+			username: userData.username,
+			role: userData.role,
+			first_name: userData.first_name || '',
+			last_name: userData.last_name || '',
+			middle_name: userData.middle_name || '',
+		};
+		console.log('AuthContext: Пользователь вошёл:', user);
+		setAuthState({
+			isAuthenticated: true,
+			user: user,
+			role: user.role,
+			csrfToken: authState.csrfToken,
+			isLoading: false,
+		});
+		localStorage.setItem('user', JSON.stringify(user));
+	};
 
-    return (
-        <AuthContext.Provider value={{ ...authState, login, logout, updateAuthState, setCsrfToken }}>
-            {children}
-        </AuthContext.Provider>
-    );
+	const logout = () => {
+		console.log('AuthContext: Пользователь выходит...');
+		setAuthState({
+			isAuthenticated: false,
+			user: null,
+			role: null,
+			csrfToken: null,
+			isLoading: false,
+		});
+		localStorage.removeItem('user');
+		localStorage.removeItem('csrfToken');
+	};
+
+	const updateAuthState = (newState) => {
+		console.log('AuthContext: Обновление состояния:', newState);
+		setAuthState((prevState) => ({
+			...prevState,
+			...newState,
+		}));
+	};
+
+	const setCsrfToken = (token) => {
+		console.log('AuthContext: Установка CSRF Token:', token);
+		setAuthState((prevState) => ({
+			...prevState,
+			csrfToken: token,
+		}));
+		localStorage.setItem('csrfToken', token);
+	};
+
+	return (
+		<AuthContext.Provider value={{ ...authState, login, logout, updateAuthState, setCsrfToken }}>
+			{children}
+		</AuthContext.Provider>
+	);
 }
 
 export function useAuth() {
-    return useContext(AuthContext);
+	return useContext(AuthContext);
 }

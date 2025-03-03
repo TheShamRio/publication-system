@@ -1,8 +1,8 @@
 import React from 'react';
 import { AppBar, Toolbar, Typography, Button, Box } from '@mui/material';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { styled } from '@mui/system';
-import { useAuth } from '../contexts/AuthContext'; // Импортируем useAuth
+import { useAuth } from '../contexts/AuthContext';
 import logoPng from '../assets/logo_kai.png';
 
 const StyledAppBar = styled(AppBar)({
@@ -23,10 +23,29 @@ const Logo = styled('img')({
 	},
 });
 
-function Header({ isAuthenticated, onLogout }) {
-	const { role } = useAuth(); // Получаем роль из контекста
-	const authenticated = isAuthenticated || false;
-	const handleLogout = onLogout || (() => { });
+function Header() {
+	const { isAuthenticated, role, isLoading, logout } = useAuth();
+	const navigate = useNavigate();
+
+	// Используем role из localStorage как запасное значение, пока состояние не загрузится
+	const storedUser = localStorage.getItem('user');
+	const parsedUser = storedUser ? JSON.parse(storedUser) : null;
+	const effectiveRole = role || parsedUser?.role || 'user';
+
+	console.log('Header.js: isAuthenticated:', isAuthenticated, 'Role:', role, 'Effective Role:', effectiveRole, 'isLoading:', isLoading);
+
+	const handleLogout = async () => {
+		try {
+			await logout();
+			navigate('/login', { replace: true });
+		} catch (err) {
+			console.error('Header.js: Ошибка при выходе:', err);
+		}
+	};
+
+	if (isLoading) {
+		return null;
+	}
 
 	return (
 		<StyledAppBar position="fixed">
@@ -51,27 +70,25 @@ function Header({ isAuthenticated, onLogout }) {
 					<Logo src={logoPng} alt="КАИ Logo" />
 				</Box>
 				<Box sx={{ display: 'flex', gap: 2 }}>
-					{!authenticated ? (
-						<>
-							<Button
-								component={Link}
-								to="/login"
-								variant="contained"
-								color="primary"
-								sx={{
-									borderRadius: 16,
-									transition: 'all 0.3s ease',
-									'&:hover': { transform: 'scale(1.05)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)' },
-								}}
-							>
-								Войти
-							</Button>
-						</>
+					{!isAuthenticated ? (
+						<Button
+							component={Link}
+							to="/login"
+							variant="contained"
+							color="primary"
+							sx={{
+								borderRadius: 16,
+								transition: 'all 0.3s ease',
+								'&:hover': { transform: 'scale(1.05)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)' },
+							}}
+						>
+							Войти
+						</Button>
 					) : (
 						<>
 							<Button
 								component={Link}
-								to={role === 'admin' ? '/admin' : '/dashboard'} // Условие для маршрута
+								to={effectiveRole === 'admin' ? '/admin' : '/dashboard'}
 								variant="contained"
 								color="primary"
 								sx={{
@@ -80,7 +97,7 @@ function Header({ isAuthenticated, onLogout }) {
 									'&:hover': { transform: 'scale(1.05)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)' },
 								}}
 							>
-								{role === 'admin' ? 'Панель управления' : 'Личный кабинет'}
+								{effectiveRole === 'admin' ? 'Панель управления' : 'Личный кабинет'}
 							</Button>
 							<Button
 								onClick={handleLogout}

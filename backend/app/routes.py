@@ -1,15 +1,11 @@
 from flask import Blueprint, jsonify, request, make_response, current_app, send_from_directory
 from .extensions import db, login_manager, csrf
-from .models import User, Publication
+from .models import User, Publication, Comment
 from .utils import allowed_file
 from flask_login import login_user, current_user, logout_user, login_required
 from werkzeug.utils import secure_filename
 from flask_wtf.csrf import generate_csrf
 import os
-from .models import User, Publication, Comment  # Добавляем Comment
-import logging
-from datetime import datetime, UTC
-from werkzeug.security import generate_password_hash, check_password_hash
 from .analytics import get_publications_by_year
 import bibtexparser
 from reportlab.platypus import SimpleDocTemplate, Paragraph
@@ -17,6 +13,10 @@ from reportlab.lib.pagesizes import letter
 from bibtexparser.bibdatabase import BibDatabase
 from bibtexparser.bwriter import BibTexWriter
 from flask import send_file
+import logging
+from datetime import datetime, UTC
+from werkzeug.security import generate_password_hash, check_password_hash
+
 bp = Blueprint('api', __name__)
 
 logging.basicConfig(level=logging.DEBUG)
@@ -36,15 +36,20 @@ def download_file(filename):
     return response
 
 @bp.route('/publications/<int:pub_id>', methods=['GET'])
+@login_required
 def get_publication(pub_id):
     publication = Publication.query.get_or_404(pub_id)
+
+    if publication.user_id != current_user.id and current_user.role != 'admin':
+        return jsonify({'error': 'У вас нет доступа к этой публикации'}), 403
+
     comments = Comment.query.filter_by(publication_id=pub_id, parent_id=None).order_by(Comment.created_at.asc()).all()
     
     def build_comment_tree(comment):
         return {
             'id': comment.id,
             'content': comment.content,
-            'user': {'username': comment.user.username, 'full_name': comment.user.full_name},
+            'user': {'username': comment.user.username, 'full_name': comment.user.full_name, 'role': comment.user.role},
             'created_at': comment.created_at.isoformat(),
             'replies': [build_comment_tree(reply) for reply in comment.replies]
         }
@@ -56,10 +61,11 @@ def get_publication(pub_id):
         'year': publication.year,
         'type': publication.type,
         'status': publication.status,
-        'file_url': f"/uploads/{os.path.basename(publication.file_url)}",  # Используем basename
+        'file_url': f"/uploads/{os.path.basename(publication.file_url)}" if publication.file_url else None,
         'user': {'full_name': publication.user.full_name if publication.user else 'Не указан'},
         'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
         'published_at': publication.published_at.isoformat() if publication.published_at else None,
+        'returned_for_revision': publication.returned_for_revision,  # Новое поле
         'comments': [build_comment_tree(comment) for comment in comments]
     }), 200
 
@@ -88,11 +94,37 @@ def add_comment(pub_id):
         'comment': {
             'id': comment.id,
             'content': comment.content,
-            'user': {'username': current_user.username, 'full_name': current_user.full_name},
+            'user': {'username': current_user.username, 'full_name': current_user.full_name, 'role': current_user.role},
             'created_at': comment.created_at.isoformat(),
             'replies': []
         }
     }), 201
+
+@bp.route('/publications/<int:pub_id>/submit-for-review', methods=['POST'])
+@login_required
+def submit_for_review(pub_id):
+    publication = Publication.query.get_or_404(pub_id)
+    
+    if publication.user_id != current_user.id:
+        return jsonify({'error': 'У вас нет прав на отправку этой публикации на проверку'}), 403
+
+    if publication.status != 'draft':
+        return jsonify({'error': 'Публикация уже отправлена на проверку или опубликована'}), 400
+
+    if not publication.file_url:
+        return jsonify({'error': 'Нельзя отправить на проверку публикацию без прикреплённого файла'}), 400
+
+    publication.status = 'needs_review'
+    publication.updated_at = datetime.utcnow()
+    publication.returned_for_revision = False  # Сбрасываем флаг при повторной отправке
+
+    try:
+        db.session.commit()
+        return jsonify({'message': 'Публикация отправлена на проверку'}), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Ошибка отправки на проверку публикации {pub_id}: {str(e)}")
+        return jsonify({'error': 'Ошибка при отправке на проверку. Попробуйте позже.'}), 500
 
 @bp.route('/login', methods=['POST'])
 @csrf.exempt
@@ -118,7 +150,7 @@ def login():
         }), 200
     return jsonify({'error': 'Неверное имя пользователя или пароль'}), 401
 
-@bp.route('/csrf-token', methods=['GET'])  # Убираем @login_required
+@bp.route('/csrf-token', methods=['GET'])
 def get_csrf_token():
     logger.debug(f"Получен GET запрос для /api/csrf-token")
     token = generate_csrf()
@@ -129,22 +161,27 @@ def get_csrf_token():
 def logout():
     logger.debug(f"Получен POST запрос для /logout")
     logout_user()
-    return jsonify({'message': 'Успешный выход'}), 200
-
+    response = jsonify({'message': 'Успешный выход'})
+    response.set_cookie('session', '', expires=0)  # Удаляем куки сессии
+    return response, 200
 @bp.route('/user', methods=['GET', 'PUT'])
 @login_required
 def user():
     logger.debug(f"Получен {request.method} запрос для /user")
+    logger.debug(f"Текущий пользователь: {current_user.id if current_user.is_authenticated else 'Не аутентифицирован'}")
+    logger.debug(f"Куки сессии: {request.cookies.get('session')}")
     if request.method == 'GET':
-        return jsonify({
+        response_data = {
             'id': current_user.id,
             'username': current_user.username,
-            'role': current_user.role,
+            'role': current_user.role,  # Убедимся, что role включён в ответ
             'last_name': current_user.last_name,
             'first_name': current_user.first_name,
             'middle_name': current_user.middle_name,
             'created_at': current_user.created_at.isoformat() if current_user.created_at else None
-        }), 200
+        }
+        logger.debug(f"Ответ сервера для /api/user: {response_data}")
+        return jsonify(response_data), 200
     elif request.method == 'PUT':
         data = request.get_json()
         current_user.last_name = data.get('last_name', current_user.last_name)
@@ -192,25 +229,19 @@ def change_password():
 def get_public_publications():
     logger.debug(f"Получен GET запрос для /api/public/publications")
     
-    # Параметры запроса для пагинации
-    page = request.args.get('page', 1, type=int)  # Номер страницы, по умолчанию 1
-    per_page = request.args.get('per_page', 10, type=int)  # Публикаций на страницу, по умолчанию 10
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
 
-    # Базовый запрос для опубликованных работ
-    # Используем coalesce для обработки NULL в published_at, чтобы приоритет был у updated_at
     query = Publication.query.filter_by(status='published').order_by(
         db.func.coalesce(Publication.published_at, Publication.updated_at).desc()
     )
 
-    # Пагинация
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     publications = pagination.items
 
-    # Отладочный лог для проверки порядка
     logger.debug(f"Returning {len(publications)} published publications, sorted by published_at/updated_at: {[pub.published_at.isoformat() if pub.published_at else pub.updated_at.isoformat() for pub in publications]}")
     logger.debug(f"Total published publications: {pagination.total}, pages: {pagination.pages}, current page: {pagination.page}")
 
-    # Форматирование ответа с данными пользователя
     response = [{
         'id': pub.id,
         'title': pub.title,
@@ -221,16 +252,17 @@ def get_public_publications():
         'file_url': pub.file_url,
         'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
         'published_at': pub.published_at.isoformat() if pub.published_at else None,
+        'returned_for_revision': pub.returned_for_revision,  # Новое поле
         'user': {
             'full_name': pub.user.full_name if pub.user else 'Не указан'
-        } if pub.user else None  # Добавляем данные пользователя
+        } if pub.user else None
     } for pub in publications]
 
     return jsonify({
         'publications': response,
-        'total': pagination.total,  # Общее количество публикаций
-        'pages': pagination.pages,  # Общее количество страниц
-        'current_page': pagination.page  # Текущая страница
+        'total': pagination.total,
+        'pages': pagination.pages,
+        'current_page': pagination.page
     }), 200
 
 @bp.route('/publications', methods=['GET'])
@@ -238,21 +270,17 @@ def get_public_publications():
 def get_publications():
     logger.debug(f"Получен GET запрос для /publications")
     
-    # Параметры запроса
-    page = request.args.get('page', 1, type=int)  # Номер страницы, по умолчанию 1
-    per_page = request.args.get('per_page', 10, type=int)  # Публикаций на страницу, по умолчанию 10
-    search = request.args.get('search', '').lower()  # Поиск по названию, авторам или году
-    pub_type = request.args.get('type', 'all')  # Фильтр по типу
-    status = request.args.get('status', 'all')  # Фильтр по статусу
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    search = request.args.get('search', '').lower()
+    pub_type = request.args.get('type', 'all')
+    status = request.args.get('status', 'all')
 
-    # Базовый запрос
     query = Publication.query.filter_by(user_id=current_user.id)
 
-    # Логирование количества записей до фильтрации
     total_records_before_filters = query.count()
     logger.debug(f"Total records before filters: {total_records_before_filters}")
 
-    # Фильтрация по поиску (по названию, авторам или году)
     if search:
         query = query.filter(
             db.or_(
@@ -262,37 +290,28 @@ def get_publications():
             )
         )
 
-    # Логирование количества записей после поиска
     total_records_after_search = query.count()
     logger.debug(f"Total records after search: {total_records_after_search}")
 
-    # Фильтрация по типу
     if pub_type != 'all':
         query = query.filter(Publication.type == pub_type)
 
-    # Логирование количества записей после фильтрации по типу
     total_records_after_type = query.count()
     logger.debug(f"Total records after type filter: {total_records_after_type}")
 
-    # Фильтрация по статусу
     if status != 'all':
         query = query.filter(Publication.status == status)
 
-    # Логирование количества записей после фильтрации по статусу
     total_records_after_status = query.count()
     logger.debug(f"Total records after status filter: {total_records_after_status}")
 
-    # Сортировка по updated_at в порядке убывания (от новых к старым)
     query = query.order_by(Publication.updated_at.desc())
 
-    # Пагинация
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     publications = pagination.items
 
-    # Логирование количества записей на текущей странице
     logger.debug(f"Publications on page {page}: {len(publications)}")
 
-    # Форматирование ответа
     response = [{
         'id': pub.id,
         'title': pub.title,
@@ -301,14 +320,15 @@ def get_publications():
         'type': pub.type,
         'status': pub.status,
         'file_url': pub.file_url,
-        'updated_at': pub.updated_at.isoformat() if pub.updated_at else None
+        'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
+        'returned_for_revision': pub.returned_for_revision,  # Новое поле
     } for pub in publications]
 
     return jsonify({
         'publications': response,
-        'total': pagination.total,  # Общее количество публикаций
-        'pages': pagination.pages,  # Общее количество страниц
-        'current_page': pagination.page  # Текущая страница
+        'total': pagination.total,
+        'pages': pagination.pages,
+        'current_page': pagination.page
     }), 200
 
 @bp.route('/publications/<int:pub_id>', methods=['PUT', 'DELETE'])
@@ -319,6 +339,9 @@ def manage_publication(pub_id):
     if publication.user_id != current_user.id:
         return jsonify({'error': 'У вас нет прав на управление этой публикацией'}), 403
 
+    if publication.status == 'needs_review':
+        return jsonify({'error': 'Нельзя редактировать публикацию, пока она на проверке'}), 403
+
     if request.method == 'PUT':
         if request.content_type == 'application/json':
             data = request.get_json()
@@ -327,7 +350,7 @@ def manage_publication(pub_id):
         else:
             return jsonify({"error": "Неподдерживаемый формат данных. Используйте application/json или multipart/form-data."}), 415
 
-        old_status = publication.status  # Сохраняем старый статус
+        old_status = publication.status
         if 'file' in request.files:
             file = request.files['file']
             if file and allowed_file(file.filename):
@@ -344,13 +367,11 @@ def manage_publication(pub_id):
         publication.type = data.get('type', publication.type)
         new_status = data.get('status', publication.status)
 
-        # Проверка: нельзя установить статус "published", если файл не прикреплён
         if new_status == 'published' and not publication.file_url:
             return jsonify({'error': 'Нельзя опубликовать работу без прикреплённого файла.'}), 400
 
         publication.status = new_status
 
-        # Обновляем published_at только если статус меняется на 'published'
         if publication.status == 'published' and old_status != 'published':
             publication.published_at = datetime.utcnow()
 
@@ -367,7 +388,8 @@ def manage_publication(pub_id):
                     'status': publication.status,
                     'file_url': publication.file_url,
                     'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
-                    'published_at': publication.published_at.isoformat() if publication.published_at else None
+                    'published_at': publication.published_at.isoformat() if publication.published_at else None,
+                    'returned_for_revision': publication.returned_for_revision,  # Новое поле
                 }
             }), 200
         except Exception as e:
@@ -422,9 +444,10 @@ def upload_file():
         authors=authors,
         year=year,
         type=type,
-        status='draft',  # По умолчанию статус "draft", даже если файл есть
+        status='draft',
         file_url=file_path,
-        user_id=current_user.id
+        user_id=current_user.id,
+        returned_for_revision=False,  # Новое поле
     )
     db.session.add(publication)
     db.session.commit()
@@ -439,7 +462,8 @@ def upload_file():
             'type': publication.type,
             'status': publication.status,
             'file_url': publication.file_url,
-            'updated_at': publication.updated_at.isoformat() if publication.updated_at else None
+            'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
+            'returned_for_revision': publication.returned_for_revision,  # Новое поле
         }
     }), 200
 
@@ -472,8 +496,9 @@ def upload_bibtex():
                     authors=authors,
                     year=year,
                     type=type,
-                    status='draft',  # По умолчанию статус "draft", так как файла нет
-                    user_id=current_user.id
+                    status='draft',
+                    user_id=current_user.id,
+                    returned_for_revision=False,  # Новое поле
                 )
                 db.session.add(publication)
                 publications_added += 1
@@ -493,6 +518,9 @@ def attach_file(pub_id):
     publication = Publication.query.get_or_404(pub_id)
     if publication.user_id != current_user.id:
         return jsonify({'error': 'У вас нет прав на изменение этой публикации'}), 403
+
+    if publication.status == 'needs_review':
+        return jsonify({'error': 'Нельзя редактировать публикацию, пока она на проверке'}), 403
 
     if 'file' not in request.files:
         return jsonify({'error': 'Файл не предоставлен'}), 400
@@ -518,7 +546,8 @@ def attach_file(pub_id):
                     'type': publication.type,
                     'status': publication.status,
                     'file_url': publication.file_url,
-                    'updated_at': publication.updated_at.isoformat() if publication.updated_at else None
+                    'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
+                    'returned_for_revision': publication.returned_for_revision,  # Новое поле
                 }
             }), 200
         except Exception as e:
@@ -536,7 +565,6 @@ def export_bibtex():
         publications = Publication.query.filter_by(user_id=current_user.id).all()
         logger.debug(f"Найдено публикаций: {len(publications)}")
 
-        # Создаём экземпляр BibDatabase
         bib_db = BibDatabase()
         bib_db.entries = [{
             'ENTRYTYPE': pub.type or 'article',
@@ -546,7 +574,6 @@ def export_bibtex():
             'year': str(pub.year) if pub.year else str(datetime.now().year)
         } for pub in publications]
 
-        # Создаём экземпляр BibTexWriter и генерируем строку BibTeX
         writer = BibTexWriter()
         if not callable(writer.write):
             raise AttributeError("Метод write в BibTexWriter не является callable. Проверьте версию bibtexparser.")
@@ -572,7 +599,7 @@ def export_bibtex():
 @login_required
 def get_analytics_yearly():
     logger.debug(f"Получен GET запрос для /analytics/yearly")
-    analytics = get_publications_by_year(current_user.id)  # Используем ID текущего пользователя
+    analytics = get_publications_by_year(current_user.id)
     return jsonify([{
         'year': year,
         'count': count

@@ -21,7 +21,7 @@ class User(db.Model, UserMixin):
     username = db.Column(db.String(50), unique=True, nullable=False)
     publications = db.relationship('Publication', back_populates='user', lazy=True)
     password_hash = db.Column(db.Text)
-    role = db.Column(db.String(20), default='user')
+    role = db.Column(db.String(20), default='user', nullable=False)
     last_name = db.Column(db.String(100), nullable=True)
     first_name = db.Column(db.String(100), nullable=True)
     middle_name = db.Column(db.String(100), nullable=True)
@@ -59,6 +59,7 @@ class Publication(db.Model):
     file_url = db.Column(db.String(200), nullable=True)  # Оставляем как nullable=True
     user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)
     updated_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow(), nullable=False)
+    returned_for_revision = db.Column(db.Boolean, default=False)  # Новое поле
     published_at = db.Column(db.DateTime, nullable=True)
 
     user = db.relationship('User', back_populates='publications', lazy=True)

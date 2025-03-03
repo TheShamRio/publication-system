@@ -4,13 +4,9 @@ import {
 	Container,
 	Typography,
 	Card,
+	Button,
 	CardContent,
 	Box,
-	TextField,
-	List,
-	ListItem,
-	ListItemText,
-	Button,
 	Pagination,
 } from '@mui/material';
 import { styled } from '@mui/system';
@@ -18,14 +14,12 @@ import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import axios from 'axios';
-import ReplyIcon from '@mui/icons-material/Reply';
-import DownloadIcon from '@mui/icons-material/Download'; // Импортируем иконку для скачивания
+import DownloadIcon from '@mui/icons-material/Download';
 import { useAuth } from '../contexts/AuthContext';
+import CommentSection from './CommentSection';
 
-// Указываем путь к worker для pdfjs
 pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
 
-// Стилизация компонентов
 const AppleButton = styled(Button)({
 	borderRadius: '12px',
 	textTransform: 'none',
@@ -38,16 +32,42 @@ const AppleButton = styled(Button)({
 	'&:hover': { backgroundColor: '#0066CC', boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)' },
 });
 
-const AppleTextField = styled(TextField)({
-	'& .MuiOutlinedInput-root': {
-		borderRadius: '12px',
-		backgroundColor: '#F5F5F7',
-		'& fieldset': { borderColor: '#D1D1D6' },
-		'&:hover fieldset': { borderColor: '#0071E3' },
-		'&.Mui-focused fieldset': { borderColor: '#0071E3' },
+const GreenButton = styled(Button)({
+	borderRadius: '12px',
+	textTransform: 'none',
+	backgroundColor: 'green',
+	color: '#FFFFFF',
+	padding: '8px 16px',
+	fontSize: '14px',
+	fontWeight: 600,
+	boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+	'&:hover': {
+		backgroundColor: '#2EBB4A',
+		boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
 	},
-	'& label': { color: '#6E6E73' },
-	'& input': { color: '#1D1D1F' },
+	'&:disabled': {
+		backgroundColor: '#D1D1D6',
+		color: '#FFFFFF',
+	},
+});
+
+const RedButton = styled(Button)({
+	borderRadius: '12px',
+	textTransform: 'none',
+	backgroundColor: '#FF3B30',
+	color: '#FFFFFF',
+	padding: '8px 16px',
+	fontSize: '14px',
+	fontWeight: 600,
+	boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+	'&:hover': {
+		backgroundColor: '#E63935',
+		boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
+	},
+	'&:disabled': {
+		backgroundColor: '#D1D1D6',
+		color: '#FFFFFF',
+	},
 });
 
 const AppleCard = styled(Card)({
@@ -64,7 +84,7 @@ const DocumentViewer = styled(Box)({
 	backgroundColor: '#FFFFFF',
 	boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
 	width: '100%',
-	height: '850px', // Фиксированная высота для страницы
+	height: '850px',
 	display: 'flex',
 	justifyContent: 'center',
 	alignItems: 'flex-start',
@@ -77,17 +97,20 @@ function Publication() {
 	const { id } = useParams();
 	const [publication, setPublication] = useState(null);
 	const [error, setError] = useState('');
-	const [comment, setComment] = useState('');
-	const [replyTo, setReplyTo] = useState(null);
 	const [numPages, setNumPages] = useState(null);
 	const [pageNumber, setPageNumber] = useState(1);
-	const { isAuthenticated, csrfToken } = useAuth();
+	const { user, isAuthenticated, csrfToken } = useAuth();
+	const [hasAdminComment, setHasAdminComment] = useState(false);
+	const [loadingUser, setLoadingUser] = useState(true);
 
-	// Функция загрузки публикации
 	const fetchPublication = useCallback(async () => {
 		try {
 			const response = await axios.get(`http://localhost:5000/api/publications/${id}`, { withCredentials: true });
 			setPublication(response.data);
+			const adminComment = response.data.comments.some(
+				(comment) => comment.user.role === 'admin' || comment.replies.some((reply) => reply.user.role === 'admin')
+			);
+			setHasAdminComment(adminComment);
 		} catch (err) {
 			console.error('Ошибка загрузки публикации:', err);
 			setError('Не удалось загрузить публикацию. Попробуйте позже.');
@@ -98,88 +121,123 @@ function Publication() {
 		fetchPublication();
 	}, [fetchPublication]);
 
-	// Успешная загрузка PDF
+	useEffect(() => {
+		if (user !== null) {
+			setLoadingUser(false);
+		}
+	}, [user]);
+
 	const onDocumentLoadSuccess = ({ numPages }) => {
 		setNumPages(numPages);
 	};
 
-	// Функция для скачивания файла
 	const handleDownload = () => {
 		if (publication && publication.file_url) {
 			const fileUrl = `http://localhost:5000${publication.file_url}`;
 			const link = document.createElement('a');
 			link.href = fileUrl;
-			link.download = publication.file_url.split('/').pop(); // Имя файла для скачивания
+			link.download = publication.file_url.split('/').pop();
 			document.body.appendChild(link);
 			link.click();
 			document.body.removeChild(link);
 		}
 	};
 
-	// Отправка комментария
-	const handleCommentSubmit = async (e) => {
-		e.preventDefault();
-		if (!comment.trim()) return;
-
+	const handlePublish = async () => {
 		try {
-			const response = await axios.post(
-				`http://localhost:5000/api/publications/${id}/comments`,
-				{ content: comment, parent_id: replyTo },
+			await axios.post(
+				`http://localhost:5000/admin_api/admin/publications/${id}/publish`,
+				{},
 				{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
 			);
-			setPublication((prev) => ({
-				...prev,
-				comments: replyTo
-					? prev.comments.map((c) => (c.id === replyTo ? { ...c, replies: [...c.replies, response.data.comment] } : c))
-					: [...prev.comments, response.data.comment],
-			}));
-			setComment('');
-			setReplyTo(null);
+			fetchPublication();
 		} catch (err) {
-			console.error('Ошибка добавления комментария:', err);
-			setError('Не удалось добавить комментарий.');
+			console.error('Ошибка при публикации:', err);
+			setError('Не удалось опубликовать публикацию.');
 		}
 	};
 
-	// Рендеринг комментариев
-	const renderComments = (comments, level = 0) => (
-		<List sx={{ pl: level * 4 }}>
-			{comments.map((comment) => (
-				<React.Fragment key={comment.id}>
-					<ListItem sx={{ borderBottom: '1px solid #E5E5EA', py: 2 }}>
-						<ListItemText
-							primary={<Typography sx={{ color: '#1D1D1F', fontWeight: 500 }}>{comment.user.full_name}:</Typography>}
-							secondary={
-								<>
-									<Typography sx={{ color: '#6E6E73' }}>{comment.content}</Typography>
-									<Typography sx={{ color: '#757575', fontSize: '0.8rem', mt: 1 }}>
-										{new Date(comment.created_at).toLocaleString()}
-									</Typography>
-									{isAuthenticated && (
-										<AppleButton
-											size="small"
-											onClick={() => setReplyTo(comment.id)}
-											sx={{ mt: 1 }}
-											startIcon={<ReplyIcon />}
-										>
-											Ответить
-										</AppleButton>
-									)}
-								</>
-							}
-						/>
-					</ListItem>
-					{comment.replies.length > 0 && renderComments(comment.replies, level + 1)}
-				</React.Fragment>
-			))}
-		</List>
-	);
+	const handleReject = async () => {
+		try {
+			await axios.post(
+				`http://localhost:5000/admin_api/admin/publications/${id}/reject`,
+				{},
+				{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
+			);
+			fetchPublication();
+		} catch (err) {
+			console.error('Ошибка при отправке на доработку:', err);
+			setError('Не удалось отправить на доработку. Убедитесь, что был добавлен комментарий.');
+		}
+	};
 
-	// Обработка ошибок и загрузки
+	const handleCommentAdded = (newComment) => {
+		setPublication((prev) => {
+			if (newComment.parent_id) {
+				const updatedComments = prev.comments.map((comment) =>
+					comment.id === newComment.parent_id
+						? { ...comment, replies: [...comment.replies, newComment] }
+						: comment
+				);
+				return { ...prev, comments: updatedComments };
+			}
+			return { ...prev, comments: [...prev.comments, newComment] };
+		});
+		if (newComment.user.role === 'admin') {
+			setHasAdminComment(true);
+		}
+	};
+
 	if (error) return <Typography color="error">{error}</Typography>;
-	if (!publication) return <Typography sx={{ color: '#212121' }}>Загрузка...</Typography>;
+	if (!publication || loadingUser) return <Typography sx={{ color: '#212121' }}>Загрузка...</Typography>;
 
 	const fileUrl = publication.file_url ? `http://localhost:5000${publication.file_url}` : null;
+
+	// Функция для отображения статуса с учётом локализации и цвета
+	const renderStatus = (status, returnedForRevision, isAdmin) => {
+		let statusText = '';
+		let statusColor = '#757575'; // Цвет по умолчанию (серый)
+
+		if (isAdmin) {
+			// Для администратора
+			switch (status) {
+				case 'draft':
+					statusText = 'Черновик';
+					break;
+				case 'needs_review':
+					statusText = 'Нуждается в проверке';
+					statusColor = '#FF3B30'; // Красный
+					break;
+				case 'published':
+					statusText = 'Опубликованные';
+					break;
+				default:
+					statusText = status;
+			}
+		} else {
+			// Для пользователя
+			if (status === 'needs_review' && !returnedForRevision) {
+				statusText = 'На проверке';
+			} else if (status === 'draft' && returnedForRevision) {
+				statusText = 'Требуется доработка';
+				statusColor = '#FF3B30'; // Красный
+			} else if (status === 'draft') {
+				statusText = 'Черновик';
+			} else if (status === 'published') {
+				statusText = 'Опубликованные';
+			} else {
+				statusText = status;
+			}
+		}
+
+		return <Typography variant="body1" sx={{ color: statusColor, mb: 1 }}>{`Статус: ${statusText}`}</Typography>;
+	};
+
+	// Отладочные сообщения
+	console.log('User:', user);
+	console.log('User role:', user?.role);
+	console.log('Publication status:', publication.status);
+	console.log('Is admin and needs_review:', user?.role === 'admin' && publication.status === 'needs_review');
 
 	return (
 		<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
@@ -195,11 +253,9 @@ function Publication() {
 						Год: {publication.year}
 					</Typography>
 					<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
-						Тип: {publication.type_ru || publication.type}
+						Тип: {publication.type === 'article' ? 'Статья' : publication.type === 'monograph' ? 'Монография' : publication.type === 'conference' ? 'Доклад/конференция' : publication.type}
 					</Typography>
-					<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
-						Статус: {publication.status_ru || publication.status}
-					</Typography>
+					{renderStatus(publication.status, publication.returned_for_revision, user?.role === 'admin')}
 					<Typography variant="body1" sx={{ color: '#757575', mb: 2 }}>
 						Опубликовал: {publication.user.full_name}
 					</Typography>
@@ -259,41 +315,30 @@ function Publication() {
 					)}
 					{fileUrl && (
 						<Box sx={{ mb: 2 }}>
-							<AppleButton
-								startIcon={<DownloadIcon />}
-								onClick={handleDownload}
-							>
+							<AppleButton startIcon={<DownloadIcon />} onClick={handleDownload}>
 								Скачать
 							</AppleButton>
+						</Box>
+					)}
+
+					{user?.role === 'admin' && publication.status === 'needs_review' && (
+						<Box sx={{ mb: 2, display: 'flex', gap: 2 }}>
+							<GreenButton onClick={handlePublish}>Опубликовать</GreenButton>
+							<RedButton onClick={handleReject} disabled={!hasAdminComment}>
+								Отправить на доработку
+							</RedButton>
 						</Box>
 					)}
 
 					<Typography variant="h5" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 600 }}>
 						Комментарии
 					</Typography>
-					{isAuthenticated && (
-						<Box component="form" onSubmit={handleCommentSubmit} sx={{ mb: 3 }}>
-							<AppleTextField
-								fullWidth
-								label={replyTo ? 'Ответить на комментарий' : 'Добавить комментарий'}
-								value={comment}
-								onChange={(e) => setComment(e.target.value)}
-								multiline
-								rows={3}
-								sx={{ mb: 2 }}
-							/>
-							<AppleButton type="submit">Отправить</AppleButton>
-							{replyTo && (
-								<AppleButton onClick={() => setReplyTo(null)} sx={{ ml: 2 }}>
-									Отменить ответ
-								</AppleButton>
-							)}
-						</Box>
-					)}
-					{publication.comments && publication.comments.length > 0 ? (
-						renderComments(publication.comments)
-					) : (
-						<Typography sx={{ color: '#6E6E73' }}>Комментариев пока нет.</Typography>
+					{publication.comments && (
+						<CommentSection
+							comments={publication.comments}
+							publicationId={publication.id}
+							onCommentAdded={handleCommentAdded}
+						/>
 					)}
 				</CardContent>
 			</AppleCard>

@@ -4,6 +4,7 @@ from .extensions import db, migrate, login_manager, csrf
 from .models import User
 import os
 import logging
+from flask_session import Session  # Импортируем Flask-Session
 
 # Настройка логирования
 logging.basicConfig(level=logging.DEBUG)
@@ -13,18 +14,23 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object('config.Config')
 
-    # Генерация секретного ключа
-    import secrets
-    app.secret_key = os.getenv("SECRET_KEY", secrets.token_hex(16))
+    # Устанавливаем фиксированный секретный ключ
+    app.secret_key = os.getenv("SECRET_KEY", "your-fixed-secret-key-here")  # Замените на фиксированное значение или задайте в переменной окружения
 
-    # Конфигурация сессий
+    # Настройка Flask-Session
+    app.config['SESSION_TYPE'] = 'sqlalchemy'  # Храним сессии в базе данных
+    app.config['SESSION_SQLALCHEMY'] = db  # Используем ту же базу данных, что и для моделей
+    app.config['SESSION_PERMANENT'] = True  # Сессии постоянные
+    app.config['PERMANENT_SESSION_LIFETIME'] = 60 * 60 * 24 * 7  # 7 дней
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+    app.config['SESSION_COOKIE_SECURE'] = False  # Установите True в продакшене с HTTPS
 
     # Инициализация расширений
     db.init_app(app)
     migrate.init_app(app, db)
     login_manager.init_app(app)
+    Session(app)  # Инициализируем Flask-Session
     csrf.init_app(app)
 
     # Настройка CORS
@@ -32,7 +38,7 @@ def create_app():
         r"/api/*": {"origins": ["http://localhost:3000", "http://localhost:3001"]},
         r"/admin_api/*": {"origins": ["http://localhost:3000", "http://localhost:3001"]},
         r"/uploads/*": {"origins": ["http://localhost:3000", "http://localhost:3001"]}
-    }, supports_credentials=True, methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'], 
+    }, supports_credentials=True, methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allow_headers=['Content-Type', 'Authorization', 'X-CSRFToken'])
 
     # Регистрация Blueprint'ов

@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request
 from .extensions import db
-from .models import Publication, User
+from .models import Publication, User, Comment
 from .utils import allowed_file
 import bibtexparser
 from flask_login import login_user, current_user, logout_user, login_required
@@ -54,7 +54,7 @@ def admin_register():
         last_name=last_name,
         first_name=first_name,
         middle_name=middle_name,
-        role='user'  # Устанавливаем роль user по умолчанию
+        role='user'
     )
     user.set_password(password)
     try:
@@ -106,7 +106,6 @@ def generate_password():
 
     logger.debug("Получен GET запрос для /admin_api/admin/generate-password")
     
-    # Генерация надёжного пароля
     chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+'
     password_length = 12
     password = ''.join(secrets.choice(chars) for _ in range(password_length))
@@ -128,10 +127,8 @@ def get_all_users():
     per_page = request.args.get('per_page', 10, type=int)
     search = request.args.get('search', '').lower()
     
-    # Базовый запрос
     query = User.query
     
-    # Фильтрация по поиску
     if search:
         query = query.filter(
             db.or_(
@@ -142,7 +139,6 @@ def get_all_users():
             )
         )
     
-    # Сортировка по updated_at или created_at от новых к старым
     pagination = query.order_by(db.func.coalesce(User.updated_at, User.created_at).desc()).paginate(page=page, per_page=per_page, error_out=False)
     users = pagination.items
     
@@ -168,7 +164,7 @@ def get_all_users():
 def user_management(user_id):
     if request.method == 'OPTIONS':
         logger.debug(f"Handling OPTIONS for /admin_api/admin/users/{user_id}")
-        return jsonify({}), 200  # CORS уже обрабатывается в __init__.py
+        return jsonify({}), 200
 
     logger.debug(f"Получен {request.method} запрос для /admin_api/admin/users/{user_id}")
     user = User.query.get_or_404(user_id)
@@ -181,7 +177,6 @@ def user_management(user_id):
         user.first_name = data.get('first_name', user.first_name)
         user.middle_name = data.get('middle_name', user.middle_name)
         
-        # Обновление пароля, если он указан
         new_password = data.get('new_password')
         if new_password:
             user.set_password(new_password)
@@ -225,6 +220,101 @@ def user_management(user_id):
             db.session.rollback()
             logger.error(f"Ошибка удаления пользователя {user_id}: {str(e)}")
             return jsonify({"error": "Ошибка при удалении пользователя. Попробуйте позже."}), 500
+
+@bp.route('/admin/publications/needs-review', methods=['GET', 'OPTIONS'])
+@login_required
+@admin_required
+def get_needs_review_publications():
+    if request.method == 'OPTIONS':
+        logger.debug("Handling OPTIONS for /admin_api/admin/publications/needs-review")
+        return jsonify({}), 200
+
+    logger.debug(f"Получен GET запрос для /admin_api/admin/publications/needs-review")
+    
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    search = request.args.get('search', '').lower()
+    
+    query = Publication.query.filter_by(status='needs_review')
+    
+    if search:
+        query = query.filter(
+            db.or_(
+                Publication.title.ilike(f'%{search}%'),
+                Publication.authors.ilike(f'%{search}%'),
+                db.cast(Publication.year, db.String).ilike(f'%{search}%')
+            )
+        )
+    
+    pagination = query.order_by(Publication.updated_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
+    publications = pagination.items
+    
+    return jsonify({
+        'publications': [{
+            'id': pub.id,
+            'title': pub.title,
+            'authors': pub.authors,
+            'year': pub.year,
+            'type': pub.type,
+            'status': pub.status,
+            'file_url': pub.file_url,
+            'user_id': pub.user_id,
+            'user': {'full_name': pub.user.full_name if pub.user else 'Не указан'},
+            'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
+            'published_at': pub.published_at.isoformat() if pub.published_at else None,
+            'returned_for_revision': pub.returned_for_revision,  # Новое поле
+        } for pub in publications],
+        'total': pagination.total,
+        'pages': pagination.pages,
+        'current_page': pagination.page
+    }), 200
+
+@bp.route('/admin/publications/<int:pub_id>/publish', methods=['POST'])
+@login_required
+@admin_required
+def publish_publication(pub_id):
+    publication = Publication.query.get_or_404(pub_id)
+
+    if publication.status != 'needs_review':
+        return jsonify({'error': 'Публикация не находится в статусе "Нуждается в проверке"'}), 400
+
+    publication.status = 'published'
+    publication.published_at = datetime.utcnow()
+    publication.updated_at = datetime.utcnow()
+    publication.returned_for_revision = False  # Сбрасываем флаг
+
+    try:
+        db.session.commit()
+        return jsonify({'message': 'Публикация успешно опубликована'}), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Ошибка публикации {pub_id}: {str(e)}")
+        return jsonify({'error': 'Ошибка при публикации. Попробуйте позже.'}), 500
+
+@bp.route('/admin/publications/<int:pub_id>/reject', methods=['POST'])
+@login_required
+@admin_required
+def reject_publication(pub_id):
+    publication = Publication.query.get_or_404(pub_id)
+
+    if publication.status != 'needs_review':
+        return jsonify({'error': 'Публикация не находится в статусе "Нуждается в проверке"'}), 400
+
+    admin_comment_exists = Comment.query.filter_by(publication_id=pub_id, user_id=current_user.id).first()
+    if not admin_comment_exists:
+        return jsonify({'error': 'Необходимо добавить комментарий с описанием ошибки перед возвратом на исправление'}), 400
+
+    publication.status = 'draft'
+    publication.updated_at = datetime.utcnow()
+    publication.returned_for_revision = True  # Устанавливаем флаг
+
+    try:
+        db.session.commit()
+        return jsonify({'message': 'Публикация возвращена на исправление'}), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Ошибка возврата на исправление публикации {pub_id}: {str(e)}")
+        return jsonify({'error': 'Ошибка при возврате на исправление. Попробуйте позже.'}), 500
 
 @bp.route('/admin/publications', methods=['GET', 'OPTIONS'])
 @login_required
@@ -277,8 +367,10 @@ def get_all_publications():
             'status': pub.status,
             'file_url': pub.file_url,
             'user_id': pub.user_id,
+            'user': {'full_name': pub.user.full_name if pub.user else 'Не указан'},
             'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
-            'published_at': pub.published_at.isoformat() if pub.published_at else None
+            'published_at': pub.published_at.isoformat() if pub.published_at else None,
+            'returned_for_revision': pub.returned_for_revision,  # Новое поле
         } for pub in publications],
         'total': pagination.total,
         'pages': pagination.pages,
@@ -320,6 +412,9 @@ def publication_management(pub_id):
         publication.year = data.get('year', publication.year)
         publication.type = data.get('type', publication.type)
         publication.status = data.get('status', publication.status)
+        # При изменении статуса сбрасываем флаг, если статус не draft
+        if publication.status != 'draft':
+            publication.returned_for_revision = False
         
         try:
             db.session.commit()
@@ -332,7 +427,8 @@ def publication_management(pub_id):
                     'year': publication.year,
                     'type': publication.type,
                     'status': publication.status,
-                    'file_url': publication.file_url
+                    'file_url': publication.file_url,
+                    'returned_for_revision': publication.returned_for_revision,  # Новое поле
                 }
             }), 200
         except Exception as e:

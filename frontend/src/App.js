@@ -9,7 +9,55 @@ import AdminDashboard from './components/AdminDashboard';
 import { useAuth } from './contexts/AuthContext';
 
 function App() {
-	const { isAuthenticated, role } = useAuth();
+	const { isAuthenticated, user, isLoading } = useAuth();
+
+	// Используем role из user, если он доступен, иначе из localStorage
+	const storedUser = localStorage.getItem('user');
+	const parsedUser = storedUser ? JSON.parse(storedUser) : null;
+	const role = user?.role || parsedUser?.role || 'user';
+
+	console.log('App.js: isAuthenticated:', isAuthenticated, 'Role:', role);
+
+	if (isLoading) {
+		console.log('App.js: Загрузка состояния аутентификации...');
+		return <div>Загрузка...</div>;
+	}
+
+	const handleDashboardRedirect = () => {
+		if (!isAuthenticated) {
+			console.log('App.js: Перенаправление на /login: isAuthenticated is false');
+			return <Navigate to="/login" replace />;
+		} else if (role === 'admin') {
+			console.log('App.js: Перенаправление на /admin: role is admin');
+			return <Navigate to="/admin" replace />;
+		} else if (role !== 'user') {
+			console.log('App.js: Перенаправление на /login: role is not user, role:', role);
+			return <Navigate to="/login" replace />;
+		}
+		return <Navigate to="/login" replace />;
+	};
+
+	const handleAdminRedirect = () => {
+		if (!isAuthenticated) {
+			console.log('App.js: Перенаправление на /login: isAuthenticated is false');
+			return <Navigate to="/login" replace />;
+		} else if (role === 'user') {
+			console.log('App.js: Перенаправление на /dashboard: role is user');
+			return <Navigate to="/dashboard" replace />;
+		} else if (role !== 'admin') {
+			console.log('App.js: Перенаправление на /login: role is not admin, role:', role);
+			return <Navigate to="/login" replace />;
+		}
+		return <Navigate to="/login" replace />;
+	};
+
+	const handlePublicationRedirect = () => {
+		if (!isAuthenticated) {
+			console.log('App.js: Перенаправление на /login: isAuthenticated is false');
+			return <Navigate to="/login" replace />;
+		}
+		return null;
+	};
 
 	return (
 		<Routes>
@@ -18,16 +66,35 @@ function App() {
 				<Route path="/login" element={<Login />} />
 				<Route
 					path="/dashboard"
-					element={isAuthenticated && role === 'user' ? <Dashboard /> : <Navigate to="/login" />}
+					element={
+						isAuthenticated && role === 'user' ? (
+							<Dashboard />
+						) : (
+							handleDashboardRedirect()
+						)
+					}
 				/>
 				<Route
 					path="/publication/:id"
-					element={isAuthenticated ? <Publication /> : <Navigate to="/login" />}
+					element={
+						isAuthenticated ? (
+							<Publication />
+						) : (
+							handlePublicationRedirect()
+						)
+					}
 				/>
 				<Route
 					path="/admin"
-					element={isAuthenticated && role === 'admin' ? <AdminDashboard /> : <Navigate to="/login" />}
+					element={
+						isAuthenticated && role === 'admin' ? (
+							<AdminDashboard />
+						) : (
+							handleAdminRedirect()
+						)
+					}
 				/>
+				<Route path="*" element={<Navigate to="/" replace />} />
 			</Route>
 		</Routes>
 	);
