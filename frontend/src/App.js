@@ -6,6 +6,7 @@ import Dashboard from './components/Dashboard';
 import Publication from './components/Publication';
 import Layout from './components/Layout';
 import AdminDashboard from './components/AdminDashboard';
+import ManagerDashboard from './components/ManagerDashboard'; // Импортируем новый компонент
 import { useAuth } from './contexts/AuthContext';
 
 function App() {
@@ -30,6 +31,9 @@ function App() {
 		} else if (role === 'admin') {
 			console.log('App.js: Перенаправление на /admin: role is admin');
 			return <Navigate to="/admin" replace />;
+		} else if (role === 'manager') {
+			console.log('App.js: Перенаправление на /manager: role is manager');
+			return <Navigate to="/manager" replace />;
 		} else if (role !== 'user') {
 			console.log('App.js: Перенаправление на /login: role is not user, role:', role);
 			return <Navigate to="/login" replace />;
@@ -44,8 +48,28 @@ function App() {
 		} else if (role === 'user') {
 			console.log('App.js: Перенаправление на /dashboard: role is user');
 			return <Navigate to="/dashboard" replace />;
+		} else if (role === 'manager') {
+			console.log('App.js: Перенаправление на /manager: role is manager');
+			return <Navigate to="/manager" replace />;
 		} else if (role !== 'admin') {
 			console.log('App.js: Перенаправление на /login: role is not admin, role:', role);
+			return <Navigate to="/login" replace />;
+		}
+		return <Navigate to="/login" replace />;
+	};
+
+	const handleManagerRedirect = () => {
+		if (!isAuthenticated) {
+			console.log('App.js: Перенаправление на /login: isAuthenticated is false');
+			return <Navigate to="/login" replace />;
+		} else if (role === 'user') {
+			console.log('App.js: Перенаправление на /dashboard: role is user');
+			return <Navigate to="/dashboard" replace />;
+		} else if (role === 'admin') {
+			console.log('App.js: Перенаправление на /admin: role is admin');
+			return <Navigate to="/admin" replace />;
+		} else if (role !== 'manager') {
+			console.log('App.js: Перенаправление на /login: role is not manager, role:', role);
 			return <Navigate to="/login" replace />;
 		}
 		return <Navigate to="/login" replace />;
@@ -91,6 +115,16 @@ function App() {
 							<AdminDashboard />
 						) : (
 							handleAdminRedirect()
+						)
+					}
+				/>
+				<Route
+					path="/manager"
+					element={
+						isAuthenticated && role === 'manager' ? (
+							<ManagerDashboard />
+						) : (
+							handleManagerRedirect()
 						)
 					}
 				/>

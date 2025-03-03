@@ -4,7 +4,7 @@ from .extensions import db, migrate, login_manager, csrf
 from .models import User
 import os
 import logging
-from flask_session import Session  # Импортируем Flask-Session
+from flask_session import Session
 
 # Настройка логирования
 logging.basicConfig(level=logging.DEBUG)
@@ -15,12 +15,12 @@ def create_app():
     app.config.from_object('config.Config')
 
     # Устанавливаем фиксированный секретный ключ
-    app.secret_key = os.getenv("SECRET_KEY", "your-fixed-secret-key-here")  # Замените на фиксированное значение или задайте в переменной окружения
+    app.secret_key = os.getenv("SECRET_KEY", "your-fixed-secret-key-here")
 
     # Настройка Flask-Session
-    app.config['SESSION_TYPE'] = 'sqlalchemy'  # Храним сессии в базе данных
-    app.config['SESSION_SQLALCHEMY'] = db  # Используем ту же базу данных, что и для моделей
-    app.config['SESSION_PERMANENT'] = True  # Сессии постоянные
+    app.config['SESSION_TYPE'] = 'sqlalchemy'
+    app.config['SESSION_SQLALCHEMY'] = db
+    app.config['SESSION_PERMANENT'] = True
     app.config['PERMANENT_SESSION_LIFETIME'] = 60 * 60 * 24 * 7  # 7 дней
     app.config['SESSION_COOKIE_HTTPONLY'] = True
     app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
@@ -30,7 +30,7 @@ def create_app():
     db.init_app(app)
     migrate.init_app(app, db)
     login_manager.init_app(app)
-    Session(app)  # Инициализируем Flask-Session
+    Session(app)
     csrf.init_app(app)
 
     # Настройка CORS
@@ -60,7 +60,7 @@ def create_app():
             response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-CSRFToken'
             response.headers['Access-Control-Allow-Credentials'] = 'true'
-            response.headers['Access-Control-Max-Age'] = '86400'  # Кэширование на 24 часа
+            response.headers['Access-Control-Max-Age'] = '86400'
             return response, 200
 
     # Обработчик для загрузки файлов

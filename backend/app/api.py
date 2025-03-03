@@ -1,39 +1,287 @@
-from flask import Blueprint, jsonify, request
-from .extensions import db
-from .models import Publication, User, Comment
-from .utils import allowed_file
-import bibtexparser
-from flask_login import login_user, current_user, logout_user, login_required
-from .middleware import admin_required
-from .analytics import get_publications_by_year
-from flask import current_app
+from flask import Blueprint, jsonify, request, send_file
 from werkzeug.utils import secure_filename
+from flask_login import login_required, current_user
+from flask import current_app
+from app.extensions import db
+from app.models import Publication, User
 import os
 import logging
-import secrets
+from io import BytesIO
+import bibtexparser
 from datetime import datetime
-from werkzeug.security import generate_password_hash, check_password_hash
-from sqlalchemy import func, desc
-from functools import wraps
 
-bp = Blueprint('admin_api', __name__)
-
-logging.basicConfig(level=logging.DEBUG)
+bp = Blueprint('admin_api', __name__, url_prefix='/admin_api')
 logger = logging.getLogger(__name__)
 
-@bp.before_request
-def log_request():
-    logger.debug(f"Received request for {request.path} with method {request.method}")
+# Проверка, является ли пользователь администратором или управляющим
+def admin_or_manager_required(f):
+    @login_required
+    def wrapper(*args, **kwargs):
+        if current_user.role not in ['admin', 'manager']:
+            logger.warning(f"Unauthorized access attempt by user {current_user.id} with role {current_user.role}")
+            return jsonify({"error": "Доступ запрещён. Требуется роль администратора или управляющего."}), 403
+        return f(*args, **kwargs)
+    wrapper.__name__ = f.__name__
+    return wrapper
 
-@bp.route('/admin/register', methods=['POST', 'OPTIONS'])
-@login_required
+# Проверка, является ли пользователь администратором
+def admin_required(f):
+    @login_required
+    def wrapper(*args, **kwargs):
+        if current_user.role != 'admin':
+            logger.warning(f"Unauthorized access attempt by user {current_user.id} with role {current_user.role}")
+            return jsonify({"error": "Доступ запрещён. Требуется роль администратора."}), 403
+        return f(*args, **kwargs)
+    wrapper.__name__ = f.__name__
+    return wrapper
+
+@bp.route('/admin/users', methods=['GET'])
 @admin_required
-def admin_register():
-    if request.method == 'OPTIONS':
-        logger.debug("Handling OPTIONS for /admin_api/admin/register")
-        return jsonify({}), 200
+def get_users():
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    search = request.args.get('search', '', type=str)
 
-    logger.debug("Получен POST запрос для /admin_api/admin/register")
+    query = User.query
+    if search:
+        search_pattern = f'%{search}%'
+        query = query.filter(
+            (User.username.ilike(search_pattern)) |
+            (User.last_name.ilike(search_pattern)) |
+            (User.first_name.ilike(search_pattern)) |
+            (User.middle_name.ilike(search_pattern))
+        )
+
+    paginated_users = query.paginate(page=page, per_page=per_page, error_out=False)
+    users = [{
+        'id': user.id,
+        'username': user.username,
+        'role': user.role,
+        'last_name': user.last_name,
+        'first_name': user.first_name,
+        'middle_name': user.middle_name,
+        'full_name': user.full_name,
+    } for user in paginated_users.items]
+
+    return jsonify({
+        'users': users,
+        'pages': paginated_users.pages,
+        'total': paginated_users.total
+    }), 200
+
+@bp.route('/admin/users/<int:user_id>', methods=['PUT'])
+@admin_required
+def update_user(user_id):
+    user = User.query.get_or_404(user_id)
+    data = request.get_json()
+
+    user.username = data.get('username', user.username)
+    user.role = data.get('role', user.role)
+    user.last_name = data.get('last_name', user.last_name)
+    user.first_name = data.get('first_name', user.first_name)
+    user.middle_name = data.get('middle_name', user.middle_name)
+
+    if 'new_password' in data and data['new_password']:
+        user.set_password(data['new_password'])
+
+    try:
+        db.session.commit()
+        return jsonify({
+            'message': 'Пользователь успешно обновлён',
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'role': user.role,
+                'last_name': user.last_name,
+                'first_name': user.first_name,
+                'middle_name': user.middle_name
+            }
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Ошибка при обновлении пользователя {user_id}: {str(e)}")
+        return jsonify({"error": "Ошибка при обновлении пользователя. Попробуйте позже."}), 500
+
+@bp.route('/admin/users/<int:user_id>', methods=['DELETE'])
+@admin_required
+def delete_user(user_id):
+    user = User.query.get_or_404(user_id)
+
+    if user.id == current_user.id:
+        return jsonify({"error": "Нельзя удалить самого себя."}), 400
+
+    try:
+        db.session.delete(user)
+        db.session.commit()
+        return jsonify({"message": "Пользователь успешно удалён."}), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Ошибка при удалении пользователя {user_id}: {str(e)}")
+        return jsonify({"error": "Ошибка при удалении пользователя. Попробуйте позже."}), 500
+
+@bp.route('/admin/publications', methods=['GET'])
+@admin_required
+def get_publications():
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    search = request.args.get('search', '', type=str)
+    pub_type = request.args.get('type', 'all', type=str)
+    status = request.args.get('status', 'all', type=str)
+
+    query = Publication.query
+    if search:
+        search_pattern = f'%{search}%'
+        query = query.filter(
+            (Publication.title.ilike(search_pattern)) |
+            (Publication.authors.ilike(search_pattern)) |
+            (Publication.year.ilike(search_pattern))
+        )
+
+    if pub_type != 'all':
+        query = query.filter_by(type=pub_type)
+    if status != 'all':
+        query = query.filter_by(status=status)
+
+    paginated_publications = query.paginate(page=page, per_page=per_page, error_out=False)
+
+    publications = [{
+        'id': pub.id,
+        'title': pub.title,
+        'authors': pub.authors,
+        'year': pub.year,
+        'type': pub.type,
+        'status': pub.status,
+        'file_url': pub.file_url,
+        'user': {
+            'id': pub.user.id if pub.user else None,
+            'full_name': pub.user.full_name if pub.user else None
+        },
+        'returned_for_revision': pub.returned_for_revision,
+        'published_at': pub.published_at.isoformat() if pub.published_at else None
+    } for pub in paginated_publications.items]
+
+    return jsonify({
+        'publications': publications,
+        'pages': paginated_publications.pages,
+        'total': paginated_publications.total
+    }), 200
+
+@bp.route('/admin/publications/<int:pub_id>', methods=['PUT'])
+@admin_or_manager_required
+def update_publication(pub_id):
+    publication = Publication.query.get_or_404(pub_id)
+    if 'file' in request.files:
+        file = request.files['file']
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+
+            if os.path.exists(file_path):
+                base, extension = os.path.splitext(filename)
+                counter = 1
+                while os.path.exists(file_path):
+                    filename = f"{base}_{counter}{extension}"
+                    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+                    counter += 1
+
+            try:
+                file.save(file_path)
+                publication.file_url = f"/uploads/{filename}"
+            except Exception as e:
+                logger.error(f"Ошибка при сохранении файла: {str(e)}")
+                return jsonify({"error": "Ошибка при сохранении файла. Попробуйте снова."}), 500
+
+    data = request.form if 'file' in request.files else request.get_json()
+    publication.title = data.get('title', publication.title)
+    publication.authors = data.get('authors', publication.authors)
+    publication.year = int(data.get('year', publication.year))
+    publication.type = data.get('type', publication.type)
+    publication.status = data.get('status', publication.status)
+
+    if publication.status == 'published' and not publication.published_at:
+        publication.published_at = datetime.utcnow()
+
+    try:
+        db.session.commit()
+        return jsonify({
+            'message': 'Публикация успешно обновлена',
+            'publication': {
+                'id': publication.id,
+                'title': publication.title,
+                'authors': publication.authors,
+                'year': publication.year,
+                'type': publication.type,
+                'status': publication.status,
+                'file_url': publication.file_url,
+                'published_at': publication.published_at.isoformat() if publication.published_at else None
+            }
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Ошибка при обновлении публикации {pub_id}: {str(e)}")
+        return jsonify({"error": "Ошибка при обновлении публикации. Попробуйте позже."}), 500
+
+@bp.route('/admin/publications/<int:pub_id>', methods=['DELETE'])
+@admin_or_manager_required
+def delete_publication(pub_id):
+    publication = Publication.query.get_or_404(pub_id)
+    try:
+        if publication.file_url:
+            file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
+            if os.path.exists(file_path):
+                os.remove(file_path)
+
+        db.session.delete(publication)
+        db.session.commit()
+        return jsonify({"message": "Публикация успешно удалена."}), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Ошибка при удалении публикации {pub_id}: {str(e)}")
+        return jsonify({"error": "Ошибка при удалении публикации. Попробуйте позже."}), 500
+
+@bp.route('/admin/publications/needs-review', methods=['GET'])
+@admin_or_manager_required
+def get_needs_review_publications():
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    search = request.args.get('search', '', type=str)
+
+    query = Publication.query.filter_by(status='needs_review')
+    if search:
+        search_pattern = f'%{search}%'
+        query = query.filter(
+            (Publication.title.ilike(search_pattern)) |
+            (Publication.authors.ilike(search_pattern)) |
+            (Publication.year.ilike(search_pattern))
+        )
+
+    paginated_publications = query.paginate(page=page, per_page=per_page, error_out=False)
+
+    publications = [{
+        'id': pub.id,
+        'title': pub.title,
+        'authors': pub.authors,
+        'year': pub.year,
+        'type': pub.type,
+        'status': pub.status,
+        'file_url': pub.file_url,
+        'user': {
+            'id': pub.user.id if pub.user else None,
+            'full_name': pub.user.full_name if pub.user else None
+        },
+        'returned_for_revision': pub.returned_for_revision,
+        'published_at': pub.published_at.isoformat() if pub.published_at else None
+    } for pub in paginated_publications.items]
+
+    return jsonify({
+        'publications': publications,
+        'pages': paginated_publications.pages,
+        'total': paginated_publications.total
+    }), 200
+
+@bp.route('/admin/register', methods=['POST'])
+@admin_or_manager_required
+def register():
     data = request.get_json()
     username = data.get('username')
     password = data.get('password')
@@ -41,409 +289,47 @@ def admin_register():
     first_name = data.get('first_name')
     middle_name = data.get('middle_name')
 
-    if not username or not password or not last_name or not first_name or not middle_name:
-        logger.error("Не все обязательные поля заполнены")
-        return jsonify({'error': 'Все поля (логин, пароль, ФИО) обязательны'}), 400
+    if not username or not password:
+        return jsonify({"error": "Логин и пароль обязательны."}), 400
 
-    if User.query.filter_by(username=username).first():
-        logger.error(f"Пользователь с логином {username} уже существует")
-        return jsonify({'error': 'Пользователь с таким логином уже существует'}), 400
+    existing_user = User.query.filter_by(username=username).first()
+    if existing_user:
+        return jsonify({"error": "Пользователь с таким логином уже существует."}), 400
 
-    user = User(
+    new_user = User(
         username=username,
         last_name=last_name,
         first_name=first_name,
         middle_name=middle_name,
-        role='user'
     )
-    user.set_password(password)
+    new_user.set_password(password)
+
     try:
-        db.session.add(user)
+        db.session.add(new_user)
         db.session.commit()
-        logger.info(f"Пользователь {username} успешно зарегистрирован администратором")
-        return jsonify({
-            'message': 'Пользователь успешно зарегистрирован',
-            'user': {
-                'username': user.username,
-                'role': user.role,
-                'last_name': user.last_name,
-                'first_name': user.first_name,
-                'middle_name': user.middle_name
-            }
-        }), 201
+        logger.debug(f"User registered successfully: {username}, response: {'Пользователь успешно зарегистрирован.'}")
+        return jsonify({"message": "Пользователь успешно зарегистрирован."}), 201
     except Exception as e:
         db.session.rollback()
-        logger.error(f"Ошибка регистрации пользователя {username}: {str(e)}")
-        return jsonify({'error': 'Ошибка при регистрации. Попробуйте позже.'}), 500
+        logger.error(f"Ошибка при регистрации пользователя {username}: {str(e)}")
+        return jsonify({"error": "Ошибка при регистрации. Попробуйте позже."}), 500
 
-@bp.route('/admin/check-username', methods=['POST', 'OPTIONS'])
-@login_required
-@admin_required
+@bp.route('/admin/check-username', methods=['POST'])
+@admin_or_manager_required  # Изменён с @admin_required на @admin_or_manager_required
 def check_username():
-    if request.method == 'OPTIONS':
-        logger.debug("Handling OPTIONS for /admin_api/admin/check-username")
-        return jsonify({}), 200
-
-    logger.debug("Получен POST запрос для /admin_api/admin/check-username")
     data = request.get_json()
     username = data.get('username')
-
-    if not username:
-        return jsonify({'error': 'Логин не указан'}), 400
-
     user = User.query.filter_by(username=username).first()
-    if user:
-        return jsonify({'exists': True, 'message': 'Пользователь с таким логином уже существует'}), 200
-    return jsonify({'exists': False, 'message': 'Логин доступен'}), 200
+    return jsonify({'exists': user is not None})
 
-@bp.route('/admin/generate-password', methods=['GET', 'OPTIONS'])
-@login_required
-@admin_required
+@bp.route('/admin/generate-password', methods=['GET'])
+@admin_or_manager_required  # Я также обновлю этот маршрут, чтобы быть последовательным
 def generate_password():
-    if request.method == 'OPTIONS':
-        logger.debug("Handling OPTIONS for /admin_api/admin/generate-password")
-        return jsonify({}), 200
+    import secrets
+    import string
+    characters = string.ascii_letters + string.digits + string.punctuation
+    password = ''.join(secrets.choice(characters) for _ in range(12))
+    return jsonify({'password': password})
 
-    logger.debug("Получен GET запрос для /admin_api/admin/generate-password")
-    
-    chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789!@#$%^&*()_+'
-    password_length = 12
-    password = ''.join(secrets.choice(chars) for _ in range(password_length))
-    
-    return jsonify({'password': password}), 200
-
-@bp.route('/admin/users', methods=['GET', 'OPTIONS'])
-@login_required
-@admin_required
-def get_all_users():
-    if request.method == 'OPTIONS':
-        logger.debug("Handling OPTIONS for /admin_api/admin/users")
-        return jsonify({}), 200
-
-    logger.debug(f"Получен GET запрос для /admin_api/admin/users")
-    logger.debug(f"Current user: {current_user}, Role: {current_user.role if current_user.is_authenticated else 'Not authenticated'}")
-    
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 10, type=int)
-    search = request.args.get('search', '').lower()
-    
-    query = User.query
-    
-    if search:
-        query = query.filter(
-            db.or_(
-                User.username.ilike(f'%{search}%'),
-                User.last_name.ilike(f'%{search}%'),
-                User.first_name.ilike(f'%{search}%'),
-                User.middle_name.ilike(f'%{search}%')
-            )
-        )
-    
-    pagination = query.order_by(db.func.coalesce(User.updated_at, User.created_at).desc()).paginate(page=page, per_page=per_page, error_out=False)
-    users = pagination.items
-    
-    return jsonify({
-        'users': [{
-            'id': user.id,
-            'username': user.username,
-            'role': user.role,
-            'last_name': user.last_name,
-            'first_name': user.first_name,
-            'middle_name': user.middle_name,
-            'created_at': user.created_at.isoformat() if user.created_at else None,
-            'updated_at': user.updated_at.isoformat() if hasattr(user, 'updated_at') and user.updated_at else None
-        } for user in users],
-        'total': pagination.total,
-        'pages': pagination.pages,
-        'current_page': pagination.page
-    }), 200
-
-@bp.route('/admin/users/<int:user_id>', methods=['PUT', 'DELETE', 'OPTIONS'])
-@login_required
-@admin_required
-def user_management(user_id):
-    if request.method == 'OPTIONS':
-        logger.debug(f"Handling OPTIONS for /admin_api/admin/users/{user_id}")
-        return jsonify({}), 200
-
-    logger.debug(f"Получен {request.method} запрос для /admin_api/admin/users/{user_id}")
-    user = User.query.get_or_404(user_id)
-    
-    if request.method == 'PUT':
-        data = request.json
-        user.username = data.get('username', user.username)
-        user.role = data.get('role', user.role)
-        user.last_name = data.get('last_name', user.last_name)
-        user.first_name = data.get('first_name', user.first_name)
-        user.middle_name = data.get('middle_name', user.middle_name)
-        
-        new_password = data.get('new_password')
-        if new_password:
-            user.set_password(new_password)
-            logger.debug(f"Пароль пользователя {user.username} обновлён администратором")
-
-        try:
-            db.session.commit()
-            return jsonify({
-                'message': 'Пользователь успешно обновлён',
-                'user': {
-                    'id': user.id,
-                    'username': user.username,
-                    'role': user.role,
-                    'last_name': user.last_name,
-                    'first_name': user.first_name,
-                    'middle_name': user.middle_name
-                }
-            }), 200
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Ошибка обновления пользователя {user_id}: {str(e)}")
-            return jsonify({"error": "Ошибка при обновлении пользователя. Попробуйте позже."}), 500
-
-    elif request.method == 'DELETE':
-        try:
-            deleted_user = User.query.filter_by(username='deleted_user').first()
-            if not deleted_user:
-                deleted_user = User(username='deleted_user', role='deleted')
-                deleted_user.set_password('deleted')
-                db.session.add(deleted_user)
-                db.session.commit()
-
-            publications = Publication.query.filter_by(user_id=user_id).all()
-            for pub in publications:
-                pub.user_id = deleted_user.id
-
-            db.session.delete(user)
-            db.session.commit()
-            return jsonify({'message': 'Пользователь успешно удалён, его публикации переназначены'}), 200
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Ошибка удаления пользователя {user_id}: {str(e)}")
-            return jsonify({"error": "Ошибка при удалении пользователя. Попробуйте позже."}), 500
-
-@bp.route('/admin/publications/needs-review', methods=['GET', 'OPTIONS'])
-@login_required
-@admin_required
-def get_needs_review_publications():
-    if request.method == 'OPTIONS':
-        logger.debug("Handling OPTIONS for /admin_api/admin/publications/needs-review")
-        return jsonify({}), 200
-
-    logger.debug(f"Получен GET запрос для /admin_api/admin/publications/needs-review")
-    
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 10, type=int)
-    search = request.args.get('search', '').lower()
-    
-    query = Publication.query.filter_by(status='needs_review')
-    
-    if search:
-        query = query.filter(
-            db.or_(
-                Publication.title.ilike(f'%{search}%'),
-                Publication.authors.ilike(f'%{search}%'),
-                db.cast(Publication.year, db.String).ilike(f'%{search}%')
-            )
-        )
-    
-    pagination = query.order_by(Publication.updated_at.desc()).paginate(page=page, per_page=per_page, error_out=False)
-    publications = pagination.items
-    
-    return jsonify({
-        'publications': [{
-            'id': pub.id,
-            'title': pub.title,
-            'authors': pub.authors,
-            'year': pub.year,
-            'type': pub.type,
-            'status': pub.status,
-            'file_url': pub.file_url,
-            'user_id': pub.user_id,
-            'user': {'full_name': pub.user.full_name if pub.user else 'Не указан'},
-            'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
-            'published_at': pub.published_at.isoformat() if pub.published_at else None,
-            'returned_for_revision': pub.returned_for_revision,  # Новое поле
-        } for pub in publications],
-        'total': pagination.total,
-        'pages': pagination.pages,
-        'current_page': pagination.page
-    }), 200
-
-@bp.route('/admin/publications/<int:pub_id>/publish', methods=['POST'])
-@login_required
-@admin_required
-def publish_publication(pub_id):
-    publication = Publication.query.get_or_404(pub_id)
-
-    if publication.status != 'needs_review':
-        return jsonify({'error': 'Публикация не находится в статусе "Нуждается в проверке"'}), 400
-
-    publication.status = 'published'
-    publication.published_at = datetime.utcnow()
-    publication.updated_at = datetime.utcnow()
-    publication.returned_for_revision = False  # Сбрасываем флаг
-
-    try:
-        db.session.commit()
-        return jsonify({'message': 'Публикация успешно опубликована'}), 200
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Ошибка публикации {pub_id}: {str(e)}")
-        return jsonify({'error': 'Ошибка при публикации. Попробуйте позже.'}), 500
-
-@bp.route('/admin/publications/<int:pub_id>/reject', methods=['POST'])
-@login_required
-@admin_required
-def reject_publication(pub_id):
-    publication = Publication.query.get_or_404(pub_id)
-
-    if publication.status != 'needs_review':
-        return jsonify({'error': 'Публикация не находится в статусе "Нуждается в проверке"'}), 400
-
-    admin_comment_exists = Comment.query.filter_by(publication_id=pub_id, user_id=current_user.id).first()
-    if not admin_comment_exists:
-        return jsonify({'error': 'Необходимо добавить комментарий с описанием ошибки перед возвратом на исправление'}), 400
-
-    publication.status = 'draft'
-    publication.updated_at = datetime.utcnow()
-    publication.returned_for_revision = True  # Устанавливаем флаг
-
-    try:
-        db.session.commit()
-        return jsonify({'message': 'Публикация возвращена на исправление'}), 200
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Ошибка возврата на исправление публикации {pub_id}: {str(e)}")
-        return jsonify({'error': 'Ошибка при возврате на исправление. Попробуйте позже.'}), 500
-
-@bp.route('/admin/publications', methods=['GET', 'OPTIONS'])
-@login_required
-@admin_required
-def get_all_publications():
-    if request.method == 'OPTIONS':
-        logger.debug("Handling OPTIONS for /admin_api/admin/publications")
-        return jsonify({}), 200
-
-    logger.debug(f"Получен GET запрос для /admin_api/admin/publications")
-    
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 10, type=int)
-    search = request.args.get('search', '').lower()
-    pub_type = request.args.get('type', 'all')
-    status = request.args.get('status', 'all')
-    
-    # Базовый запрос
-    query = Publication.query
-    
-    # Фильтрация по поиску
-    if search:
-        query = query.filter(
-            db.or_(
-                Publication.title.ilike(f'%{search}%'),
-                Publication.authors.ilike(f'%{search}%'),
-                db.cast(Publication.year, db.String).ilike(f'%{search}%')
-            )
-        )
-    
-    # Фильтрация по типу
-    if pub_type != 'all':
-        query = query.filter(Publication.type == pub_type)
-    
-    # Фильтрация по статусу
-    if status != 'all':
-        query = query.filter(Publication.status == status)
-    
-    # Сортировка по updated_at или published_at от новых к старым
-    pagination = query.order_by(db.func.coalesce(Publication.updated_at, Publication.published_at).desc()).paginate(page=page, per_page=per_page, error_out=False)
-    publications = pagination.items
-    
-    return jsonify({
-        'publications': [{
-            'id': pub.id,
-            'title': pub.title,
-            'authors': pub.authors,
-            'year': pub.year,
-            'type': pub.type,
-            'status': pub.status,
-            'file_url': pub.file_url,
-            'user_id': pub.user_id,
-            'user': {'full_name': pub.user.full_name if pub.user else 'Не указан'},
-            'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
-            'published_at': pub.published_at.isoformat() if pub.published_at else None,
-            'returned_for_revision': pub.returned_for_revision,  # Новое поле
-        } for pub in publications],
-        'total': pagination.total,
-        'pages': pagination.pages,
-        'current_page': pagination.page
-    }), 200
-
-@bp.route('/admin/publications/<int:pub_id>', methods=['PUT', 'DELETE', 'OPTIONS'])
-@login_required
-@admin_required
-def publication_management(pub_id):
-    if request.method == 'OPTIONS':
-        logger.debug(f"Handling OPTIONS for /admin_api/admin/publications/{pub_id}")
-        return jsonify({}), 200  # CORS уже обрабатывается в __init__.py
-
-    logger.debug(f"Получен {request.method} запрос для /admin_api/admin/publications/{pub_id}")
-    publication = Publication.query.get_or_404(pub_id)
-    
-    if request.method == 'PUT':
-        if request.content_type == 'application/json':
-            data = request.get_json()
-        elif 'file' in request.files or request.content_type.startswith('multipart/form-data'):
-            data = request.form
-        else:
-            return jsonify({"error": "Неподдерживаемый формат данных. Используйте application/json или multipart/form-data."}), 415
-
-        if 'file' in request.files:
-            file = request.files['file']
-            if file and allowed_file(file.filename):
-                if publication.file_url and os.path.exists(publication.file_url):
-                    os.remove(publication.file_url)
-                filename = secure_filename(file.filename)
-                file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-                file.save(file_path)
-                publication.file_url = file_path
-                logger.debug(f"Файл обновлён для публикации {pub_id}: {file_path}")
-        
-        publication.title = data.get('title', publication.title)
-        publication.authors = data.get('authors', publication.authors)
-        publication.year = data.get('year', publication.year)
-        publication.type = data.get('type', publication.type)
-        publication.status = data.get('status', publication.status)
-        # При изменении статуса сбрасываем флаг, если статус не draft
-        if publication.status != 'draft':
-            publication.returned_for_revision = False
-        
-        try:
-            db.session.commit()
-            return jsonify({
-                'message': 'Публикация успешно обновлена',
-                'publication': {
-                    'id': publication.id,
-                    'title': publication.title,
-                    'authors': publication.authors,
-                    'year': publication.year,
-                    'type': publication.type,
-                    'status': publication.status,
-                    'file_url': publication.file_url,
-                    'returned_for_revision': publication.returned_for_revision,  # Новое поле
-                }
-            }), 200
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Ошибка обновления публикации {pub_id}: {str(e)}")
-            return jsonify({"error": "Ошибка при обновлении публикации. Попробуйте позже."}), 500
-
-    elif request.method == 'DELETE':
-        try:
-            if publication.file_url and os.path.exists(publication.file_url):
-                os.remove(publication.file_url)
-            db.session.delete(publication)
-            db.session.commit()
-            return jsonify({'message': 'Публикация успешно удалена'}), 200
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Ошибка удаления публикации {pub_id}: {str(e)}")
-            return jsonify({"error": "Ошибка при удалении публикации. Попробуйте позже."}), 500
+def allowed_file(filename):
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'pdf', 'docx'}

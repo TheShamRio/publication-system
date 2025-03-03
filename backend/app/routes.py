@@ -17,7 +17,7 @@ import logging
 from datetime import datetime, UTC
 from werkzeug.security import generate_password_hash, check_password_hash
 
-bp = Blueprint('api', __name__)
+bp = Blueprint('api', __name__, url_prefix='/api')
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -40,8 +40,9 @@ def download_file(filename):
 def get_publication(pub_id):
     publication = Publication.query.get_or_404(pub_id)
 
-    if publication.user_id != current_user.id and current_user.role != 'admin':
-        return jsonify({'error': 'У вас нет доступа к этой публикации'}), 403
+    if publication.user_id != current_user.id and current_user.role not in ['admin', 'manager']:
+        logger.warning(f"Unauthorized access attempt to publication {pub_id} by user {current_user.id} with role {current_user.role}")
+        return jsonify({"error": "У вас нет прав для просмотра этой публикации."}), 403
 
     comments = Comment.query.filter_by(publication_id=pub_id, parent_id=None).order_by(Comment.created_at.asc()).all()
     
@@ -53,7 +54,7 @@ def get_publication(pub_id):
             'created_at': comment.created_at.isoformat(),
             'replies': [build_comment_tree(reply) for reply in comment.replies]
         }
-
+    
     return jsonify({
         'id': publication.id,
         'title': publication.title,
@@ -62,7 +63,9 @@ def get_publication(pub_id):
         'type': publication.type,
         'status': publication.status,
         'file_url': f"/uploads/{os.path.basename(publication.file_url)}" if publication.file_url else None,
-        'user': {'full_name': publication.user.full_name if publication.user else 'Не указан'},
+        'user': {
+            'id': publication.user.id if publication.user else None,
+            'full_name': publication.user.full_name if publication.user else None},
         'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
         'published_at': publication.published_at.isoformat() if publication.published_at else None,
         'returned_for_revision': publication.returned_for_revision,  # Новое поле
@@ -126,6 +129,98 @@ def submit_for_review(pub_id):
         logger.error(f"Ошибка отправки на проверку публикации {pub_id}: {str(e)}")
         return jsonify({'error': 'Ошибка при отправке на проверку. Попробуйте позже.'}), 500
 
+@bp.route('/publications/<int:pub_id>/publish', methods=['POST'])
+@login_required
+def publish_publication(pub_id):
+    """
+    Опубликовать публикацию (только для администраторов или управляющих).
+    """
+    publication = Publication.query.get_or_404(pub_id)
+
+    # Проверка прав доступа (только администратор или управляющий)
+    if current_user.role not in ['admin', 'manager']:
+        logger.warning(f"Несанкционированная попытка опубликовать публикацию {pub_id} пользователем {current_user.id} с ролью {current_user.role}")
+        return jsonify({"error": "У вас нет прав для публикации этой работы."}), 403
+
+    # Проверка, находится ли публикация на стадии проверки
+    if publication.status != 'needs_review':
+        return jsonify({"error": "Публикация не находится на стадии проверки."}), 400
+
+    # Проверка, прикреплён ли файл
+    if not publication.file_url:
+        return jsonify({"error": "Нельзя опубликовать работу без прикреплённого файла."}), 400
+
+    # Обновление статуса публикации и установка времени публикации
+    publication.status = 'published'
+    publication.published_at = datetime.utcnow()
+    publication.returned_for_revision = False  # Сброс флага, если ранее публикация была возвращена на доработку
+
+    try:
+        db.session.commit()
+        logger.debug(f"Публикация {pub_id} успешно опубликована пользователем {current_user.id}")
+        return jsonify({
+            'message': 'Публикация успешно опубликована',
+            'publication': {
+                'id': publication.id,
+                'title': publication.title,
+                'status': publication.status,
+                'published_at': publication.published_at.isoformat()
+            }
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Ошибка при публикации публикации {pub_id}: {str(e)}")
+        return jsonify({"error": "Ошибка при публикации. Попробуйте позже."}), 500
+
+@bp.route('/publications/<int:pub_id>/return-for-revision', methods=['POST'])
+@login_required
+def return_for_revision(pub_id):
+    """
+    Вернуть публикацию на доработку (только для администраторов или управляющих).
+    Требуется наличие комментария ревьюера.
+    """
+    publication = Publication.query.get_or_404(pub_id)
+
+    # Проверка прав доступа (только администратор или управляющий)
+    if current_user.role not in ['admin', 'manager']:
+        logger.warning(f"Несанкционированная попытка вернуть публикацию {pub_id} на доработку пользователем {current_user.id} с ролью {current_user.role}")
+        return jsonify({"error": "У вас нет прав для возврата этой работы на доработку."}), 403
+
+    # Проверка, находится ли публикация на стадии проверки
+    if publication.status != 'needs_review':
+        return jsonify({"error": "Публикация не находится на стадии проверки."}), 400
+
+    # Проверка наличия комментария от ревьюера
+    comments = Comment.query.filter_by(publication_id=pub_id).all()
+    has_reviewer_comment = any(
+        comment.user.role in ['admin', 'manager'] or any(reply.user.role in ['admin', 'manager'] for reply in comment.replies)
+        for comment in comments
+    )
+    if not has_reviewer_comment:
+        return jsonify({"error": "Необходимо добавить комментарий перед возвратом на доработку."}), 400
+
+    # Обновление статуса публикации и установка флага returned_for_revision
+    publication.status = 'draft'
+    publication.returned_for_revision = True
+    publication.published_at = None  # Сброс времени публикации, если оно было установлено
+
+    try:
+        db.session.commit()
+        logger.debug(f"Публикация {pub_id} возвращена на доработку пользователем {current_user.id}")
+        return jsonify({
+            'message': 'Публикация отправлена на доработку',
+            'publication': {
+                'id': publication.id,
+                'title': publication.title,
+                'status': publication.status,
+                'returned_for_revision': publication.returned_for_revision
+            }
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Ошибка при возврате публикации {pub_id} на доработку: {str(e)}")
+        return jsonify({"error": "Ошибка при возврате на доработку. Попробуйте позже."}), 500
+
 @bp.route('/login', methods=['POST'])
 @csrf.exempt
 def login():
@@ -164,6 +259,7 @@ def logout():
     response = jsonify({'message': 'Успешный выход'})
     response.set_cookie('session', '', expires=0)  # Удаляем куки сессии
     return response, 200
+
 @bp.route('/user', methods=['GET', 'PUT'])
 @login_required
 def user():

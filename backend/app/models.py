@@ -3,7 +3,6 @@ from werkzeug.security import generate_password_hash, check_password_hash
 from .extensions import db
 from flask_login import UserMixin
 
-
 class Comment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     content = db.Column(db.Text, nullable=False)
@@ -21,12 +20,13 @@ class User(db.Model, UserMixin):
     username = db.Column(db.String(50), unique=True, nullable=False)
     publications = db.relationship('Publication', back_populates='user', lazy=True)
     password_hash = db.Column(db.Text)
-    role = db.Column(db.String(20), default='user', nullable=False)
+    role = db.Column(db.String(20), default='user', nullable=False)  # Добавляем возможные роли: user, admin, manager
     last_name = db.Column(db.String(100), nullable=True)
     first_name = db.Column(db.String(100), nullable=True)
     middle_name = db.Column(db.String(100), nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), nullable=False)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)  # Добавлено
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
     @property
     def full_name(self):
         return f"{self.last_name or ''} {self.first_name or ''} {self.middle_name or ''}".strip()
@@ -56,10 +56,10 @@ class Publication(db.Model):
     year = db.Column(db.Integer, nullable=False)
     type = db.Column(db.String(50), nullable=False)
     status = db.Column(db.String(50), nullable=False, default='draft')
-    file_url = db.Column(db.String(200), nullable=True)  # Оставляем как nullable=True
+    file_url = db.Column(db.String(200), nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)
     updated_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow(), nullable=False)
-    returned_for_revision = db.Column(db.Boolean, default=False)  # Новое поле
+    returned_for_revision = db.Column(db.Boolean, default=False)
     published_at = db.Column(db.DateTime, nullable=True)
 
     user = db.relationship('User', back_populates='publications', lazy=True)
@@ -79,6 +79,7 @@ class Publication(db.Model):
             'review': 'На проверке',
             'published': 'Оп-published'
         }.get(self.status, self.status)
+
 class Achievement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)

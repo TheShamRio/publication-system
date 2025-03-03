@@ -109,13 +109,10 @@ function AdminDashboard() {
 	const [value, setValue] = useState(0);
 	const [users, setUsers] = useState([]);
 	const [publications, setPublications] = useState([]);
-	const [needsReviewPublications, setNeedsReviewPublications] = useState([]);
 	const [currentPageUsers, setCurrentPageUsers] = useState(1);
 	const [totalPagesUsers, setTotalPagesUsers] = useState(1);
 	const [currentPagePublications, setCurrentPagePublications] = useState(1);
 	const [totalPagesPublications, setTotalPagesPublications] = useState(1);
-	const [currentPageNeedsReview, setCurrentPageNeedsReview] = useState(1);
-	const [totalPagesNeedsReview, setTotalPagesNeedsReview] = useState(1);
 	const [loadingInitial, setLoadingInitial] = useState(true);
 	const [searchQuery, setSearchQuery] = useState('');
 	const [filterType, setFilterType] = useState('all');
@@ -125,7 +122,6 @@ function AdminDashboard() {
 	const [openError, setOpenError] = useState(false);
 	const [openSuccess, setOpenSuccess] = useState(false);
 	const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
-	const [openEditDialog, setOpenEditDialog] = useState(false); // Добавляем недостающее состояние
 	const [userToDelete, setUserToDelete] = useState(null);
 	const [publicationToDelete, setPublicationToDelete] = useState(null);
 	const [editUser, setEditUser] = useState(null);
@@ -143,8 +139,9 @@ function AdminDashboard() {
 	const [editType, setEditType] = useState('');
 	const [editStatus, setEditStatus] = useState('');
 	const [editFile, setEditFile] = useState(null);
+	const [openEditDialog, setOpenEditDialog] = useState(false);
 	const navigate = useNavigate();
-	const { logout, csrfToken } = useAuth();
+	const { csrfToken } = useAuth();
 
 	const [newUsername, setNewUsername] = useState('');
 	const [newPassword, setNewPassword] = useState('');
@@ -170,13 +167,6 @@ function AdminDashboard() {
 				});
 				setPublications(publicationsResponse.data.publications || []);
 				setTotalPagesPublications(publicationsResponse.data.pages || 1);
-
-				const needsReviewResponse = await axios.get('http://localhost:5000/admin_api/admin/publications/needs-review', {
-					withCredentials: true,
-					params: { page: currentPageNeedsReview, per_page: 10, search: searchQuery },
-				});
-				setNeedsReviewPublications(needsReviewResponse.data.publications || []);
-				setTotalPagesNeedsReview(needsReviewResponse.data.pages || 1);
 			} catch (err) {
 				setError('Ошибка загрузки данных. Попробуйте позже.');
 				setOpenError(true);
@@ -186,7 +176,7 @@ function AdminDashboard() {
 		};
 
 		fetchData();
-	}, [currentPageUsers, currentPagePublications, currentPageNeedsReview, searchQuery, filterType, filterStatus]);
+	}, [currentPageUsers, currentPagePublications, searchQuery, filterType, filterStatus]);
 
 	const handleTabChange = (event, newValue) => {
 		setValue(newValue);
@@ -195,7 +185,6 @@ function AdminDashboard() {
 		setFilterStatus('all');
 		setCurrentPageUsers(1);
 		setCurrentPagePublications(1);
-		setCurrentPageNeedsReview(1);
 	};
 
 	const handlePageChangeUsers = (event, newPage) => {
@@ -206,15 +195,10 @@ function AdminDashboard() {
 		setCurrentPagePublications(newPage);
 	};
 
-	const handlePageChangeNeedsReview = (event, newPage) => {
-		setCurrentPageNeedsReview(newPage);
-	};
-
 	const handleSearchChange = async (e) => {
 		setSearchQuery(e.target.value);
 		setCurrentPageUsers(1);
 		setCurrentPagePublications(1);
-		setCurrentPageNeedsReview(1);
 	};
 
 	const handleFilterTypeChange = (e) => {
@@ -258,7 +242,6 @@ function AdminDashboard() {
 					headers: { 'X-CSRFToken': csrfToken },
 				});
 				setPublications(publications.filter((pub) => pub.id !== publicationToDelete.id));
-				setNeedsReviewPublications(needsReviewPublications.filter((pub) => pub.id !== publicationToDelete.id));
 				setSuccess('Публикация успешно удалена.');
 				setOpenSuccess(true);
 			}
@@ -355,28 +338,12 @@ function AdminDashboard() {
 					headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'multipart/form-data' },
 				});
 				setPublications(publications.map((pub) => (pub.id === editPublication.id ? response.data.publication : pub)));
-				setNeedsReviewPublications(needsReviewPublications.map((pub) => (pub.id === editPublication.id ? response.data.publication : pub)));
 				setSuccess('Публикация успешно обновлена.');
 				setOpenSuccess(true);
 				setTimeout(() => handleEditCancel(), 2000);
 			}
 		} catch (err) {
 			setError(err.response?.data?.error || 'Ошибка при обновлении. Попробуйте позже.');
-			setOpenError(true);
-		}
-	};
-
-	const handleLogout = async () => {
-		try {
-			await axios.post('http://localhost:5000/api/logout', {}, {
-				withCredentials: true,
-				headers: { 'X-CSRFToken': csrfToken },
-			});
-			logout();
-			localStorage.removeItem('user');
-			navigate('/login', { replace: true });
-		} catch (err) {
-			setError('Ошибка при выходе. Попробуйте снова.');
 			setOpenError(true);
 		}
 	};
@@ -461,6 +428,13 @@ function AdminDashboard() {
 		}
 
 		try {
+			console.log('Sending registration request with data:', {
+				username: newUsername,
+				password: newPassword,
+				last_name: newLastName,
+				first_name: newFirstName,
+				middle_name: newMiddleName,
+			});
 			const response = await axios.post('http://localhost:5000/admin_api/admin/register', {
 				username: newUsername,
 				password: newPassword,
@@ -472,7 +446,9 @@ function AdminDashboard() {
 				headers: { 'X-CSRFToken': csrfToken },
 			});
 
-			if (response.data.message === 'Пользователь успешно зарегистрирован') {
+			console.log('Registration response:', response.data, response.status);
+			if (response.status === 201 && response.data.message && response.data.message.includes('успешно зарегистрирован')) {
+				console.log('Setting success state...');
 				setSuccess('Пользователь успешно создан.');
 				setOpenSuccess(true);
 				setNewUsername('');
@@ -488,6 +464,7 @@ function AdminDashboard() {
 				setTotalPagesUsers(usersResponse.data.pages || 1);
 			}
 		} catch (err) {
+			console.error('Registration error:', err.response?.data || err.message, err.response?.status);
 			setError(err.response?.data?.error || 'Ошибка при создании пользователя. Попробуйте позже.');
 			setOpenError(true);
 		}
@@ -514,25 +491,6 @@ function AdminDashboard() {
 			});
 	};
 
-	// Функция для отображения статуса с учётом локализации и цвета (для вкладки "Работы на проверке")
-	const renderNeedsReviewStatus = (status) => {
-		let statusText = '';
-		let statusColor = '#1D1D1F'; // Цвет по умолчанию (чёрный)
-
-		switch (status) {
-			case 'needs_review':
-				statusText = 'Нуждается в проверке';
-				statusColor = '#FF3B30'; // Красный
-				break;
-			default:
-				statusText = status === 'draft' ? 'Черновик' : status === 'published' ? 'Опубликованные' : status;
-				statusColor = '#1D1D1F';
-		}
-
-		return <Typography variant="body2" sx={{ color: statusColor }}>{statusText}</Typography>;
-	};
-
-	// Функция для отображения статуса в других вкладках (без красного цвета)
 	const renderStatus = (status) => {
 		let statusText = '';
 		switch (status) {
@@ -570,7 +528,6 @@ function AdminDashboard() {
 				>
 					<Tab label="Пользователи" />
 					<Tab label="Все публикации" />
-					<Tab label="Работы на проверке" />
 				</Tabs>
 
 				{loadingInitial ? (
@@ -1013,179 +970,6 @@ function AdminDashboard() {
 								</Box>
 							</>
 						)}
-
-						{value === 2 && (
-							<>
-								<Typography
-									variant="h5"
-									gutterBottom
-									sx={{
-										mt: 4,
-										color: '#1D1D1F',
-										fontWeight: 600,
-										textAlign: 'center',
-									}}
-								>
-									Работы на проверке
-								</Typography>
-								<AppleCard sx={{ mt: 2, mb: 2, p: 2, backgroundColor: '#F5F5F7', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
-									<AppleTextField
-										fullWidth
-										label="Поиск по названию, авторам или году"
-										value={searchQuery}
-										onChange={handleSearchChange}
-										margin="normal"
-										variant="outlined"
-										InputProps={{
-											endAdornment: <IconButton sx={{ color: '#0071E3' }}>{/* Можно добавить иконку поиска */}</IconButton>,
-										}}
-									/>
-								</AppleCard>
-								<AppleTable sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
-									<TableHead>
-										<TableRow sx={{ backgroundColor: '#0071E3' }}>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Название</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Авторы</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Тип</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Пользователь</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>
-												Действия
-											</TableCell>
-										</TableRow>
-									</TableHead>
-									<Fade in={true} timeout={500}>
-										<TableBody>
-											{needsReviewPublications.length > 0 ? (
-												needsReviewPublications.map((pub) => (
-													<TableRow
-														key={pub.id}
-														sx={{
-															'&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' },
-														}}
-													>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.id}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															<Typography
-																sx={{
-																	color: '#0071E3',
-																	textDecoration: 'underline',
-																	cursor: 'pointer',
-																	'&:hover': { textDecoration: 'none' },
-																}}
-																onClick={() => navigate(`/publication/${pub.id}`)}
-															>
-																{pub.title}
-															</Typography>
-														</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															{pub.type === 'article'
-																? 'Статья'
-																: pub.type === 'monograph'
-																	? 'Монография'
-																	: pub.type === 'conference'
-																		? 'Доклад/конференция'
-																		: 'Неизвестный тип'}
-														</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															{renderNeedsReviewStatus(pub.status)}
-														</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															{pub.user?.full_name || 'Не указан'}
-														</TableCell>
-														<TableCell sx={{ textAlign: 'center' }}>
-															<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-																<IconButton
-																	aria-label="edit"
-																	onClick={() => handleEditClick('publication', pub)}
-																	sx={{
-																		color: '#0071E3',
-																		borderRadius: '8px',
-																		'&:hover': {
-																			color: '#FFFFFF',
-																			backgroundColor: '#0071E3',
-																			boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																		},
-																	}}
-																>
-																	<EditIcon />
-																</IconButton>
-																<IconButton
-																	aria-label="delete"
-																	onClick={() => handleDeleteClick('publication', pub)}
-																	sx={{
-																		color: '#0071E3',
-																		borderRadius: '8px',
-																		'&:hover': {
-																			color: '#FFFFFF',
-																			backgroundColor: '#0071E3',
-																			boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																		},
-																	}}
-																>
-																	<DeleteIcon />
-																</IconButton>
-																{pub.file_url && (
-																	<IconButton
-																		aria-label="download"
-																		onClick={() => {
-																			const link = document.createElement('a');
-																			link.href = `http://localhost:5000${pub.file_url}`;
-																			link.download = pub.file_url.split('/').pop();
-																			document.body.appendChild(link);
-																			link.click();
-																			document.body.removeChild(link);
-																		}}
-																		sx={{
-																			color: '#0071E3',
-																			borderRadius: '8px',
-																			'&:hover': {
-																				color: '#FFFFFF',
-																				backgroundColor: '#0071E3',
-																				boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																			},
-																		}}
-																	>
-																		<DownloadIcon />
-																	</IconButton>
-																)}
-															</Box>
-														</TableCell>
-													</TableRow>
-												))
-											) : (
-												<TableRow>
-													<TableCell colSpan={8} sx={{ textAlign: 'center', color: '#6E6E73' }}>
-														Нет публикаций, ожидающих проверки.
-													</TableCell>
-												</TableRow>
-											)}
-										</TableBody>
-									</Fade>
-								</AppleTable>
-								<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-									<Pagination
-										count={totalPagesNeedsReview}
-										page={currentPageNeedsReview}
-										onChange={handlePageChangeNeedsReview}
-										color="primary"
-										sx={{
-											'& .MuiPaginationItem-root': {
-												borderRadius: 20,
-												transition: 'all 0.3s ease',
-												'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
-												'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
-											},
-										}}
-									/>
-								</Box>
-							</>
-						)}
-
 						<Dialog
 							open={openDeleteDialog}
 							onClose={handleDeleteCancel}
@@ -1252,6 +1036,7 @@ function AdminDashboard() {
 											>
 												<MenuItem value="user">Пользователь</MenuItem>
 												<MenuItem value="admin">Администратор</MenuItem>
+												<MenuItem value="manager">Управляющий</MenuItem> {/* Добавляем новую роль */}
 											</AppleTextField>
 											<AppleTextField
 												fullWidth

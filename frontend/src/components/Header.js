@@ -47,6 +47,17 @@ function Header() {
 		return null;
 	}
 
+	// Определяем маршрут и текст кнопки в зависимости от роли
+	let dashboardPath = '/dashboard';
+	let dashboardLabel = 'Личный кабинет';
+	if (effectiveRole === 'admin') {
+		dashboardPath = '/admin';
+		dashboardLabel = 'Панель администратора';
+	} else if (effectiveRole === 'manager') {
+		dashboardPath = '/manager';
+		dashboardLabel = 'Панель управляющего';
+	}
+
 	return (
 		<StyledAppBar position="fixed">
 			<Toolbar sx={{ justifyContent: 'space-between', alignItems: 'center' }}>
@@ -88,7 +99,7 @@ function Header() {
 						<>
 							<Button
 								component={Link}
-								to={effectiveRole === 'admin' ? '/admin' : '/dashboard'}
+								to={dashboardPath}
 								variant="contained"
 								color="primary"
 								sx={{
@@ -97,7 +108,7 @@ function Header() {
 									'&:hover': { transform: 'scale(1.05)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)' },
 								}}
 							>
-								{effectiveRole === 'admin' ? 'Панель управления' : 'Личный кабинет'}
+								{dashboardLabel}
 							</Button>
 							<Button
 								onClick={handleLogout}
