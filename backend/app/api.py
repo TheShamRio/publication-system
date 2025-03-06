@@ -3,7 +3,7 @@ from werkzeug.utils import secure_filename
 from flask_login import login_required, current_user
 from flask import current_app
 from app.extensions import db
-from app.models import Publication, User
+from app.models import Publication, User, Plan
 import os
 import logging
 from io import BytesIO
@@ -315,7 +315,7 @@ def register():
         return jsonify({"error": "Ошибка при регистрации. Попробуйте позже."}), 500
 
 @bp.route('/admin/check-username', methods=['POST'])
-@admin_or_manager_required  # Изменён с @admin_required на @admin_or_manager_required
+@admin_or_manager_required
 def check_username():
     data = request.get_json()
     username = data.get('username')
@@ -323,7 +323,7 @@ def check_username():
     return jsonify({'exists': user is not None})
 
 @bp.route('/admin/generate-password', methods=['GET'])
-@admin_or_manager_required  # Я также обновлю этот маршрут, чтобы быть последовательным
+@admin_or_manager_required
 def generate_password():
     import secrets
     import string
@@ -331,5 +331,106 @@ def generate_password():
     password = ''.join(secrets.choice(characters) for _ in range(12))
     return jsonify({'password': password})
 
+@bp.route('/admin/plans', methods=['GET'])
+@admin_or_manager_required
+def get_all_plans():
+    logger.debug(f"Получен GET запрос для /admin_api/admin/plans")
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    pagination = Plan.query.order_by(Plan.year.desc()).paginate(page=page, per_page=per_page)
+    plans = pagination.items
+    return jsonify({
+        'plans': [plan.to_dict() for plan in plans],
+        'total': pagination.total,
+        'pages': pagination.pages,
+        'current_page': pagination.page
+    }), 200
+
+@bp.route('/admin/plans/<int:plan_id>', methods=['PUT'])
+@admin_or_manager_required
+def update_plan(plan_id):
+    logger.debug(f"Получен PUT запрос для /admin_api/admin/plans/{plan_id}")
+    plan = Plan.query.get_or_404(plan_id)
+    data = request.get_json()
+    if not all(k in data for k in ('year', 'expectedCount', 'fillType', 'user_id', 'entries')):
+        return jsonify({'error': 'Missing required fields'}), 400
+    
+    if not isinstance(data['year'], int) or data['year'] < 1900 or data['year'] > 2100:
+        return jsonify({'error': 'Invalid year'}), 400
+    
+    if not isinstance(data['expectedCount'], int) or data['expectedCount'] < 1:
+        return jsonify({'error': 'Expected count must be at least 1'}), 400
+    
+    if data['fillType'] not in ['manual', 'link']:
+        return jsonify({'error': 'Invalid fill type'}), 400
+
+    plan.year = data['year']
+    plan.expectedCount = data['expectedCount']
+    plan.fillType = data['fillType']
+    plan.user_id = data['user_id']
+
+    PlanEntry.query.filter_by(plan_id=plan.id).delete()
+    for entry_data in data['entries']:
+        entry = PlanEntry(
+            title=entry_data.get('title'),
+            type=entry_data.get('type'),
+            publication_id=entry_data.get('publication_id'),
+            status=entry_data.get('status', 'planned'),
+            plan=plan
+        )
+        if entry.publication_id:
+            publication = Publication.query.filter_by(id=entry.publication_id, user_id=plan.user_id, status='published').first()
+            if not publication:
+                db.session.rollback()
+                return jsonify({'error': f'Publication with ID {entry.publication_id} not found or not published'}), 404
+        db.session.add(entry)
+
+    db.session.commit()
+    return jsonify({'message': 'Plan updated successfully', 'plan': plan.to_dict()}), 200
+
+@bp.route('/admin/plans/<int:plan_id>', methods=['DELETE'])
+@admin_or_manager_required
+def delete_plan(plan_id):
+    logger.debug(f"Получен DELETE запрос для /admin_api/admin/plans/{plan_id}")
+    plan = Plan.query.get_or_404(plan_id)
+    if plan.status not in ['draft', 'returned']:
+        return jsonify({'error': 'Cannot delete plan that is under review or approved'}), 403
+    
+    db.session.delete(plan)
+    db.session.commit()
+    return jsonify({'message': 'Plan deleted successfully'}), 200
+
+@bp.route('/admin/plans/<int:plan_id>/approve', methods=['POST'])
+@admin_or_manager_required
+def approve_plan(plan_id):
+    logger.debug(f"Получен POST запрос для /admin_api/admin/plans/{plan_id}/approve")
+    plan = Plan.query.get_or_404(plan_id)
+    if plan.status != 'needs_review':
+        return jsonify({'error': 'План не находится на проверке'}), 400
+
+    plan.status = 'approved'
+    db.session.commit()
+    return jsonify({'message': 'План утверждён', 'plan': plan.to_dict()}), 200
+
+@bp.route('/admin/plans/<int:plan_id>/return-for-revision', methods=['POST'])
+@admin_or_manager_required
+def return_plan_for_revision(plan_id):
+    logger.debug(f"Получен POST запрос для /admin_api/admin/plans/{plan_id}/return-for-revision")
+    plan = Plan.query.get_or_404(plan_id)
+    if plan.status != 'needs_review':
+        return jsonify({'error': 'План не находится на проверке'}), 400
+
+    plan.status = 'returned'
+    db.session.commit()
+    return jsonify({'message': 'План возвращён на доработку', 'plan': plan.to_dict()}), 200
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'pdf', 'docx'}
+
+def get_publications_by_year(user_id):
+    publications = Publication.query.filter_by(user_id=user_id).all()
+    yearly_counts = {}
+    for pub in publications:
+        year = pub.year
+        yearly_counts[year] = yearly_counts.get(year, 0) + 1
+    return sorted(yearly_counts.items(), key=lambda x: x[0])

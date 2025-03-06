@@ -1,4 +1,4 @@
-from flask import Flask, send_from_directory, jsonify, make_response, request
+from flask import Flask, send_from_directory, make_response, request
 from flask_cors import CORS
 from .extensions import db, migrate, login_manager, csrf
 from .models import User
@@ -14,7 +14,7 @@ def create_app():
     app = Flask(__name__)
     app.config.from_object('config.Config')
 
-    # Устанавливаем фиксированный секретный ключ
+    # Устанавливаем секретный ключ
     app.secret_key = os.getenv("SECRET_KEY", "your-fixed-secret-key-here")
 
     # Настройка Flask-Session
@@ -34,39 +34,33 @@ def create_app():
     csrf.init_app(app)
 
     # Настройка CORS
-    CORS(app, resources={
-        r"/api/*": {"origins": ["http://localhost:3000", "http://localhost:3001"]},
-        r"/admin_api/*": {"origins": ["http://localhost:3000", "http://localhost:3001"]},
-        r"/uploads/*": {"origins": ["http://localhost:3000", "http://localhost:3001"]}
-    }, supports_credentials=True, methods=['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-    allow_headers=['Content-Type', 'Authorization', 'X-CSRFToken'])
+    CORS(app, resources={r"/*": {"origins": "http://localhost:3001"}}, supports_credentials=True)
 
-    # Регистрация Blueprint'ов
-    from .routes import bp as user_bp
-    app.register_blueprint(user_bp, url_prefix='/api')
-    logger.debug("Registered Blueprint 'api' with URL prefix '/api'")
-
-    from .api import bp as admin_bp
-    app.register_blueprint(admin_bp, url_prefix='/admin_api')
-    logger.debug("Registered Blueprint 'admin_api' with URL prefix '/admin_api'")
-
-    # Явная обработка OPTIONS для всех маршрутов
+    # Обработка предварительных запросов
     @app.before_request
     def handle_preflight():
         if request.method == 'OPTIONS':
-            logger.debug(f"Handling OPTIONS request for {request.path}")
             response = make_response()
-            response.headers['Access-Control-Allow-Origin'] = request.headers.get('Origin', 'http://localhost:3001')
+            response.headers['Access-Control-Allow-Origin'] = 'http://localhost:3001'
             response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
             response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-CSRFToken'
             response.headers['Access-Control-Allow-Credentials'] = 'true'
             response.headers['Access-Control-Max-Age'] = '86400'
             return response, 200
 
+    # Регистрация Blueprint'ов
+    from .routes import bp as user_bp
+    app.register_blueprint(user_bp, url_prefix='/api')
+    logger.debug("Зарегистрирован Blueprint 'api' с префиксом '/api'")
+
+    from .api import bp as admin_bp
+    app.register_blueprint(admin_bp, url_prefix='/admin_api')
+    logger.debug("Зарегистрирован Blueprint 'admin_api' с префиксом '/admin_api'")
+
     # Обработчик для загрузки файлов
     @app.route('/uploads/<path:filename>')
     def download_file(filename):
-        logger.debug(f"Serving file from /uploads/{filename}")
+        logger.debug(f"Отправка файла из /uploads/{filename}")
         return send_from_directory(app.config['UPLOAD_FOLDER'], filename)
 
     with app.app_context():

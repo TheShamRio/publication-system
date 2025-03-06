@@ -20,7 +20,7 @@ class User(db.Model, UserMixin):
     username = db.Column(db.String(50), unique=True, nullable=False)
     publications = db.relationship('Publication', back_populates='user', lazy=True)
     password_hash = db.Column(db.Text)
-    role = db.Column(db.String(20), default='user', nullable=False)  # Добавляем возможные роли: user, admin, manager
+    role = db.Column(db.String(20), default='user', nullable=False)  # 'user', 'admin', 'manager'
     last_name = db.Column(db.String(100), nullable=True)
     first_name = db.Column(db.String(100), nullable=True)
     middle_name = db.Column(db.String(100), nullable=True)
@@ -63,6 +63,7 @@ class Publication(db.Model):
     published_at = db.Column(db.DateTime, nullable=True)
 
     user = db.relationship('User', back_populates='publications', lazy=True)
+    plan_entries = db.relationship('PlanEntry', back_populates='publication', lazy=True)
 
     @property
     def type_ru(self):
@@ -76,9 +77,26 @@ class Publication(db.Model):
     def status_ru(self):
         return {
             'draft': 'Черновик',
-            'review': 'На проверке',
-            'published': 'Оп-published'
+            'needs_review': 'На проверке',
+            'published': 'Опубликованные'
         }.get(self.status, self.status)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            'authors': self.authors,
+            'year': self.year,
+            'type': self.type,
+            'status': self.status,
+            'file_url': self.file_url,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'returned_for_revision': self.returned_for_revision,
+            'published_at': self.published_at.isoformat() if self.published_at else None,
+            'user': {
+                'full_name': self.user.full_name if self.user else None
+            } if self.user else None
+        }
 
 class Achievement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
@@ -104,3 +122,46 @@ class Achievement(db.Model):
                 new_achievement = Achievement(user_id=user_id, badge=badge)
                 db.session.add(new_achievement)
         db.session.commit()
+
+class Plan(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    year = db.Column(db.Integer, nullable=False)
+    expectedCount = db.Column(db.Integer, nullable=False, default=1)
+    fillType = db.Column(db.String(10), nullable=False, default='manual')  # 'manual' или 'link'
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default='draft')  # 'draft', 'needs_review', 'approved', 'returned'
+
+    user = db.relationship('User', backref='plans', lazy=True)
+    entries = db.relationship('PlanEntry', back_populates='plan', lazy=True, cascade='all, delete-orphan')
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'year': self.year,
+            'expectedCount': self.expectedCount,
+            'fillType': self.fillType,
+            'status': self.status,
+            'user': {'full_name': self.user.full_name if self.user else None} if self.user else None,
+            'entries': [entry.to_dict() for entry in self.entries]
+        }
+
+class PlanEntry(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    plan_id = db.Column(db.Integer, db.ForeignKey('plan.id'), nullable=False)
+    title = db.Column(db.String(200), nullable=True)  # Для ручного заполнения
+    type = db.Column(db.String(50), nullable=True)  # Для ручного заполнения
+    publication_id = db.Column(db.Integer, db.ForeignKey('publication.id'), nullable=True)  # Для привязки
+    status = db.Column(db.String(50), nullable=False, default='planned')  # 'planned', 'in_progress', 'completed'
+
+    plan = db.relationship('Plan', back_populates='entries')
+    publication = db.relationship('Publication', back_populates='plan_entries', lazy=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            'type': self.type,
+            'publicationId': self.publication_id,
+            'status': self.status,
+            'publication': self.publication.to_dict() if self.publication else None
+        }

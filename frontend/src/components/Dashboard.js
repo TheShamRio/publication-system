@@ -2,43 +2,48 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Line } from 'react-chartjs-2';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler } from 'chart.js';
 import {
-  Container,
-  Typography,
-  Table,
-  TableHead,
-  TableRow,
-  TableCell,
-  TableBody,
-  Grid,
-  Card,
-  CardContent,
-  Button,
-  TextField,
-  Box,
-  MenuItem,
-  Alert,
-  Collapse,
-  Dialog,
-  DialogTitle,
-  DialogContent,
-  DialogActions,
-  IconButton,
-  Tabs,
-  Tab,
-  Accordion,
-  AccordionSummary,
-  AccordionDetails,
-  Pagination,
-  Fade,
-  CircularProgress,
+    Container,
+    Typography,
+    Table,
+    TableHead,
+    TableRow,
+    TableCell,
+    TableBody,
+    Grid,
+    Card,
+    CardContent,
+    Button,
+    TextField,
+    Box,
+    MenuItem,
+    Alert,
+    Collapse,
+    Dialog,
+    DialogTitle,
+    DialogContent,
+    DialogActions,
+    IconButton,
+    Tabs,
+    Tab,
+    Accordion,
+    AccordionSummary,
+    AccordionDetails,
+    Pagination,
+    Fade,
+    CircularProgress,
+    Autocomplete,
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import AddIcon from '@mui/icons-material/Add';
 import { useNavigate } from 'react-router-dom';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
+import SaveIcon from '@mui/icons-material/Save';
+import PublishIcon from '@mui/icons-material/Publish';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import DownloadIcon from '@mui/icons-material/Download';
-import PublishIcon from '@mui/icons-material/Publish';
+import Visibility from '@mui/icons-material/Visibility';
+import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import { styled } from '@mui/system';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
@@ -47,108 +52,119 @@ ChartJS.register(CategoryScale, LinearScale, PointElement, LineElement, BarEleme
 
 // Кастомные стили в стиле Apple
 const AppleButton = styled(Button)(({ theme }) => ({
-  borderRadius: '12px',
-  textTransform: 'none',
-  backgroundColor: '#0071E3',
-  color: '#FFFFFF',
-  padding: '8px 16px',
-  fontSize: '14px',
-  fontWeight: 600,
-  boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-  '&:hover': {
-    backgroundColor: '#0066CC',
-    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
-  },
-  '&:disabled': {
-    backgroundColor: '#D1D1D6',
+    borderRadius: '12px',
+    textTransform: 'none',
+    backgroundColor: '#0071E3',
     color: '#FFFFFF',
-  },
+    padding: '8px 16px',
+    fontSize: '14px',
+    fontWeight: 600,
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+    '&:hover': {
+        backgroundColor: '#0066CC',
+        boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
+    },
+    '&:disabled': {
+        backgroundColor: '#D1D1D6',
+        color: '#FFFFFF',
+    },
 }));
 
 const GreenButton = styled(Button)(({ theme }) => ({
-  borderRadius: '12px',
-  textTransform: 'none',
-  backgroundColor: 'green',
-  color: '#FFFFFF',
-  padding: '8px 16px',
-  fontSize: '14px',
-  fontWeight: 600,
-  boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-  '&:hover': {
-    backgroundColor: '#2EBB4A',
-    boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
-  },
-  '&:disabled': {
-    backgroundColor: '#D1D1D6',
+    borderRadius: '12px',
+    textTransform: 'none',
+    backgroundColor: 'green',
     color: '#FFFFFF',
-  },
+    padding: '8px 16px',
+    fontSize: '14px',
+    fontWeight: 600,
+    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+    '&:hover': {
+        backgroundColor: '#2EBB4A',
+        boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
+    },
+    '&:disabled': {
+        backgroundColor: '#D1D1D6',
+        color: '#FFFFFF',
+    },
 }));
 
 const AppleTextField = styled(TextField)(({ theme }) => ({
-  '& .MuiOutlinedInput-root': {
-    borderRadius: '12px',
-    backgroundColor: '#F5F5F7',
-    '& fieldset': {
-      borderColor: '#D1D1D6',
+    '& .MuiOutlinedInput-root': {
+        borderRadius: '12px',
+        backgroundColor: '#F5F5F7',
+        '& fieldset': {
+            borderColor: '#D1D1D6',
+        },
+        '&:hover fieldset': {
+            borderColor: '#0071E3',
+        },
+        '&.Mui-focused fieldset': {
+            borderColor: '#0071E3',
+        },
     },
-    '&:hover fieldset': {
-      borderColor: '#0071E3',
+    '& label': {
+        color: '#6E6E73',
     },
-    '&.Mui-focused fieldset': {
-      borderColor: '#0071E3',
+    '& input': {
+        color: '#1D1D1F',
     },
-  },
-  '& label': {
-    color: '#6E6E73',
-  },
-  '& input': {
-    color: '#1D1D1F',
-  },
-  '& .MuiSelect-select': {
-    backgroundColor: '#F5F5F7',
-  },
+    '& .MuiSelect-select': {
+        backgroundColor: '#F5F5F7',
+    },
 }));
 
 const AppleCard = styled(Card)(({ theme }) => ({
-  borderRadius: '16px',
-  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-  backgroundColor: '#FFFFFF',
+    borderRadius: '16px',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+    backgroundColor: '#FFFFFF',
 }));
 
 const AppleTable = styled(Table)(({ theme }) => ({
-  borderRadius: '16px',
-  overflow: 'hidden',
-  backgroundColor: '#FFFFFF',
-  boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+    borderRadius: '16px',
+    overflow: 'hidden',
+    backgroundColor: '#FFFFFF',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+}));
+
+const PlanTable = styled(Table)(({ theme }) => ({
+    borderRadius: '16px',
+    overflow: 'hidden',
+    backgroundColor: '#FFFFFF',
+    boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+    marginBottom: '16px',
 }));
 
 const CancelButton = styled(Button)(({ theme }) => ({
-  borderRadius: '12px',
-  color: '#0071E3',
-  textTransform: 'none',
-  backgroundColor: 'transparent',
-  '&:hover': {
-    color: '#FFFFFF',
-    backgroundColor: '#0071E3',
-  },
+    borderRadius: '12px',
+    color: '#0071E3',
+    textTransform: 'none',
+    backgroundColor: 'transparent',
+    '&:hover': {
+        color: '#FFFFFF',
+        backgroundColor: '#0071E3',
+    },
 }));
 
 const DetailsButton = styled(Button)(({ theme }) => ({
-  borderRadius: '12px',
-  border: '1px solid #D1D1D6',
-  color: '#1D1D1F',
-  textTransform: 'none',
-  backgroundColor: 'transparent',
-  transition: 'all 0.3s ease',
-  '&:hover': {
-    borderColor: '#0071E3',
-    color: '#0071E3',
+    borderRadius: '12px',
+    border: '1px solid #D1D1D6',
+    color: '#1D1D1F',
+    textTransform: 'none',
     backgroundColor: 'transparent',
-  },
+    transition: 'all 0.3s ease',
+    '&:hover': {
+        borderColor: '#0071E3',
+        color: '#0071E3',
+        backgroundColor: 'transparent',
+    },
 }));
 
 function Dashboard() {
-    const { user, csrfToken } = useAuth();
+    const { user, csrfToken, setCsrfToken } = useAuth();
+    const [loadingUser, setLoadingUser] = useState(true);
+    const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+    const [showNewPassword, setShowNewPassword] = useState(false);
     const [showDetailedAnalytics, setShowDetailedAnalytics] = useState(false);
     const [value, setValue] = useState(0);
     const [publications, setPublications] = useState([]);
@@ -197,11 +213,29 @@ function Dashboard() {
     const [currentPage, setCurrentPage] = useState(1);
     const [totalPages, setTotalPages] = useState(1);
     const [publicationsTransitionKey, setPublicationsTransitionKey] = useState(0);
+    const [plans, setPlans] = useState([]);
+    const [openCreatePlanDialog, setOpenCreatePlanDialog] = useState(false);
+    const [newPlan, setNewPlan] = useState({ year: new Date().getFullYear() + 1, expectedCount: 1 });
+    const [editingPlanId, setEditingPlanId] = useState(null);
+    const [planPage, setPlanPage] = useState(1);
+    const [planTotalPages, setPlanTotalPages] = useState(1);
+    const [publishedPublications, setPublishedPublications] = useState([]);
     const publicationsPerPage = 10;
+    const plansPerPage = 10;
     const navigate = useNavigate();
     const chartRef = useRef(null);
 
     const validPublicationTypes = ['article', 'monograph', 'conference'];
+    const validPlanStatuses = ['planned', 'in_progress', 'completed'];
+
+    useEffect(() => {
+        if (user !== null) {
+            setLoadingUser(false);
+            setEditLastName(user.last_name || '');
+            setEditFirstName(user.first_name || '');
+            setEditMiddleName(user.middle_name || '');
+        }
+    }, [user]);
 
     const handleTabChange = (event, newValue) => {
         setValue(newValue);
@@ -220,7 +254,9 @@ function Dashboard() {
                     status: 'all',
                 },
             });
-            return pubResponse.data.publications;
+            const allPubs = pubResponse.data.publications || [];
+            setPublishedPublications(allPubs.filter(pub => pub.status === 'published'));
+            return allPubs;
         } catch (err) {
             console.error('Ошибка загрузки всех публикаций:', err);
             setError('Произошла ошибка сервера. Попробуйте позже.');
@@ -269,6 +305,31 @@ function Dashboard() {
         }
     };
 
+    const fetchPlans = async (page = 1) => {
+        try {
+            const response = await axios.get('http://localhost:5000/api/plans', {
+                withCredentials: true,
+                params: {
+                    page,
+                    per_page: plansPerPage,
+                },
+            });
+            const sortedPlans = (response.data.plans || []).map(plan => ({
+                ...plan,
+                isSaved: true, // Планы с сервера считаются сохранёнными
+            })).sort((a, b) => b.year - a.year);
+            setPlans(sortedPlans);
+            setPlanPage(page);
+            const total = response.data.total || 0;
+            setPlanTotalPages(Math.ceil(total / plansPerPage));
+            setError('');
+        } catch (err) {
+            console.error('Ошибка загрузки планов:', err);
+            setError('Произошла ошибка сервера. Попробуйте позже.');
+            setOpenError(true);
+        }
+    };
+
     const updateAnalytics = (allPublications) => {
         const types = { article: 0, monograph: 0, conference: 0 };
         const statuses = { draft: 0, needs_review: 0, published: 0 };
@@ -296,16 +357,17 @@ function Dashboard() {
 
     useEffect(() => {
         fetchData(1, searchQuery, filterType, filterStatus);
-        // Данные пользователя уже доступны через useAuth, поэтому fetchUserData не нужен
-        setEditLastName(user?.last_name || '');
-        setEditFirstName(user?.first_name || '');
-        setEditMiddleName(user?.middle_name || '');
-    }, [navigate, searchQuery, filterType, filterStatus, user]);
+        fetchPlans(1);
+    }, [navigate, searchQuery, filterType, filterStatus]);
 
     const currentPublications = filteredPublications;
 
     const handlePageChange = (event, newPage) => {
         fetchData(newPage, searchQuery, filterType, filterStatus);
+    };
+
+    const handlePlanPageChange = (event, newPage) => {
+        fetchPlans(newPage);
     };
 
     const handleChangePasswordClick = () => {
@@ -314,11 +376,14 @@ function Dashboard() {
         setNewPassword('');
         setPasswordError('');
         setPasswordSuccess('');
+        setShowCurrentPassword(false);
+        setShowNewPassword(false);
     };
 
     const handleChangePasswordSubmit = async (e) => {
         e.preventDefault();
         try {
+            await refreshCsrfToken();
             console.log('Changing password for user:', user?.username);
             const response = await axios.put(
                 'http://localhost:5000/api/user/password',
@@ -337,6 +402,8 @@ function Dashboard() {
             setOpenChangePasswordDialog(false);
             setCurrentPassword('');
             setNewPassword('');
+            setShowCurrentPassword(false);
+            setShowNewPassword(false);
         } catch (err) {
             console.error('Ошибка изменения пароля:', err);
             if (err.response) {
@@ -356,6 +423,16 @@ function Dashboard() {
         setNewPassword('');
         setPasswordError('');
         setPasswordSuccess('');
+        setShowCurrentPassword(false);
+        setShowNewPassword(false);
+    };
+
+    const handleToggleCurrentPasswordVisibility = () => {
+        setShowCurrentPassword(!showCurrentPassword);
+    };
+
+    const handleToggleNewPasswordVisibility = () => {
+        setShowNewPassword(!showNewPassword);
     };
 
     useEffect(() => {
@@ -402,6 +479,7 @@ function Dashboard() {
         formData.append('type', type);
 
         try {
+            await refreshCsrfToken();
             console.log('Uploading file with data:', { title, authors, year, type });
             const response = await axios.post('http://localhost:5000/api/publications/upload-file', formData, {
                 withCredentials: true,
@@ -450,6 +528,7 @@ function Dashboard() {
         formData.append('file', file);
 
         try {
+            await refreshCsrfToken();
             console.log('Uploading BibTeX file');
             const response = await axios.post('http://localhost:5000/api/publications/upload-bibtex', formData, {
                 withCredentials: true,
@@ -515,6 +594,7 @@ function Dashboard() {
         }
 
         try {
+            await refreshCsrfToken();
             console.log('Updating publication with:', {
                 title: editTitle,
                 authors: editAuthors,
@@ -546,6 +626,7 @@ function Dashboard() {
 
     const handleSubmitForReview = async (publicationId) => {
         try {
+            await refreshCsrfToken();
             const response = await axios.post(
                 `http://localhost:5000/api/publications/${publicationId}/submit-for-review`,
                 {},
@@ -597,6 +678,7 @@ function Dashboard() {
         if (!publicationToDelete) return;
 
         try {
+            await refreshCsrfToken();
             console.log('Confirming deletion of publication:', publicationToDelete.id);
             const response = await axios.delete(`http://localhost:5000/api/publications/${publicationToDelete.id}`, {
                 withCredentials: true,
@@ -656,6 +738,7 @@ function Dashboard() {
     const handleEditUserSubmit = async (e) => {
         e.preventDefault();
         try {
+            await refreshCsrfToken();
             console.log('Updating user data:', { last_name: editLastName, first_name: editFirstName, middle_name: editMiddleName });
             const response = await axios.put(
                 'http://localhost:5000/api/user',
@@ -672,7 +755,6 @@ function Dashboard() {
             setSuccess('Личные данные успешно обновлены!');
             setOpenSuccess(true);
             setError('');
-            // Обновляем данные пользователя в контексте
             setEditLastName(response.data.user.last_name);
             setEditFirstName(response.data.user.first_name);
             setEditMiddleName(response.data.user.middle_name);
@@ -713,6 +795,7 @@ function Dashboard() {
         formData.append('file', attachFile);
 
         try {
+            await refreshCsrfToken();
             console.log('Sending attach file request for publication:', publicationToAttach.id);
             const response = await axios.post(
                 `http://localhost:5000/api/publications/${publicationToAttach.id}/attach-file`,
@@ -790,6 +873,7 @@ function Dashboard() {
 
     const handleExportBibTeX = async () => {
         try {
+            await refreshCsrfToken();
             const response = await axios.get('http://localhost:5000/api/publications/export-bibtex', {
                 withCredentials: true,
             });
@@ -838,6 +922,235 @@ function Dashboard() {
         animation: { duration: 1000 },
     };
 
+    const handleCreatePlan = async () => {
+        if (!newPlan.year || !newPlan.expectedCount || newPlan.expectedCount < 1) {
+            setError('Пожалуйста, укажите год и количество ожидаемых публикаций (минимум 1).');
+            setOpenError(true);
+            return;
+        }
+
+        try {
+            await refreshCsrfToken();
+            const planData = {
+                year: newPlan.year,
+                expectedCount: newPlan.expectedCount,
+                fillType: 'manual',
+                entries: Array.from({ length: newPlan.expectedCount }, () => ({
+                    title: '',
+                    type: 'article',
+                    status: 'planned',
+                })),
+            };
+            console.log('Creating plan with:', planData);
+            const response = await axios.post('http://localhost:5000/api/plans', planData, {
+                withCredentials: true,
+                headers: {
+                    'X-CSRFToken': csrfToken,
+                    'Content-Type': 'application/json',
+                },
+            });
+            setSuccess('План успешно создан!');
+            setOpenSuccess(true);
+            setError('');
+            setOpenCreatePlanDialog(false);
+            setNewPlan({ year: new Date().getFullYear() + 1, expectedCount: 1 });
+            await fetchPlans(planPage);
+        } catch (err) {
+            console.error('Ошибка создания плана:', err.response?.data || err);
+            if (err.response) {
+                setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`);
+            } else {
+                setError('Ошибка сети. Проверьте подключение и сервер.');
+            }
+            setOpenError(true);
+            setSuccess('');
+        }
+    };
+
+    const handleEditPlanClick = (planId) => {
+        setEditingPlanId(planId);
+        setPlans(prevPlans =>
+            prevPlans.map(plan =>
+                plan.id === planId ? { ...plan, isSaved: false } : plan
+            )
+        );
+    };
+
+    const handleAddPlanEntry = (planId) => {
+        setPlans(prevPlans =>
+            prevPlans.map(plan =>
+                plan.id === planId
+                    ? {
+                        ...plan,
+                        expectedCount: plan.expectedCount + 1,
+                        entries: [...plan.entries, { title: '', type: 'article', status: 'planned' }],
+                    }
+                    : plan
+            )
+        );
+    };
+
+    const handleDeletePlanEntry = (planId, index) => {
+        setPlans(prevPlans =>
+            prevPlans.map(plan =>
+                plan.id === planId
+                    ? {
+                        ...plan,
+                        expectedCount: plan.expectedCount - 1,
+                        entries: plan.entries.filter((_, i) => i !== index),
+                        isSaved: false,
+                    }
+                    : plan
+            )
+        );
+    };
+
+    const handleSavePlan = async (plan) => {
+        try {
+            await refreshCsrfToken();
+            const planData = {
+                year: plan.year,
+                expectedCount: plan.entries.length,
+                fillType: 'manual',
+                entries: plan.entries.map(entry => ({
+                    title: entry.title || '',
+                    type: entry.type || 'article',
+                    status: 'planned',
+                })),
+            };
+            console.log('Saving plan with:', planData);
+            const response = await axios.put(`http://localhost:5000/api/plans/${plan.id}`, planData, {
+                withCredentials: true,
+                headers: {
+                    'X-CSRFToken': csrfToken,
+                    'Content-Type': 'application/json',
+                },
+            });
+            setSuccess('План успешно сохранён!');
+            setOpenSuccess(true);
+            setError('');
+            setEditingPlanId(null);
+            setPlans(prevPlans =>
+                prevPlans.map(p =>
+                    p.id === plan.id ? { ...p, entries: planData.entries, isSaved: true } : p
+                )
+            );
+            await fetchPlans(planPage);
+        } catch (err) {
+            console.error('Ошибка сохранения плана:', err.response?.data || err);
+            if (err.response) {
+                setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`);
+            } else {
+                setError('Ошибка сети. Проверьте подключение и сервер.');
+            }
+            setOpenError(true);
+            setSuccess('');
+        }
+    };
+
+    const handleSubmitPlanForReview = async (plan) => {
+        try {
+            await refreshCsrfToken();
+            const response = await axios.post(
+                `http://localhost:5000/api/plans/${plan.id}/submit-for-review`,
+                {},
+                {
+                    withCredentials: true,
+                    headers: { 'X-CSRFToken': csrfToken },
+                }
+            );
+            setSuccess('План отправлен на проверку!');
+            setOpenSuccess(true);
+            setError('');
+            setEditingPlanId(null);
+            await fetchPlans(planPage);
+        } catch (err) {
+            console.error('Ошибка отправки плана на проверку:', err.response?.data || err);
+            if (err.response) {
+                setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте права доступа.'}`);
+            } else {
+                setError('Ошибка сети. Проверьте подключение и сервер.');
+            }
+            setOpenError(true);
+            setSuccess('');
+        }
+    };
+
+    const handleDeletePlanClick = (plan) => {
+        console.log('Deleting plan:', plan.id);
+        setPublicationToDelete(plan);
+        setOpenDeleteDialog(true);
+    };
+
+    const handleDeletePlanConfirm = async () => {
+        if (!publicationToDelete) return;
+
+        try {
+            await refreshCsrfToken();
+            console.log('Confirming deletion of plan:', publicationToDelete.id);
+            const response = await axios.delete(`http://localhost:5000/api/plans/${publicationToDelete.id}`, {
+                withCredentials: true,
+                headers: {
+                    'X-CSRFToken': csrfToken,
+                },
+            });
+            setSuccess('План успешно удалён!');
+            setOpenSuccess(true);
+            setError('');
+            await fetchPlans(planPage);
+        } catch (err) {
+            console.error('Ошибка удаления плана:', err.response?.data || err);
+            if (err.response) {
+                setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте права доступа.'}`);
+            } else {
+                setError('Ошибка сети. Проверьте подключение и сервер.');
+            }
+            setOpenError(true);
+            setSuccess('');
+        }
+        setOpenDeleteDialog(false);
+        setPublicationToDelete(null);
+    };
+
+    const handlePlanEntryChange = (planId, index, field, value) => {
+        setPlans(prevPlans =>
+            prevPlans.map(plan =>
+                plan.id === planId
+                    ? {
+                        ...plan,
+                        entries: plan.entries.map((entry, i) =>
+                            i === index ? { ...entry, [field]: value } : entry
+                        ),
+                    }
+                    : plan
+            )
+        );
+    };
+
+    const areAllTitlesFilled = (plan) => {
+        return plan.entries.every(entry => entry.title && entry.title.trim() !== '');
+    };
+
+    const refreshCsrfToken = async () => {
+        try {
+            const response = await axios.get('http://localhost:5000/api/csrf-token', {
+                withCredentials: true,
+            });
+            setCsrfToken(response.data.csrf_token);
+            console.log('CSRF Token обновлён:', response.data.csrf_token);
+        } catch (err) {
+            console.error('Ошибка обновления CSRF Token:', err);
+        }
+    };
+
+    if (loadingUser) {
+        return (
+            <Container maxWidth="lg" sx={{ mt: 4, display: 'flex', justifyContent: 'center' }}>
+                <CircularProgress sx={{ color: '#0071E3' }} />
+            </Container>
+        );
+    }
+
     return (
         <Container
             maxWidth="lg"
@@ -882,6 +1195,7 @@ function Dashboard() {
                         <Tab label="Личные данные" />
                         <Tab label="Публикации" />
                         <Tab label="Аналитика" />
+                        <Tab label="План" />
                         <Tab label="Экспорт" />
                     </Tabs>
 
@@ -1211,10 +1525,10 @@ function Dashboard() {
                                                                 {pub.type === 'article'
                                                                     ? 'Статья'
                                                                     : pub.type === 'monograph'
-                                                                    ? 'Монография'
-                                                                    : pub.type === 'conference'
-                                                                    ? 'Доклад/конференция'
-                                                                    : 'Неизвестный тип'}
+                                                                        ? 'Монография'
+                                                                        : pub.type === 'conference'
+                                                                            ? 'Доклад/конференция'
+                                                                            : 'Неизвестный тип'}
                                                             </TableCell>
                                                             <TableCell sx={{ color: '#1D1D1F' }}>
                                                                 {renderStatus(pub.status, pub.returned_for_revision)}
@@ -1235,7 +1549,6 @@ function Dashboard() {
                                                                                         boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
                                                                                     },
                                                                                 }}
-                                                                                disabled={pub.status === 'needs_review' && !pub.returned_for_revision}
                                                                             >
                                                                                 <EditIcon />
                                                                             </IconButton>
@@ -1251,64 +1564,29 @@ function Dashboard() {
                                                                                         boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
                                                                                     },
                                                                                 }}
-                                                                                disabled={pub.status === 'needs_review' && !pub.returned_for_revision}
                                                                             >
                                                                                 <DeleteIcon />
                                                                             </IconButton>
-                                                                            {!pub.file_url ? (
+                                                                            {pub.file_url && (
                                                                                 <IconButton
-                                                                                    aria-label="attach"
-                                                                                    onClick={() => handleAttachFileClick(pub)}
+                                                                                    aria-label="submit-for-review"
+                                                                                    onClick={() => handleSubmitForReview(pub.id)}
                                                                                     sx={{
-                                                                                        color: '#0071E3',
+                                                                                        color: 'green',
                                                                                         borderRadius: '8px',
                                                                                         '&:hover': {
                                                                                             color: '#FFFFFF',
-                                                                                            backgroundColor: '#0071E3',
+                                                                                            backgroundColor: 'green',
                                                                                             boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
                                                                                         },
                                                                                     }}
-                                                                                    disabled={pub.status === 'needs_review' && !pub.returned_for_revision}
                                                                                 >
-                                                                                    <AttachFileIcon />
+                                                                                    <PublishIcon />
                                                                                 </IconButton>
-                                                                            ) : (
-                                                                                <>
-                                                                                    <IconButton
-                                                                                        aria-label="download"
-                                                                                        onClick={() => handleDownloadClick(pub)}
-                                                                                        sx={{
-                                                                                            color: '#0071E3',
-                                                                                            borderRadius: '8px',
-                                                                                            '&:hover': {
-                                                                                                color: '#FFFFFF',
-                                                                                                backgroundColor: '#0071E3',
-                                                                                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-                                                                                            },
-                                                                                        }}
-                                                                                    >
-                                                                                        <DownloadIcon />
-                                                                                    </IconButton>
-                                                                                    <IconButton
-                                                                                        aria-label="submit-for-review"
-                                                                                        onClick={() => handleSubmitForReview(pub.id)}
-                                                                                        sx={{
-                                                                                            color: 'green',
-                                                                                            borderRadius: '8px',
-                                                                                            '&:hover': {
-                                                                                                color: '#FFFFFF',
-                                                                                                backgroundColor: 'green',
-                                                                                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-                                                                                            },
-                                                                                        }}
-                                                                                    >
-                                                                                        <PublishIcon />
-                                                                                    </IconButton>
-                                                                                </>
                                                                             )}
                                                                         </>
                                                                     )}
-                                                                    {(pub.status === 'needs_review' || pub.status === 'published') && (
+                                                                    {pub.file_url && pub.status !== 'draft' && (
                                                                         <IconButton
                                                                             aria-label="download"
                                                                             onClick={() => handleDownloadClick(pub)}
@@ -1323,6 +1601,23 @@ function Dashboard() {
                                                                             }}
                                                                         >
                                                                             <DownloadIcon />
+                                                                        </IconButton>
+                                                                    )}
+                                                                    {!pub.file_url && pub.status === 'draft' && (
+                                                                        <IconButton
+                                                                            aria-label="attach"
+                                                                            onClick={() => handleAttachFileClick(pub)}
+                                                                            sx={{
+                                                                                color: '#0071E3',
+                                                                                borderRadius: '8px',
+                                                                                '&:hover': {
+                                                                                    color: '#FFFFFF',
+                                                                                    backgroundColor: '#0071E3',
+                                                                                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+                                                                                },
+                                                                            }}
+                                                                        >
+                                                                            <AttachFileIcon />
                                                                         </IconButton>
                                                                     )}
                                                                 </Box>
@@ -1469,14 +1764,237 @@ function Dashboard() {
                                             textAlign: 'center',
                                         }}
                                     >
-                                        Экспорт публикаций
+                                        Планы публикаций
                                     </Typography>
-                                    <AppleButton onClick={handleExportBibTeX} sx={{ mt: 2 }}>
-                                        Выгрузить публикации в BibTeX
+                                    <AppleButton onClick={() => setOpenCreatePlanDialog(true)} sx={{ mt: 2, mb: 4 }}>
+                                        Создать план
                                     </AppleButton>
+                                    {plans.length > 0 ? (
+                                        plans.map((plan) => (
+                                            <PlanTable key={plan.id} sx={{ mb: 4 }}>
+                                                <TableHead>
+                                                    <TableRow sx={{ backgroundColor: '#0071E3' }}>
+                                                        <TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
+                                                        <TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
+                                                        <TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Ожидаемые публикации</TableCell>
+                                                        <TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
+                                                        <TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>
+                                                            Действия
+                                                        </TableCell>
+                                                    </TableRow>
+                                                </TableHead>
+                                                <TableBody>
+                                                    <TableRow
+                                                        sx={{
+                                                            '&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' },
+                                                            borderBottom: '2px solid #E5E5EA',
+                                                        }}
+                                                    >
+                                                        <TableCell sx={{ color: '#1D1D1F' }}>{plan.id}</TableCell>
+                                                        <TableCell sx={{ color: '#1D1D1F' }}>{plan.year}</TableCell>
+                                                        <TableCell sx={{ color: '#1D1D1F' }}>{plan.expectedCount}</TableCell>
+                                                        <TableCell sx={{ color: '#1D1D1F' }}>
+                                                            {plan.status === 'draft' ? 'Черновик' :
+                                                                plan.status === 'needs_review' ? 'На проверке' :
+                                                                    plan.status === 'approved' ? 'Утверждён' :
+                                                                        plan.status === 'returned' ? 'Возвращён' : plan.status}
+                                                        </TableCell>
+                                                        <TableCell sx={{ textAlign: 'center' }}>
+                                                            <Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
+                                                                {(plan.status === 'draft' || plan.status === 'returned') && (
+                                                                    <>
+                                                                        <IconButton
+                                                                            aria-label="edit"
+                                                                            onClick={() => handleEditPlanClick(plan.id)}
+                                                                            sx={{
+                                                                                color: '#0071E3',
+                                                                                borderRadius: '8px',
+                                                                                '&:hover': {
+                                                                                    color: '#FFFFFF',
+                                                                                    backgroundColor: '#0071E3',
+                                                                                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+                                                                                },
+                                                                            }}
+                                                                        >
+                                                                            <EditIcon />
+                                                                        </IconButton>
+                                                                        <IconButton
+                                                                            aria-label="delete"
+                                                                            onClick={() => handleDeletePlanClick(plan)}
+                                                                            sx={{
+                                                                                color: '#0071E3',
+                                                                                borderRadius: '8px',
+                                                                                '&:hover': {
+                                                                                    color: '#FFFFFF',
+                                                                                    backgroundColor: '#0071E3',
+                                                                                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+                                                                                },
+                                                                            }}
+                                                                        >
+                                                                            <DeleteIcon />
+                                                                        </IconButton>
+                                                                        {plan.isSaved && areAllTitlesFilled(plan) && (
+                                                                            <IconButton
+                                                                                aria-label="submit-for-review"
+                                                                                onClick={() => handleSubmitPlanForReview(plan)}
+                                                                                sx={{
+                                                                                    color: 'green',
+                                                                                    borderRadius: '8px',
+                                                                                    '&:hover': {
+                                                                                        color: '#FFFFFF',
+                                                                                        backgroundColor: 'green',
+                                                                                        boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+                                                                                    },
+                                                                                }}
+                                                                            >
+                                                                                <PublishIcon />
+                                                                            </IconButton>
+                                                                        )}
+                                                                    </>
+                                                                )}
+                                                            </Box>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                    {plan.entries.map((entry, index) => (
+                                                        <TableRow key={`${plan.id}-${index}`}>
+                                                            <TableCell sx={{ color: '#1D1D1F', pl: 4 }}>{index + 1}</TableCell>
+                                                            <TableCell sx={{ color: '#1D1D1F' }}>
+                                                                <AppleTextField
+                                                                    fullWidth
+                                                                    value={entry.title}
+                                                                    onChange={(e) => handlePlanEntryChange(plan.id, index, 'title', e.target.value)}
+                                                                    disabled={editingPlanId !== plan.id || (plan.status !== 'draft' && plan.status !== 'returned')}
+                                                                    variant="outlined"
+                                                                    sx={{ backgroundColor: editingPlanId === plan.id && (plan.status === 'draft' || plan.status === 'returned') ? '#FFFFFF' : '#F5F5F7' }}
+                                                                />
+                                                            </TableCell>
+                                                            <TableCell sx={{ color: '#1D1D1F' }}>
+                                                                <AppleTextField
+                                                                    fullWidth
+                                                                    select
+                                                                    value={entry.type}
+                                                                    onChange={(e) => handlePlanEntryChange(plan.id, index, 'type', e.target.value)}
+                                                                    disabled={editingPlanId !== plan.id || (plan.status !== 'draft' && plan.status !== 'returned')}
+                                                                    variant="outlined"
+                                                                    sx={{ backgroundColor: editingPlanId === plan.id && (plan.status === 'draft' || plan.status === 'returned') ? '#FFFFFF' : '#F5F5F7' }}
+                                                                >
+                                                                    <MenuItem value="article">Статья</MenuItem>
+                                                                    <MenuItem value="monograph">Монография</MenuItem>
+                                                                    <MenuItem value="conference">Доклад/конференция</MenuItem>
+                                                                </AppleTextField>
+                                                            </TableCell>
+                                                            <TableCell sx={{ color: '#1D1D1F' }}>{entry.status}</TableCell>
+                                                            <TableCell sx={{ textAlign: 'center' }}>
+                                                                {editingPlanId === plan.id && (plan.status === 'draft' || plan.status === 'returned') && (
+                                                                    <IconButton
+                                                                        aria-label="delete-entry"
+                                                                        onClick={() => handleDeletePlanEntry(plan.id, index)}
+                                                                        sx={{
+                                                                            color: '#FF3B30',
+                                                                            borderRadius: '8px',
+                                                                            '&:hover': {
+                                                                                color: '#FFFFFF',
+                                                                                backgroundColor: '#FF3B30',
+                                                                                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+                                                                            },
+                                                                        }}
+                                                                    >
+                                                                        <DeleteIcon />
+                                                                    </IconButton>
+                                                                )}
+                                                            </TableCell>
+                                                        </TableRow>
+                                                    ))}
+                                                    {editingPlanId === plan.id && (plan.status === 'draft' || plan.status === 'returned') && (
+                                                        <>
+                                                            <TableRow>
+                                                                <TableCell colSpan={5} sx={{ textAlign: 'center', py: 1 }}>
+                                                                    <AppleButton onClick={() => handleAddPlanEntry(plan.id)} sx={{ mt: 1 }}>
+                                                                        <AddIcon sx={{ mr: 1 }} /> Добавить запись
+                                                                    </AppleButton>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                            <TableRow>
+                                                                <TableCell colSpan={5} sx={{ textAlign: 'right', py: 1 }}>
+                                                                    <AppleButton onClick={() => handleSavePlan(plan)} sx={{ mt: 1, mr: 2 }}>
+                                                                        Сохранить
+                                                                    </AppleButton>
+                                                                </TableCell>
+                                                            </TableRow>
+                                                        </>
+                                                    )}
+                                                </TableBody>
+                                            </PlanTable>
+                                        ))
+                                    ) : (
+                                        <AppleTable sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
+                                                                                        <TableHead>
+                                                <TableRow sx={{ backgroundColor: '#0071E3' }}>
+                                                    <TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
+                                                    <TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
+                                                    <TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Ожидаемые публикации</TableCell>
+                                                    <TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
+                                                    <TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>
+                                                        Действия
+                                                    </TableCell>
+                                                </TableRow>
+                                            </TableHead>
+                                            <TableBody>
+                                                <TableRow>
+                                                    <TableCell colSpan={5} sx={{ textAlign: 'center', color: '#6E6E73' }}>
+                                                        Нет запланированных планов.
+                                                    </TableCell>
+                                                </TableRow>
+                                            </TableBody>
+                                        </AppleTable>
+                                    )}
+                                    <Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+                                        <Pagination
+                                            count={planTotalPages}
+                                            page={planPage}
+                                            onChange={handlePlanPageChange}
+                                            color="primary"
+                                            sx={{
+                                                '& .MuiPaginationItem-root': {
+                                                    borderRadius: 20,
+                                                    transition: 'all 0.3s ease',
+                                                    '&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
+                                                    '&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
+                                                },
+                                            }}
+                                        />
+                                    </Box>
                                 </Box>
                             )}
 
+                            {value === 4 && (
+                                <Box sx={{ mt: 4 }}>
+                                    <Typography
+                                        variant="h5"
+                                        gutterBottom
+                                        sx={{
+                                            mt: 4,
+                                            color: '#1D1D1F',
+                                            fontWeight: 600,
+                                            textAlign: 'center',
+                                        }}
+                                    >
+                                        Экспорт данных
+                                    </Typography>
+                                    <AppleCard sx={{ p: 4, mt: 2, borderRadius: '16px', backgroundColor: '#FFFFFF', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
+                                        <CardContent>
+                                            <Typography variant="body1" sx={{ color: '#1D1D1F', mb: 2 }}>
+                                                Экспортируйте ваши публикации в формате BibTeX для использования в других системах.
+                                            </Typography>
+                                            <AppleButton onClick={handleExportBibTeX}>
+                                                Экспорт в BibTeX
+                                            </AppleButton>
+                                        </CardContent>
+                                    </AppleCard>
+                                </Box>
+                            )}
+
+                            {/* Диалоги */}
                             <Dialog
                                 open={openDeleteDialog}
                                 onClose={handleDeleteCancel}
@@ -1494,12 +2012,14 @@ function Dashboard() {
                                 </DialogTitle>
                                 <DialogContent sx={{ padding: '24px' }}>
                                     <Typography sx={{ color: '#6E6E73' }}>
-                                        Вы уверены, что хотите удалить публикацию «{publicationToDelete?.title}»?
+                                        Вы уверены, что хотите удалить {publicationToDelete?.expectedCount ? `план на ${publicationToDelete.year} год` : 'эту публикацию'}?
                                     </Typography>
                                 </DialogContent>
                                 <DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5EA' }}>
                                     <CancelButton onClick={handleDeleteCancel}>Отмена</CancelButton>
-                                    <AppleButton onClick={handleDeleteConfirm}>Удалить</AppleButton>
+                                    <AppleButton onClick={publicationToDelete?.expectedCount ? handleDeletePlanConfirm : handleDeleteConfirm}>
+                                        Удалить
+                                    </AppleButton>
                                 </DialogActions>
                             </Dialog>
 
@@ -1741,10 +2261,102 @@ function Dashboard() {
                                                 Выбрать файл
                                             </AppleButton>
                                         </label>
-																				{attachFile && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{attachFile.name}</Typography>}
-                                        </Box>
-                                        <Collapse in={!!attachError}>
-                                            {attachError && (
+                                        {attachFile && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{attachFile.name}</Typography>}
+                                    </Box>
+                                    <Collapse in={!!attachError}>
+                                        {attachError && (
+                                            <Alert
+                                                severity="error"
+                                                sx={{
+                                                    mb: 2,
+                                                    borderRadius: '12px',
+                                                    backgroundColor: '#FFF1F0',
+                                                    color: '#1D1D1F',
+                                                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+                                                }}
+                                                onClose={() => setAttachError('')}
+                                            >
+                                                {attachError}
+                                            </Alert>
+                                        )}
+                                    </Collapse>
+                                    <Collapse in={!!attachSuccess}>
+                                        {attachSuccess && (
+                                            <Alert
+                                                severity="success"
+                                                sx={{
+                                                    mb: 2,
+                                                    borderRadius: '12px',
+                                                    backgroundColor: '#E7F8E7',
+                                                    color: '#1D1D1F',
+                                                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+                                                }}
+                                                onClose={() => setAttachSuccess('')}
+                                            >
+                                                {attachSuccess}
+                                            </Alert>
+                                        )}
+                                    </Collapse>
+                                    <DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5EA' }}>
+                                        <CancelButton onClick={handleAttachFileCancel}>Отмена</CancelButton>
+                                        <AppleButton onClick={handleAttachFileSubmit}>Прикрепить</AppleButton>
+                                    </DialogActions>
+                                </DialogContent>
+                            </Dialog>
+
+                            <Dialog
+                                open={openChangePasswordDialog}
+                                onClose={handleChangePasswordCancel}
+                                sx={{
+                                    '& .MuiDialog-paper': {
+                                        backgroundColor: '#FFFFFF',
+                                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+                                        borderRadius: '16px',
+                                        fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif",
+                                    },
+                                }}
+                            >
+                                <DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
+                                    Изменить пароль
+                                </DialogTitle>
+                                <DialogContent sx={{ padding: '24px' }}>
+                                    <form onSubmit={handleChangePasswordSubmit}>
+                                        <AppleTextField
+                                            fullWidth
+                                            label="Текущий пароль"
+                                            type={showCurrentPassword ? 'text' : 'password'}
+                                            value={currentPassword}
+                                            onChange={(e) => setCurrentPassword(e.target.value)}
+                                            margin="normal"
+                                            variant="outlined"
+                                            autoComplete="current-password"
+                                            InputProps={{
+                                                endAdornment: (
+                                                    <IconButton onClick={handleToggleCurrentPasswordVisibility}>
+                                                        {showCurrentPassword ? <VisibilityOff /> : <Visibility />}
+                                                    </IconButton>
+                                                ),
+                                            }}
+                                        />
+                                        <AppleTextField
+                                            fullWidth
+                                            label="Новый пароль"
+                                            type={showNewPassword ? 'text' : 'password'}
+                                            value={newPassword}
+                                            onChange={(e) => setNewPassword(e.target.value)}
+                                            margin="normal"
+                                            variant="outlined"
+                                            autoComplete="new-password"
+                                            InputProps={{
+                                                endAdornment: (
+                                                    <IconButton onClick={handleToggleNewPasswordVisibility}>
+                                                        {showNewPassword ? <VisibilityOff /> : <Visibility />}
+                                                    </IconButton>
+                                                ),
+                                            }}
+                                        />
+                                        <Collapse in={!!passwordError}>
+                                            {passwordError && (
                                                 <Alert
                                                     severity="error"
                                                     sx={{
@@ -1754,14 +2366,14 @@ function Dashboard() {
                                                         color: '#1D1D1F',
                                                         boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
                                                     }}
-                                                    onClose={() => setAttachError('')}
+                                                    onClose={() => setPasswordError('')}
                                                 >
-                                                    {attachError}
+                                                    {passwordError}
                                                 </Alert>
                                             )}
                                         </Collapse>
-                                        <Collapse in={!!attachSuccess}>
-                                            {attachSuccess && (
+                                        <Collapse in={!!passwordSuccess}>
+                                            {passwordSuccess && (
                                                 <Alert
                                                     severity="success"
                                                     sx={{
@@ -1771,103 +2383,103 @@ function Dashboard() {
                                                         color: '#1D1D1F',
                                                         boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
                                                     }}
-                                                    onClose={() => setAttachSuccess('')}
+                                                    onClose={() => setPasswordSuccess('')}
                                                 >
-                                                    {attachSuccess}
+                                                    {passwordSuccess}
                                                 </Alert>
                                             )}
                                         </Collapse>
-                                        <DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5EA' }}>
-                                            <CancelButton onClick={handleAttachFileCancel}>Отмена</CancelButton>
-                                            <AppleButton onClick={handleAttachFileSubmit}>Прикрепить</AppleButton>
+                                        <DialogActions sx={{ padding: '16px 0', borderTop: '1px solid #E5E5EA' }}>
+                                            <CancelButton onClick={handleChangePasswordCancel}>Отмена</CancelButton>
+                                            <AppleButton type="submit">Сохранить</AppleButton>
                                         </DialogActions>
-                                    </DialogContent>
-                                </Dialog>
+                                    </form>
+                                </DialogContent>
+                            </Dialog>
 
-                                <Dialog
-                                    open={openChangePasswordDialog}
-                                    onClose={handleChangePasswordCancel}
-                                    sx={{
-                                        '& .MuiDialog-paper': {
-                                            backgroundColor: '#FFFFFF',
-                                            boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-                                            borderRadius: '16px',
-                                            fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif",
-                                        },
-                                    }}
-                                >
-                                    <DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
-                                        Изменить пароль
-                                    </DialogTitle>
-                                    <DialogContent sx={{ padding: '24px' }}>
-                                        <form onSubmit={handleChangePasswordSubmit}>
-                                            <AppleTextField
-                                                fullWidth
-                                                label="Текущий пароль"
-                                                type="password"
-                                                value={currentPassword}
-                                                onChange={(e) => setCurrentPassword(e.target.value)}
-                                                margin="normal"
-                                                variant="outlined"
-                                                autoComplete="current-password"
-                                            />
-                                            <AppleTextField
-                                                fullWidth
-                                                label="Новый пароль"
-                                                type="password"
-                                                value={newPassword}
-                                                onChange={(e) => setNewPassword(e.target.value)}
-                                                margin="normal"
-                                                variant="outlined"
-                                                autoComplete="new-password"
-                                            />
-                                            <Collapse in={!!passwordError}>
-                                                {passwordError && (
-                                                    <Alert
-                                                        severity="error"
-                                                        sx={{
-                                                            mb: 2,
-                                                            borderRadius: '12px',
-                                                            backgroundColor: '#FFF1F0',
-                                                            color: '#1D1D1F',
-                                                            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-                                                        }}
-                                                        onClose={() => setPasswordError('')}
-                                                    >
-                                                        {passwordError}
-                                                    </Alert>
-                                                )}
-                                            </Collapse>
-                                            <Collapse in={!!passwordSuccess}>
-                                                {passwordSuccess && (
-                                                    <Alert
-                                                        severity="success"
-                                                        sx={{
-                                                            mb: 2,
-                                                            borderRadius: '12px',
-                                                            backgroundColor: '#E7F8E7',
-                                                            color: '#1D1D1F',
-                                                            boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-                                                        }}
-                                                        onClose={() => setPasswordSuccess('')}
-                                                    >
-                                                        {passwordSuccess}
-                                                    </Alert>
-                                                )}
-                                            </Collapse>
-                                            <DialogActions sx={{ padding: '16px 0', borderTop: '1px solid #E5E5EA' }}>
-                                                <CancelButton onClick={handleChangePasswordCancel}>Отмена</CancelButton>
-                                                <AppleButton type="submit">Сохранить</AppleButton>
-                                            </DialogActions>
-                                        </form>
-                                    </DialogContent>
-                                </Dialog>
-                            </>
-                        )}
-                    </CardContent>
-                </AppleCard>
-            </Container>
-        );
-    }
+                            <Dialog
+                                open={openCreatePlanDialog}
+                                onClose={() => setOpenCreatePlanDialog(false)}
+                                sx={{
+                                    '& .MuiDialog-paper': {
+                                        backgroundColor: '#FFFFFF',
+                                        boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+                                        borderRadius: '16px',
+                                        fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif",
+                                    },
+                                }}
+                            >
+                                <DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
+                                    Создать план публикаций
+                                </DialogTitle>
+                                <DialogContent sx={{ padding: '24px' }}>
+                                    <AppleTextField
+                                        fullWidth
+                                        label="Год"
+                                        type="number"
+                                        value={newPlan.year}
+                                        onChange={(e) => setNewPlan({ ...newPlan, year: parseInt(e.target.value, 10) })}
+                                        margin="normal"
+                                        variant="outlined"
+                                        required
+                                    />
+                                    <AppleTextField
+                                        fullWidth
+                                        label="Количество ожидаемых публикаций"
+                                        type="number"
+                                        value={newPlan.expectedCount}
+                                        onChange={(e) => setNewPlan({ ...newPlan, expectedCount: parseInt(e.target.value, 10) || 1 })}
+                                        margin="normal"
+                                        variant="outlined"
+                                        required
+                                        inputProps={{ min: 1 }}
+                                    />
+                                    <Collapse in={openError}>
+                                        {error && (
+                                            <Alert
+                                                severity="error"
+                                                sx={{
+                                                    mt: 2,
+                                                    borderRadius: '12px',
+                                                    backgroundColor: '#FFF1F0',
+                                                    color: '#1D1D1F',
+                                                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+                                                }}
+                                                onClose={() => setOpenError(false)}
+                                            >
+                                                {error}
+                                            </Alert>
+                                        )}
+                                    </Collapse>
+                                    <Collapse in={openSuccess}>
+                                        {success && (
+                                            <Alert
+                                                severity="success"
+                                                sx={{
+                                                    mt: 2,
+                                                    borderRadius: '12px',
+                                                    backgroundColor: '#E7F8E7',
+                                                    color: '#1D1D1F',
+                                                    boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+                                                }}
+                                                onClose={() => setOpenSuccess(false)}
+                                            >
+                                                {success}
+                                            </Alert>
+                                        )}
+                                    </Collapse>
+                                    <DialogActions sx={{ padding: '16px 0', borderTop: '1px solid #E5E5EA' }}>
+                                        <CancelButton onClick={() => setOpenCreatePlanDialog(false)}>Отмена</CancelButton>
+                                        <AppleButton onClick={handleCreatePlan}>Создать</AppleButton>
+                                    </DialogActions>
+                                </DialogContent>
+                            </Dialog>
+                        </>
+                    )}
+                </CardContent>
+            </AppleCard>
+        </Container>
+    );
+}
 
-    export default Dashboard;
+export default Dashboard;

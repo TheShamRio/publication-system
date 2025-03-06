@@ -8,7 +8,7 @@ function Login() {
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
     const [error, setError] = useState('');
-    const [isLoading, setIsLoading] = useState(false); // Добавляем состояние загрузки
+    const [isLoading, setIsLoading] = useState(false); // Состояние загрузки
     const navigate = useNavigate();
     const { login, updateAuthState, setCsrfToken } = useAuth();
 
@@ -26,15 +26,20 @@ function Login() {
 
             if (response.data.message === 'Успешная авторизация') {
                 const userData = {
+                    id: response.data.user.id,
                     username: response.data.user.username,
                     role: response.data.user.role || 'user',
+                    last_name: response.data.user.last_name || '',
+                    first_name: response.data.user.first_name || '',
+                    middle_name: response.data.user.middle_name || '',
                 };
                 localStorage.setItem('user', JSON.stringify(userData));
-                login(userData);
+                login(userData); // Передаём полный объект userData
                 updateAuthState({
                     isAuthenticated: true,
                     role: userData.role,
                     username: userData.username,
+                    user: userData, // Сохраняем полный объект пользователя
                 });
                 console.log('User logged in, role:', userData.role);
 

@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request, make_response, current_app, send_from_directory
 from .extensions import db, login_manager, csrf
-from .models import User, Publication, Comment
+from .models import User, Publication, Comment, Plan, PlanEntry
 from .utils import allowed_file
 from flask_login import login_user, current_user, logout_user, login_required
 from werkzeug.utils import secure_filename
@@ -68,7 +68,7 @@ def get_publication(pub_id):
             'full_name': publication.user.full_name if publication.user else None},
         'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
         'published_at': publication.published_at.isoformat() if publication.published_at else None,
-        'returned_for_revision': publication.returned_for_revision,  # Новое поле
+        'returned_for_revision': publication.returned_for_revision,
         'comments': [build_comment_tree(comment) for comment in comments]
     }), 200
 
@@ -119,7 +119,7 @@ def submit_for_review(pub_id):
 
     publication.status = 'needs_review'
     publication.updated_at = datetime.utcnow()
-    publication.returned_for_revision = False  # Сбрасываем флаг при повторной отправке
+    publication.returned_for_revision = False
 
     try:
         db.session.commit()
@@ -132,28 +132,21 @@ def submit_for_review(pub_id):
 @bp.route('/publications/<int:pub_id>/publish', methods=['POST'])
 @login_required
 def publish_publication(pub_id):
-    """
-    Опубликовать публикацию (только для администраторов или управляющих).
-    """
     publication = Publication.query.get_or_404(pub_id)
 
-    # Проверка прав доступа (только администратор или управляющий)
     if current_user.role not in ['admin', 'manager']:
         logger.warning(f"Несанкционированная попытка опубликовать публикацию {pub_id} пользователем {current_user.id} с ролью {current_user.role}")
         return jsonify({"error": "У вас нет прав для публикации этой работы."}), 403
 
-    # Проверка, находится ли публикация на стадии проверки
     if publication.status != 'needs_review':
         return jsonify({"error": "Публикация не находится на стадии проверки."}), 400
 
-    # Проверка, прикреплён ли файл
     if not publication.file_url:
         return jsonify({"error": "Нельзя опубликовать работу без прикреплённого файла."}), 400
 
-    # Обновление статуса публикации и установка времени публикации
     publication.status = 'published'
     publication.published_at = datetime.utcnow()
-    publication.returned_for_revision = False  # Сброс флага, если ранее публикация была возвращена на доработку
+    publication.returned_for_revision = False
 
     try:
         db.session.commit()
@@ -175,22 +168,15 @@ def publish_publication(pub_id):
 @bp.route('/publications/<int:pub_id>/return-for-revision', methods=['POST'])
 @login_required
 def return_for_revision(pub_id):
-    """
-    Вернуть публикацию на доработку (только для администраторов или управляющих).
-    Требуется наличие комментария ревьюера.
-    """
     publication = Publication.query.get_or_404(pub_id)
 
-    # Проверка прав доступа (только администратор или управляющий)
     if current_user.role not in ['admin', 'manager']:
         logger.warning(f"Несанкционированная попытка вернуть публикацию {pub_id} на доработку пользователем {current_user.id} с ролью {current_user.role}")
         return jsonify({"error": "У вас нет прав для возврата этой работы на доработку."}), 403
 
-    # Проверка, находится ли публикация на стадии проверки
     if publication.status != 'needs_review':
         return jsonify({"error": "Публикация не находится на стадии проверки."}), 400
 
-    # Проверка наличия комментария от ревьюера
     comments = Comment.query.filter_by(publication_id=pub_id).all()
     has_reviewer_comment = any(
         comment.user.role in ['admin', 'manager'] or any(reply.user.role in ['admin', 'manager'] for reply in comment.replies)
@@ -199,10 +185,9 @@ def return_for_revision(pub_id):
     if not has_reviewer_comment:
         return jsonify({"error": "Необходимо добавить комментарий перед возвратом на доработку."}), 400
 
-    # Обновление статуса публикации и установка флага returned_for_revision
     publication.status = 'draft'
     publication.returned_for_revision = True
-    publication.published_at = None  # Сброс времени публикации, если оно было установлено
+    publication.published_at = None
 
     try:
         db.session.commit()
@@ -257,7 +242,7 @@ def logout():
     logger.debug(f"Получен POST запрос для /logout")
     logout_user()
     response = jsonify({'message': 'Успешный выход'})
-    response.set_cookie('session', '', expires=0)  # Удаляем куки сессии
+    response.set_cookie('session', '', expires=0)
     return response, 200
 
 @bp.route('/user', methods=['GET', 'PUT'])
@@ -270,7 +255,7 @@ def user():
         response_data = {
             'id': current_user.id,
             'username': current_user.username,
-            'role': current_user.role,  # Убедимся, что role включён в ответ
+            'role': current_user.role,
             'last_name': current_user.last_name,
             'first_name': current_user.first_name,
             'middle_name': current_user.middle_name,
@@ -348,7 +333,7 @@ def get_public_publications():
         'file_url': pub.file_url,
         'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
         'published_at': pub.published_at.isoformat() if pub.published_at else None,
-        'returned_for_revision': pub.returned_for_revision,  # Новое поле
+        'returned_for_revision': pub.returned_for_revision,
         'user': {
             'full_name': pub.user.full_name if pub.user else 'Не указан'
         } if pub.user else None
@@ -417,7 +402,7 @@ def get_publications():
         'status': pub.status,
         'file_url': pub.file_url,
         'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
-        'returned_for_revision': pub.returned_for_revision,  # Новое поле
+        'returned_for_revision': pub.returned_for_revision,
     } for pub in publications]
 
     return jsonify({
@@ -485,7 +470,7 @@ def manage_publication(pub_id):
                     'file_url': publication.file_url,
                     'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
                     'published_at': publication.published_at.isoformat() if publication.published_at else None,
-                    'returned_for_revision': publication.returned_for_revision,  # Новое поле
+                    'returned_for_revision': publication.returned_for_revision,
                 }
             }), 200
         except Exception as e:
@@ -543,7 +528,7 @@ def upload_file():
         status='draft',
         file_url=file_path,
         user_id=current_user.id,
-        returned_for_revision=False,  # Новое поле
+        returned_for_revision=False,
     )
     db.session.add(publication)
     db.session.commit()
@@ -559,7 +544,7 @@ def upload_file():
             'status': publication.status,
             'file_url': publication.file_url,
             'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
-            'returned_for_revision': publication.returned_for_revision,  # Новое поле
+            'returned_for_revision': publication.returned_for_revision,
         }
     }), 200
 
@@ -594,7 +579,7 @@ def upload_bibtex():
                     type=type,
                     status='draft',
                     user_id=current_user.id,
-                    returned_for_revision=False,  # Новое поле
+                    returned_for_revision=False,
                 )
                 db.session.add(publication)
                 publications_added += 1
@@ -643,7 +628,7 @@ def attach_file(pub_id):
                     'status': publication.status,
                     'file_url': publication.file_url,
                     'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
-                    'returned_for_revision': publication.returned_for_revision,  # Новое поле
+                    'returned_for_revision': publication.returned_for_revision,
                 }
             }), 200
         except Exception as e:
@@ -700,3 +685,143 @@ def get_analytics_yearly():
         'year': year,
         'count': count
     } for year, count in analytics]), 200
+
+@bp.route('/plans', methods=['GET'])
+@login_required
+def get_plans():
+    logger.debug(f"Получен GET запрос для /plans")
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    plans = Plan.query.filter_by(user_id=current_user.id).order_by(Plan.year.desc()).paginate(page=page, per_page=per_page)
+    return jsonify({
+        'plans': [plan.to_dict() for plan in plans.items],
+        'total': plans.total,
+        'pages': plans.pages,
+        'current_page': plans.page
+    })
+
+@bp.route('/plans', methods=['POST'])
+@login_required
+def create_plan():
+    logger.debug(f"Получен POST запрос для /plans")
+    data = request.get_json()
+    if not all(k in data for k in ('year', 'expectedCount', 'fillType', 'entries')):
+        return jsonify({'error': 'Missing required fields'}), 400
+    
+    if not isinstance(data['year'], int) or data['year'] < 1900 or data['year'] > 2100:
+        return jsonify({'error': 'Invalid year'}), 400
+    
+    if not isinstance(data['expectedCount'], int) or data['expectedCount'] < 1:
+        return jsonify({'error': 'Expected count must be at least 1'}), 400
+    
+    if data['fillType'] not in ['manual', 'link']:
+        return jsonify({'error': 'Invalid fill type'}), 400
+
+    plan = Plan(
+        year=data['year'],
+        expectedCount=data['expectedCount'],
+        fillType=data['fillType'],
+        user_id=current_user.id,
+        status='draft'
+    )
+    db.session.add(plan)
+
+    for entry_data in data['entries']:
+        entry = PlanEntry(
+            title=entry_data.get('title'),
+            type=entry_data.get('type'),
+            publication_id=entry_data.get('publication_id'),
+            status=entry_data.get('status', 'planned'),
+            plan=plan
+        )
+        if entry.publication_id:
+            publication = Publication.query.filter_by(id=entry.publication_id, user_id=current_user.id, status='published').first()
+            if not publication:
+                db.session.rollback()
+                return jsonify({'error': f'Publication with ID {entry.publication_id} not found or not published'}), 404
+        db.session.add(entry)
+
+    db.session.commit()
+    return jsonify({'message': f'Plan created with ID {plan.id}', 'plan': plan.to_dict()}), 201
+
+@bp.route('/plans/<int:plan_id>', methods=['PUT'])
+@login_required
+def update_plan(plan_id):
+    logger.debug(f"Получен PUT запрос для /plans/{plan_id}")
+    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
+    if not plan:
+        return jsonify({'error': 'Plan not found or unauthorized'}), 404
+    
+    if plan.status not in ['draft', 'returned']:
+        return jsonify({'error': 'Cannot edit plan that is under review or approved'}), 403
+
+    data = request.get_json()
+    if not all(k in data for k in ('year', 'expectedCount', 'fillType', 'entries')):
+        return jsonify({'error': 'Missing required fields'}), 400
+    
+    if not isinstance(data['year'], int) or data['year'] < 1900 or data['year'] > 2100:
+        return jsonify({'error': 'Invalid year'}), 400
+    
+    if not isinstance(data['expectedCount'], int) or data['expectedCount'] < 1:
+        return jsonify({'error': 'Expected count must be at least 1'}), 400
+    
+    if data['fillType'] not in ['manual', 'link']:
+        return jsonify({'error': 'Invalid fill type'}), 400
+
+    plan.year = data['year']
+    plan.expectedCount = data['expectedCount']
+    plan.fillType = data['fillType']
+
+    PlanEntry.query.filter_by(plan_id=plan.id).delete()
+    db.session.commit()
+
+    for entry_data in data['entries']:
+        entry = PlanEntry(
+            title=entry_data.get('title'),
+            type=entry_data.get('type'),
+            publication_id=entry_data.get('publication_id'),
+            status=entry_data.get('status', 'planned'),
+            plan=plan
+        )
+        if entry.publication_id:
+            publication = Publication.query.filter_by(id=entry.publication_id, user_id=current_user.id, status='published').first()
+            if not publication:
+                db.session.rollback()
+                return jsonify({'error': f'Publication with ID {entry.publication_id} not found or not published'}), 404
+        db.session.add(entry)
+
+    db.session.commit()
+    return jsonify({'message': 'Plan updated successfully', 'plan': plan.to_dict()}), 200
+
+@bp.route('/plans/<int:plan_id>', methods=['DELETE'])
+@login_required
+def delete_plan(plan_id):
+    logger.debug(f"Получен DELETE запрос для /plans/{plan_id}")
+    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
+    if not plan:
+        return jsonify({'error': 'Plan not found or unauthorized'}), 404
+    
+    if plan.status not in ['draft', 'returned']:
+        return jsonify({'error': 'Cannot delete plan that is under review or approved'}), 403
+
+    db.session.delete(plan)
+    db.session.commit()
+    return jsonify({'message': 'Plan deleted successfully'}), 200
+
+@bp.route('/plans/<int:plan_id>/submit-for-review', methods=['POST'])
+@login_required
+def submit_plan_for_review(plan_id):
+    logger.debug(f"Получен POST запрос для /plans/{plan_id}/submit-for-review")
+    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
+    if not plan:
+        return jsonify({'error': 'Plan not found or unauthorized'}), 404
+    
+    if plan.status != 'draft':
+        return jsonify({'error': 'План уже отправлен на проверку или утверждён'}), 400
+    
+    if not all(entry.title and entry.title.strip() for entry in plan.entries):
+        return jsonify({'error': 'Все записи плана должны иметь заполненные заголовки'}), 400
+
+    plan.status = 'needs_review'
+    db.session.commit()
+    return jsonify({'message': 'План отправлен на проверку', 'plan': plan.to_dict()}), 200

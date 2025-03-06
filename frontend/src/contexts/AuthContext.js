@@ -16,7 +16,7 @@ export function AuthProvider({ children }) {
 		});
 		return {
 			isAuthenticated: !!storedUser,
-			user: parsedUser || null,
+			user: parsedUser || null, // Полный объект пользователя
 			role: parsedUser?.role || null,
 			csrfToken: storedCsrfToken || null,
 			isLoading: true,
@@ -38,30 +38,22 @@ export function AuthProvider({ children }) {
 					first_name: response.data.first_name || '',
 					last_name: response.data.last_name || '',
 					middle_name: response.data.middle_name || '',
-					created_at: response.data.created_at,
 				};
-				console.log('AuthContext: Извлечённый role:', userData.role);
 				setAuthState({
 					isAuthenticated: true,
-					user: userData,
-					role: userData.role, // Убедимся, что role обновляется
+					user: userData, // Полный объект пользователя
+					role: userData.role,
 					csrfToken: authState.csrfToken,
 					isLoading: false,
 				});
 				localStorage.setItem('user', JSON.stringify(userData));
-				console.log('AuthContext: Состояние после обновления:', {
-					isAuthenticated: true,
-					user: userData,
-					role: userData.role,
-				});
 
-				if (!authState.csrfToken) {
-					const tokenResponse = await axios.get('http://localhost:5000/api/csrf-token', {
-						withCredentials: true,
-					});
-					setCsrfToken(tokenResponse.data.csrf_token);
-					console.log('AuthContext: CSRF Token сохранён:', tokenResponse.data.csrf_token);
-				}
+				// Обновляем CSRF-токен после успешной проверки
+				const tokenResponse = await axios.get('http://localhost:5000/api/csrf-token', {
+					withCredentials: true,
+				});
+				setCsrfToken(tokenResponse.data.csrf_token);
+				console.log('AuthContext: CSRF Token обновлён:', tokenResponse.data.csrf_token);
 			} catch (err) {
 				console.error('AuthContext: Ошибка проверки состояния аутентификации:', err.response?.status, err.response?.data?.error || err.message);
 				if (err.response && err.response.status === 401) {
@@ -78,7 +70,6 @@ export function AuthProvider({ children }) {
 		};
 
 		if (authState.isAuthenticated) {
-			console.log('AuthContext: Запускаем проверку аутентификации...');
 			checkAuthStatus();
 		} else {
 			console.log('AuthContext: Пользователь не аутентифицирован в localStorage, пропускаем проверку.');
@@ -87,7 +78,7 @@ export function AuthProvider({ children }) {
 				isLoading: false,
 			}));
 		}
-	}, []);
+	}, [authState.isAuthenticated]);
 
 	const login = (userData) => {
 		const user = {
@@ -101,7 +92,7 @@ export function AuthProvider({ children }) {
 		console.log('AuthContext: Пользователь вошёл:', user);
 		setAuthState({
 			isAuthenticated: true,
-			user: user,
+			user: user, // Сохраняем полный объект пользователя
 			role: user.role,
 			csrfToken: authState.csrfToken,
 			isLoading: false,
