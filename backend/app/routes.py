@@ -816,7 +816,8 @@ def submit_plan_for_review(plan_id):
     if not plan:
         return jsonify({'error': 'Plan not found or unauthorized'}), 404
     
-    if plan.status != 'draft':
+    # Разрешаем отправку из состояний 'draft' и 'returned'
+    if plan.status not in ['draft', 'returned']:
         return jsonify({'error': 'План уже отправлен на проверку или утверждён'}), 400
     
     if not all(entry.title and entry.title.strip() for entry in plan.entries):

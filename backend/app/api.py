@@ -3,7 +3,7 @@ from werkzeug.utils import secure_filename
 from flask_login import login_required, current_user
 from flask import current_app
 from app.extensions import db
-from app.models import Publication, User, Plan
+from app.models import Publication, User, Plan, PlanEntry
 import os
 import logging
 from io import BytesIO
@@ -277,7 +277,7 @@ def get_needs_review_publications():
         'publications': publications,
         'pages': paginated_publications.pages,
         'total': paginated_publications.total
-    }), 200
+    }), 200 
 
 @bp.route('/admin/register', methods=['POST'])
 @admin_or_manager_required
