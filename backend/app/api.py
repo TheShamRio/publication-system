@@ -347,7 +347,7 @@ def get_all_plans():
     }), 200
 
 @bp.route('/admin/plans/<int:plan_id>', methods=['PUT'])
-@admin_or_manager_required
+@admin_required  # Ограничиваем только для админа
 def update_plan(plan_id):
     logger.debug(f"Получен PUT запрос для /admin_api/admin/plans/{plan_id}")
     plan = Plan.query.get_or_404(plan_id)
@@ -389,7 +389,7 @@ def update_plan(plan_id):
     return jsonify({'message': 'Plan updated successfully', 'plan': plan.to_dict()}), 200
 
 @bp.route('/admin/plans/<int:plan_id>', methods=['DELETE'])
-@admin_or_manager_required
+@admin_required  # Ограничиваем только для админа
 def delete_plan(plan_id):
     logger.debug(f"Получен DELETE запрос для /admin_api/admin/plans/{plan_id}")
     plan = Plan.query.get_or_404(plan_id)
@@ -420,7 +420,13 @@ def return_plan_for_revision(plan_id):
     if plan.status != 'needs_review':
         return jsonify({'error': 'План не находится на проверке'}), 400
 
+    data = request.get_json()
+    comment = data.get('comment', '').strip()
+    if not comment:
+        return jsonify({'error': 'Комментарий обязателен'}), 400
+
     plan.status = 'returned'
+    plan.return_comment = comment  # Сохраняем комментарий
     db.session.commit()
     return jsonify({'message': 'План возвращён на доработку', 'plan': plan.to_dict()}), 200
 

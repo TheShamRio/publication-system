@@ -130,6 +130,7 @@ class Plan(db.Model):
     fillType = db.Column(db.String(10), nullable=False, default='manual')  # 'manual' или 'link'
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     status = db.Column(db.String(20), nullable=False, default='draft')  # 'draft', 'needs_review', 'approved', 'returned'
+    return_comment = db.Column(db.Text, nullable=True)  # Добавлено для комментариев при возврате
 
     user = db.relationship('User', backref='plans', lazy=True)
     entries = db.relationship('PlanEntry', back_populates='plan', lazy=True, cascade='all, delete-orphan')
@@ -142,7 +143,8 @@ class Plan(db.Model):
             'fillType': self.fillType,
             'status': self.status,
             'user': {'full_name': self.user.full_name if self.user else None} if self.user else None,
-            'entries': [entry.to_dict() for entry in self.entries]
+            'entries': [entry.to_dict() for entry in self.entries],
+            'return_comment': self.return_comment  # Добавляем комментарий в ответ
         }
 
 class PlanEntry(db.Model):
@@ -157,11 +159,15 @@ class PlanEntry(db.Model):
     publication = db.relationship('Publication', back_populates='plan_entries', lazy=True)
 
     def to_dict(self):
-        return {
+        from flask_login import current_user
+        result = {
             'id': self.id,
             'title': self.title,
             'type': self.type,
             'publicationId': self.publication_id,
-            'status': self.status,
             'publication': self.publication.to_dict() if self.publication else None
         }
+        # Поле status не включаем для обычных пользователей
+        if current_user.is_authenticated and current_user.role in ['admin', 'manager']:
+            result['status'] = self.status
+        return result
