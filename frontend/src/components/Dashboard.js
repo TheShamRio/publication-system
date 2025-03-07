@@ -184,6 +184,7 @@ function Dashboard() {
 	const [openSuccess, setOpenSuccess] = useState(false);
 	const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
 	const [publicationToDelete, setPublicationToDelete] = useState(null);
+	const [planToDelete, setPlanToDelete] = useState(null); // Новое состояние для плана
 	const [openEditDialog, setOpenEditDialog] = useState(false);
 	const [editPublication, setEditPublication] = useState(null);
 	const [editTitle, setEditTitle] = useState('');
@@ -673,6 +674,7 @@ function Dashboard() {
 	const handleDeleteClick = (publication) => {
 		console.log('Deleting publication:', publication.id);
 		setPublicationToDelete(publication);
+		setPlanToDelete(null); // Сбрасываем planToDelete
 		setOpenDeleteDialog(true);
 	};
 
@@ -707,6 +709,7 @@ function Dashboard() {
 	const handleDeleteCancel = () => {
 		setOpenDeleteDialog(false);
 		setPublicationToDelete(null);
+		setPlanToDelete(null);
 	};
 
 	const handleEditUserClick = () => {
@@ -1056,17 +1059,18 @@ function Dashboard() {
 
 	const handleDeletePlanClick = (plan) => {
 		console.log('Deleting plan:', plan.id);
-		setPublicationToDelete(plan);
+		setPlanToDelete(plan);
+		setPublicationToDelete(null); // Сбрасываем publicationToDelete
 		setOpenDeleteDialog(true);
 	};
 
 	const handleDeletePlanConfirm = async () => {
-		if (!publicationToDelete) return;
+		if (!planToDelete) return;
 
 		try {
 			await refreshCsrfToken();
-			console.log('Confirming deletion of plan:', publicationToDelete.id);
-			const response = await axios.delete(`http://localhost:5000/api/plans/${publicationToDelete.id}`, {
+			console.log('Confirming deletion of plan:', planToDelete.id);
+			const response = await axios.delete(`http://localhost:5000/api/plans/${planToDelete.id}`, {
 				withCredentials: true,
 				headers: {
 					'X-CSRFToken': csrfToken,
@@ -1087,7 +1091,7 @@ function Dashboard() {
 			setSuccess('');
 		}
 		setOpenDeleteDialog(false);
-		setPublicationToDelete(null);
+		setPlanToDelete(null);
 	};
 
 	const handlePlanEntryChange = (planId, index, field, value) => {
@@ -2313,12 +2317,16 @@ function Dashboard() {
 				<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600 }}>Подтверждение удаления</DialogTitle>
 				<DialogContent>
 					<Typography sx={{ color: '#1D1D1F' }}>
-						Вы уверены, что хотите удалить {publicationToDelete?.title || 'этот план'}?
+						Вы уверены, что хотите удалить {publicationToDelete?.title || planToDelete?.title || 'этот объект'}?
 					</Typography>
 				</DialogContent>
 				<DialogActions sx={{ p: 2 }}>
 					<CancelButton onClick={handleDeleteCancel}>Отмена</CancelButton>
-					<AppleButton onClick={publicationToDelete?.year ? handleDeletePlanConfirm : handleDeleteConfirm} sx={{ backgroundColor: '#FF3B30', '&:hover': { backgroundColor: '#FF2D1A' } }}>
+					<AppleButton
+						onClick={publicationToDelete ? handleDeleteConfirm : planToDelete ? handleDeletePlanConfirm : () => { }}
+						sx={{ backgroundColor: '#FF3B30', '&:hover': { backgroundColor: '#FF2D1A' } }}
+						disabled={!publicationToDelete && !planToDelete}
+					>
 						Удалить
 					</AppleButton>
 				</DialogActions>
