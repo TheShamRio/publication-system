@@ -158,15 +158,22 @@ class PlanEntry(db.Model):
     plan = db.relationship('Plan', back_populates='entries')
     publication = db.relationship('Publication', back_populates='plan_entries', lazy=True)
 
+
+
     def to_dict(self):
         from flask_login import current_user
         result = {
             'id': self.id,
-            'title': self.title,
-            'type': self.type,
-            'publicationId': self.publication_id,
-            'publication': self.publication.to_dict() if self.publication else None
-        }
+        'title': self.title,
+        'type': self.type,
+        'publication_id': self.publication_id,  # Оставляем поле publication_id для совместимости
+        'status': self.status,
+        'publication': {
+            'id': self.publication.id,
+            'title': self.publication.title
+        } if self.publication else None  # Добавляем данные о публикации, если она привязана
+    }
+        
         # Поле status не включаем для обычных пользователей
         if current_user.is_authenticated and current_user.role in ['admin', 'manager']:
             result['status'] = self.status

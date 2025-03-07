@@ -694,12 +694,13 @@ def get_plans():
     per_page = request.args.get('per_page', 10, type=int)
     plans = Plan.query.filter_by(user_id=current_user.id).order_by(Plan.year.desc()).paginate(page=page, per_page=per_page)
     return jsonify({
-        'plans': [plan.to_dict() for plan in plans.items],
+        'plans': [plan.to_dict() for plan in plans.items],  # Убедимся, что to_dict возвращает полные данные
         'total': plans.total,
         'pages': plans.pages,
         'current_page': plans.page
     })
 
+# Обновляем маршрут POST /plans для поддержки добавления записей с publication_id
 @bp.route('/plans', methods=['POST'])
 @login_required
 def create_plan():
@@ -744,6 +745,7 @@ def create_plan():
     db.session.commit()
     return jsonify({'message': f'Plan created with ID {plan.id}', 'plan': plan.to_dict()}), 201
 
+# Обновляем маршрут PUT /plans для поддержки редактирования утверждённых планов
 @bp.route('/plans/<int:plan_id>', methods=['PUT'])
 @login_required
 def update_plan(plan_id):
@@ -752,8 +754,9 @@ def update_plan(plan_id):
     if not plan:
         return jsonify({'error': 'Plan not found or unauthorized'}), 404
     
-    if plan.status not in ['draft', 'returned']:
-        return jsonify({'error': 'Cannot edit plan that is under review or approved'}), 403
+    # Разрешаем редактирование только черновиков, возвращённых планов и добавление записей в утверждённые
+    if plan.status not in ['draft', 'returned', 'approved']:
+        return jsonify({'error': 'Cannot edit plan that is under review'}), 403
 
     data = request.get_json()
     if not all(k in data for k in ('year', 'expectedCount', 'fillType', 'entries')):
@@ -768,27 +771,52 @@ def update_plan(plan_id):
     if data['fillType'] not in ['manual', 'link']:
         return jsonify({'error': 'Invalid fill type'}), 400
 
-    plan.year = data['year']
-    plan.expectedCount = data['expectedCount']
-    plan.fillType = data['fillType']
-
-    PlanEntry.query.filter_by(plan_id=plan.id).delete()
-    db.session.commit()
-
-    for entry_data in data['entries']:
-        entry = PlanEntry(
-            title=entry_data.get('title'),
-            type=entry_data.get('type'),
-            publication_id=entry_data.get('publication_id'),
-            status=entry_data.get('status', 'planned'),
-            plan=plan
-        )
-        if entry.publication_id:
-            publication = Publication.query.filter_by(id=entry.publication_id, user_id=current_user.id, status='published').first()
-            if not publication:
-                db.session.rollback()
-                return jsonify({'error': f'Publication with ID {entry.publication_id} not found or not published'}), 404
-        db.session.add(entry)
+    # Если план утверждён, не позволяем менять основные поля, только добавлять записи
+    if plan.status == 'approved':
+        # Сохраняем существующие записи
+        existing_entries = {entry.id: entry for entry in plan.entries}
+        new_entries = []
+        for entry_data in data['entries']:
+            entry_id = entry_data.get('id')
+            if entry_id and entry_id in existing_entries:
+                # Существующие записи не редактируем, только сохраняем
+                continue
+            else:
+                # Добавляем новые записи
+                new_entry = PlanEntry(
+                    title=entry_data.get('title'),
+                    type=entry_data.get('type'),
+                    publication_id=entry_data.get('publication_id'),
+                    status=entry_data.get('status', 'planned'),
+                    plan=plan
+                )
+                if new_entry.publication_id:
+                    publication = Publication.query.filter_by(id=new_entry.publication_id, user_id=current_user.id, status='published').first()
+                    if not publication:
+                        db.session.rollback()
+                        return jsonify({'error': f'Publication with ID {new_entry.publication_id} not found or not published'}), 404
+                new_entries.append(new_entry)
+                db.session.add(new_entry)
+    else:
+        # Для черновиков и возвращённых планов обновляем полностью
+        plan.year = data['year']
+        plan.expectedCount = data['expectedCount']
+        plan.fillType = data['fillType']
+        PlanEntry.query.filter_by(plan_id=plan.id).delete()
+        for entry_data in data['entries']:
+            entry = PlanEntry(
+                title=entry_data.get('title'),
+                type=entry_data.get('type'),
+                publication_id=entry_data.get('publication_id'),
+                status=entry_data.get('status', 'planned'),
+                plan=plan
+            )
+            if entry.publication_id:
+                publication = Publication.query.filter_by(id=entry.publication_id, user_id=current_user.id, status='published').first()
+                if not publication:
+                    db.session.rollback()
+                    return jsonify({'error': f'Publication with ID {entry.publication_id} not found or not published'}), 404
+            db.session.add(entry)
 
     db.session.commit()
     return jsonify({'message': 'Plan updated successfully', 'plan': plan.to_dict()}), 200
@@ -816,7 +844,6 @@ def submit_plan_for_review(plan_id):
     if not plan:
         return jsonify({'error': 'Plan not found or unauthorized'}), 404
     
-    # Разрешаем отправку из состояний 'draft' и 'returned'
     if plan.status not in ['draft', 'returned']:
         return jsonify({'error': 'План уже отправлен на проверку или утверждён'}), 400
     
@@ -826,3 +853,62 @@ def submit_plan_for_review(plan_id):
     plan.status = 'needs_review'
     db.session.commit()
     return jsonify({'message': 'План отправлен на проверку', 'plan': plan.to_dict()}), 200
+
+# Новый маршрут для привязки публикации к записи плана
+@bp.route('/plans/<int:plan_id>/entries/<int:entry_id>/link', methods=['POST'])
+@login_required
+def link_publication_to_plan_entry(plan_id, entry_id):
+    logger.debug(f"Получен POST запрос для /plans/{plan_id}/entries/{entry_id}/link")
+    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
+    if not plan:
+        return jsonify({'error': 'Plan not found or unauthorized'}), 404
+    
+    entry = PlanEntry.query.filter_by(id=entry_id, plan_id=plan_id).first()
+    if not entry:
+        return jsonify({'error': 'Entry not found'}), 404
+    
+    # Привязка доступна только для утверждённых планов
+    if plan.status != 'approved':
+        return jsonify({'error': 'Can only link publications to approved plans'}), 403
+    
+    if entry.publication_id:
+        return jsonify({'error': 'Entry already linked to a publication'}), 400
+
+    data = request.get_json()
+    publication_id = data.get('publication_id')
+    if not publication_id:
+        return jsonify({'error': 'Publication ID is required'}), 400
+
+    publication = Publication.query.filter_by(id=publication_id, user_id=current_user.id, status='published').first()
+    if not publication:
+        return jsonify({'error': f'Publication with ID {publication_id} not found or not published'}), 404
+
+    entry.publication_id = publication_id
+    entry.status = 'completed'  # Обновляем статус записи на "выполнено"
+    db.session.commit()
+    return jsonify({'message': 'Publication linked successfully', 'entry': entry.to_dict()}), 200
+
+# Новый маршрут для отвязки публикации от записи плана
+@bp.route('/plans/<int:plan_id>/entries/<int:entry_id>/unlink', methods=['POST'])
+@login_required
+def unlink_publication_from_plan_entry(plan_id, entry_id):
+    logger.debug(f"Получен POST запрос для /plans/{plan_id}/entries/{entry_id}/unlink")
+    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
+    if not plan:
+        return jsonify({'error': 'Plan not found or unauthorized'}), 404
+    
+    entry = PlanEntry.query.filter_by(id=entry_id, plan_id=plan_id).first()
+    if not entry:
+        return jsonify({'error': 'Entry not found'}), 404
+    
+    # Отвязка доступна только для утверждённых планов
+    if plan.status != 'approved':
+        return jsonify({'error': 'Can only unlink publications from approved plans'}), 403
+    
+    if not entry.publication_id:
+        return jsonify({'error': 'No publication linked to this entry'}), 400
+
+    entry.publication_id = None
+    entry.status = 'planned'  # Возвращаем статус "запланировано"
+    db.session.commit()
+    return jsonify({'message': 'Publication unlinked successfully', 'entry': entry.to_dict()}), 200

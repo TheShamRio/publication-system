@@ -23,6 +23,7 @@ import {
 	DialogContent,
 	DialogActions,
 	IconButton,
+	LinearProgress, // Добавляем шкалу прогресса
 	Tabs,
 	Tab,
 	Accordion,
@@ -40,6 +41,8 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SaveIcon from '@mui/icons-material/Save';
 import PublishIcon from '@mui/icons-material/Publish';
+import LinkIcon from '@mui/icons-material/Link'; // Добавляем иконку для привязки
+import UnlinkIcon from '@mui/icons-material/LinkOff';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import DownloadIcon from '@mui/icons-material/Download';
 import Visibility from '@mui/icons-material/Visibility';
@@ -213,6 +216,10 @@ function Dashboard() {
 	const [searchQuery, setSearchQuery] = useState('');
 	const [filterType, setFilterType] = useState('all');
 	const [filterStatus, setFilterStatus] = useState('all');
+	const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+	const [selectedPlanEntry, setSelectedPlanEntry] = useState(null);
+	const [filteredPublishedPublications, setFilteredPublishedPublications] = useState([]);
+	const [linkSearchQuery, setLinkSearchQuery] = useState('');
 	const [currentPage, setCurrentPage] = useState(1);
 	const [totalPages, setTotalPages] = useState(1);
 	const [publicationsTransitionKey, setPublicationsTransitionKey] = useState(0);
@@ -254,11 +261,12 @@ function Dashboard() {
 					per_page: 9999,
 					search: '',
 					type: 'all',
-					status: 'all',
+					status: 'published', // Фильтруем только опубликованные
 				},
 			});
 			const allPubs = pubResponse.data.publications || [];
-			setPublishedPublications(allPubs.filter(pub => pub.status === 'published'));
+			setPublishedPublications(allPubs);
+			setFilteredPublishedPublications(allPubs);
 			return allPubs;
 		} catch (err) {
 			console.error('Ошибка загрузки всех публикаций:', err);
@@ -319,8 +327,13 @@ function Dashboard() {
 			});
 			const sortedPlans = (response.data.plans || []).map(plan => ({
 				...plan,
-				isSaved: true, // Планы с сервера считаются сохранёнными
+				isSaved: true,
+				entries: plan.entries.map(entry => ({
+					...entry,
+					publication_id: entry.publication_id || null, // Убеждаемся, что publication_id присутствует
+				})),
 			})).sort((a, b) => b.year - a.year);
+			console.log('Обновлённые планы:', sortedPlans); // Логируем для проверки
 			setPlans(sortedPlans);
 			setPlanPage(page);
 			const total = response.data.total || 0;
@@ -332,7 +345,6 @@ function Dashboard() {
 			setOpenError(true);
 		}
 	};
-
 	const updateAnalytics = (allPublications) => {
 		const types = { article: 0, monograph: 0, conference: 0 };
 		const statuses = { draft: 0, needs_review: 0, published: 0 };
@@ -361,6 +373,7 @@ function Dashboard() {
 	useEffect(() => {
 		fetchData(1, searchQuery, filterType, filterStatus);
 		fetchPlans(1);
+		fetchAllPublications(); // Добавляем вызов 
 	}, [navigate, searchQuery, filterType, filterStatus]);
 
 	const currentPublications = filteredPublications;
@@ -989,14 +1002,16 @@ function Dashboard() {
 	const handleSavePlan = async (plan) => {
 		try {
 			await refreshCsrfToken();
+			const newEntries = plan.entries.filter(entry => !entry.id); // Фильтруем только новые записи
 			const planData = {
 				year: plan.year,
 				expectedCount: plan.entries.length,
 				fillType: 'manual',
-				entries: plan.entries.map(entry => ({
+				entries: newEntries.map(entry => ({
 					title: entry.title || '',
 					type: entry.type || 'article',
-					status: 'planned',
+					status: entry.status || 'planned',
+					publication_id: entry.publication_id || null,
 				})),
 			};
 			console.log('Saving plan with:', planData);
@@ -1013,7 +1028,7 @@ function Dashboard() {
 			setEditingPlanId(null);
 			setPlans(prevPlans =>
 				prevPlans.map(p =>
-					p.id === plan.id ? { ...p, entries: planData.entries, isSaved: true } : p
+					p.id === plan.id ? { ...p, entries: response.data.plan.entries, isSaved: true } : p
 				)
 			);
 			await fetchPlans(planPage);
@@ -1092,6 +1107,82 @@ function Dashboard() {
 		}
 		setOpenDeleteDialog(false);
 		setPlanToDelete(null);
+	};
+
+	// Функция для фильтрации публикаций в диалоге привязки
+	const handleLinkSearch = (query) => {
+		setLinkSearchQuery(query);
+		const filtered = publishedPublications.filter(
+			(pub) =>
+				pub.title.toLowerCase().includes(query.toLowerCase()) ||
+				pub.authors.toLowerCase().includes(query.toLowerCase())
+		);
+		setFilteredPublishedPublications(filtered);
+	};
+
+	// Функция открытия диалога привязки
+	const handleOpenLinkDialog = (planId, entry) => {
+		setSelectedPlanEntry({ planId, ...entry });
+		setLinkDialogOpen(true);
+		setLinkSearchQuery('');
+		setFilteredPublishedPublications(publishedPublications);
+	};
+
+	// Функция привязки публикации
+	const handleLinkPublication = async (planId, entryId, publicationId) => {
+		try {
+			await refreshCsrfToken();
+			console.log('Отправка запроса привязки:', { planId, entryId, publicationId });
+			const response = await axios.post(
+				`http://localhost:5000/api/plans/${planId}/entries/${entryId}/link`,
+				{ publication_id: publicationId },
+				{
+					withCredentials: true,
+					headers: {
+						'X-CSRFToken': csrfToken,
+						'Content-Type': 'application/json',
+					},
+				}
+			);
+			console.log('Ответ сервера:', response.data);
+			setSuccess('Публикация успешно привязана!');
+			setOpenSuccess(true);
+			await Promise.all([fetchPlans(planPage), fetchAllPublications()]); // Обновляем и планы, и публикации
+			setLinkDialogOpen(false);
+		} catch (err) {
+			console.error('Ошибка привязки:', err.response?.data || err.message);
+			setError(err.response?.data?.error || 'Не удалось привязать публикацию.');
+			setOpenError(true);
+		}
+	};
+
+
+	// Функция отвязки публикации
+	const handleUnlinkPublication = async (planId, entryId) => {
+		try {
+			await refreshCsrfToken();
+			await axios.post(
+				`http://localhost:5000/api/plans/${planId}/entries/${entryId}/unlink`,
+				{},
+				{
+					withCredentials: true,
+					headers: { 'X-CSRFToken': csrfToken },
+				}
+			);
+			setSuccess('Публикация успешно отвязана!');
+			setOpenSuccess(true);
+			fetchPlans(planPage);
+		} catch (err) {
+			setError(err.response?.data?.error || 'Не удалось отвязать публикацию.');
+			setOpenError(true);
+		}
+	};
+
+	// Функция вычисления прогресса выполнения плана
+	const calculateProgress = (plan) => {
+		const completed = plan.entries.filter((entry) => entry.publication_id).length;
+		const total = plan.expectedCount;
+		return total > 0 ? (completed / total) * 100 : 0;
 	};
 
 	const handlePlanEntryChange = (planId, index, field, value) => {
@@ -1741,217 +1832,236 @@ function Dashboard() {
 							)}
 
 							{value === 3 && (
-								<Box sx={{ mt: 4 }}>
-									<Typography
-										variant="h5"
-										gutterBottom
-										sx={{
-											mt: 4,
-											color: '#1D1D1F',
-											fontWeight: 600,
-											textAlign: 'center',
-										}}
-									>
-										Планы публикаций
-									</Typography>
-									<AppleButton onClick={() => setOpenCreatePlanDialog(true)} sx={{ mt: 2, mb: 4 }}>
-										Создать план
-									</AppleButton>
-									{plans.length > 0 ? (
-										plans.map((plan) => (
-											<PlanTable key={plan.id} sx={{ mb: 4 }}>
-												<TableHead>
-													<TableRow sx={{ backgroundColor: '#0071E3' }}>
-														<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
-														<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
-														<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Ожидаемые публикации</TableCell>
-														<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
-														<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>
-															Действия
-														</TableCell>
-													</TableRow>
-												</TableHead>
-												<TableBody>
-													<TableRow
-														sx={{
-															'&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' },
-															borderBottom: '2px solid #E5E5EA',
-														}}
-													>
-														<TableCell sx={{ color: '#1D1D1F' }}>{plan.id}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{plan.year}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{plan.expectedCount}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															<StatusChip status={plan.status} />
-														</TableCell>
-														<TableCell sx={{ textAlign: 'center' }}>
-															<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-																{(plan.status === 'draft' || plan.status === 'returned') && (
-																	<>
-																		<IconButton
-																			aria-label="edit"
-																			onClick={() => handleEditPlanClick(plan.id)}
-																			sx={{
-																				color: '#0071E3',
-																				borderRadius: '8px',
-																				'&:hover': {
-																					color: '#FFFFFF',
-																					backgroundColor: '#0071E3',
-																					boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																				},
-																			}}
-																		>
-																			<EditIcon />
-																		</IconButton>
-																		<IconButton
-																			aria-label="delete"
-																			onClick={() => handleDeletePlanClick(plan)}
-																			sx={{
-																				color: '#0071E3',
-																				borderRadius: '8px',
-																				'&:hover': {
-																					color: '#FFFFFF',
-																					backgroundColor: '#0071E3',
-																					boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																				},
-																			}}
-																		>
-																			<DeleteIcon />
-																		</IconButton>
-																		{plan.isSaved && areAllTitlesFilled(plan) && (
-																			<IconButton
-																				aria-label="submit-for-review"
-																				onClick={() => handleSubmitPlanForReview(plan)}
-																				sx={{
-																					color: 'green',
-																					borderRadius: '8px',
-																					'&:hover': {
-																						color: '#FFFFFF',
-																						backgroundColor: 'green',
-																						boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																					},
-																				}}
-																			>
-																				<PublishIcon />
-																			</IconButton>
-																		)}
-																	</>
-																)}
-															</Box>
-														</TableCell>
-													</TableRow>
-													{plan.entries.map((entry, index) => (
-														<TableRow key={`${plan.id}-${index}`}>
-															<TableCell sx={{ color: '#1D1D1F', pl: 4 }}>{index + 1}</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>
-																<AppleTextField
-																	fullWidth
-																	value={entry.title}
-																	onChange={(e) => handlePlanEntryChange(plan.id, index, 'title', e.target.value)}
-																	disabled={editingPlanId !== plan.id || (plan.status !== 'draft' && plan.status !== 'returned')}
-																	variant="outlined"
-																	sx={{ backgroundColor: editingPlanId === plan.id && (plan.status === 'draft' || plan.status === 'returned') ? '#FFFFFF' : '#F5F5F7' }}
-																/>
-															</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>
-																<AppleTextField
-																	fullWidth
-																	select
-																	value={entry.type}
-																	onChange={(e) => handlePlanEntryChange(plan.id, index, 'type', e.target.value)}
-																	disabled={editingPlanId !== plan.id || (plan.status !== 'draft' && plan.status !== 'returned')}
-																	variant="outlined"
-																	sx={{ backgroundColor: editingPlanId === plan.id && (plan.status === 'draft' || plan.status === 'returned') ? '#FFFFFF' : '#F5F5F7' }}
-																>
-																	<MenuItem value="article">Статья</MenuItem>
-																	<MenuItem value="monograph">Монография</MenuItem>
-																	<MenuItem value="conference">Доклад/конференция</MenuItem>
-																</AppleTextField>
-															</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>
-																<StatusChip status={entry.status} />
-															</TableCell>
-															<TableCell sx={{ textAlign: 'center' }}>
-																{editingPlanId === plan.id && (plan.status === 'draft' || plan.status === 'returned') && (
-																	<IconButton
-																		aria-label="delete-entry"
-																		onClick={() => handleDeletePlanEntry(plan.id, index)}
-																		sx={{
-																			color: '#FF3B30',
-																			borderRadius: '8px',
-																			'&:hover': {
-																				color: '#FFFFFF',
-																				backgroundColor: '#FF3B30',
-																				boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																			},
-																		}}
-																	>
-																		<DeleteIcon />
-																	</IconButton>
-																)}
-															</TableCell>
-														</TableRow>
-													))}
-													{plan.status === 'returned' && plan.return_comment && (
-														<TableRow>
-															<TableCell colSpan={5} sx={{ pl: 4, color: '#1D1D1F' }}>
-																<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-																	<WarningAmberIcon sx={{ color: '#FF3B30' }} />
-																	<Typography variant="body2" sx={{ color: '#1D1D1F' }}>
-																		Комментарий: {plan.return_comment}
-																	</Typography>
-																</Box>
-															</TableCell>
-														</TableRow>
-													)}
-													{editingPlanId === plan.id && (plan.status === 'draft' || plan.status === 'returned') && (
-														<>
-															<TableRow>
-																<TableCell colSpan={5} sx={{ textAlign: 'center', py: 1 }}>
-																	<AppleButton onClick={() => handleAddPlanEntry(plan.id)} sx={{ mt: 1 }}>
-																		<AddIcon sx={{ mr: 1 }} /> Добавить запись
-																	</AppleButton>
-																</TableCell>
-															</TableRow>
-															<TableRow>
-																<TableCell colSpan={5} sx={{ textAlign: 'right', py: 1 }}>
-																	<AppleButton onClick={() => handleSavePlan(plan)} sx={{ mt: 1, mr: 2 }}>
-																		Сохранить
-																	</AppleButton>
-																	{plan.isSaved && areAllTitlesFilled(plan) && (
-																		<GreenButton onClick={() => handleSubmitPlanForReview(plan)} sx={{ mt: 1 }}>
-																			Отправить на проверку
-																		</GreenButton>
-																	)}
-																</TableCell>
-															</TableRow>
-														</>
-													)}
-												</TableBody>
-											</PlanTable>
-										))
-									) : (
-										<Typography sx={{ color: '#6E6E73', textAlign: 'center', mt: 4 }}>
-											У вас ещё нет ни одного плана. Нажмите "Создать план", чтобы добавить новый план публикаций.
-										</Typography>
-									)}
-									<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-										<Pagination
-											count={planTotalPages}
-											page={planPage}
-											onChange={handlePlanPageChange}
-											color="primary"
+								<>
+									<Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+										<Typography
+											variant="h5"
 											sx={{
-												'& .MuiPaginationItem-root': {
-													borderRadius: 20,
-													transition: 'all 0.3s ease',
-													'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
-													'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
-												},
+												color: '#1D1D1F',
+												fontWeight: 600,
 											}}
-										/>
+										>
+											Ваши планы
+										</Typography>
+										<AppleButton
+											startIcon={<AddIcon />}
+											onClick={() => setOpenCreatePlanDialog(true)}
+										>
+											Создать план
+										</AppleButton>
 									</Box>
-								</Box>
+
+									{plans.map((plan) => (
+										<Accordion
+											key={plan.id}
+											sx={{
+												mb: 2,
+												borderRadius: '16px',
+												boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+											}}
+										>
+											<AccordionSummary expandIcon={<ExpandMoreIcon />}>
+												<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+													<Typography variant="h6" sx={{ color: '#1D1D1F' }}>
+														План на {plan.year} год (Ожидаемое количество: {plan.expectedCount})
+													</Typography>
+													<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+														<StatusChip status={plan.status} />
+														{(plan.status === 'draft' || plan.status === 'returned') && (
+															<>
+																<IconButton
+																	onClick={(e) => {
+																		e.stopPropagation();
+																		handleEditPlanClick(plan.id);
+																	}}
+																	sx={{ color: '#0071E3' }}
+																>
+																	<EditIcon />
+																</IconButton>
+																<IconButton
+																	onClick={(e) => {
+																		e.stopPropagation();
+																		handleDeletePlanClick(plan);
+																	}}
+																	sx={{ color: '#FF3B30' }}
+																>
+																	<DeleteIcon />
+																</IconButton>
+																<IconButton
+																	onClick={(e) => {
+																		e.stopPropagation();
+																		handleSubmitPlanForReview(plan);
+																	}}
+																	sx={{ color: '#0071E3' }}
+																	disabled={!areAllTitlesFilled(plan)}
+																	title={areAllTitlesFilled(plan) ? 'Отправить на проверку' : 'Заполните все заголовки'}
+																>
+																	<PublishIcon />
+																</IconButton>
+															</>
+														)}
+													</Box>
+												</Box>
+											</AccordionSummary>
+											<AccordionDetails>
+												{editingPlanId === plan.id ? (
+													<>
+														<PlanTable>
+															<TableHead>
+																<TableRow>
+																	<TableCell>Название</TableCell>
+																	<TableCell>Тип</TableCell>
+																	<TableCell>Статус</TableCell>
+																	<TableCell>Действия</TableCell>
+																</TableRow>
+															</TableHead>
+															<TableBody>
+																{plan.entries.map((entry, index) => (
+																	<TableRow key={index}>
+																		<TableCell>
+																			<AppleTextField
+																				value={entry.title}
+																				onChange={(e) => handlePlanEntryChange(plan.id, index, 'title', e.target.value)}
+																				fullWidth
+																				variant="outlined"
+																			/>
+																		</TableCell>
+																		<TableCell>
+																			<AppleTextField
+																				select
+																				value={entry.type}
+																				onChange={(e) => handlePlanEntryChange(plan.id, index, 'type', e.target.value)}
+																				fullWidth
+																				variant="outlined"
+																			>
+																				<MenuItem value="article">Статья</MenuItem>
+																				<MenuItem value="monograph">Монография</MenuItem>
+																				<MenuItem value="conference">Доклад/конференция</MenuItem>
+																			</AppleTextField>
+																		</TableCell>
+																		<TableCell>
+																			<StatusChip status={entry.status} />
+																		</TableCell>
+																		<TableCell>
+																			<IconButton
+																				onClick={() => handleDeletePlanEntry(plan.id, index)}
+																				sx={{ color: '#FF3B30' }}
+																			>
+																				<DeleteIcon />
+																			</IconButton>
+																		</TableCell>
+																	</TableRow>
+																))}
+															</TableBody>
+														</PlanTable>
+														<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+															<AppleButton
+																startIcon={<AddIcon />}
+																onClick={() => handleAddPlanEntry(plan.id)}
+															>
+																Добавить запись
+															</AppleButton>
+															<GreenButton
+																startIcon={<SaveIcon />}
+																onClick={() => handleSavePlan(plan)}
+																disabled={!areAllTitlesFilled(plan)}
+															>
+																Сохранить
+															</GreenButton>
+														</Box>
+													</>
+												) : (
+													<>
+														<LinearProgress
+															variant="determinate"
+															value={calculateProgress(plan)}
+															sx={{ mb: 2, height: 8, borderRadius: 4 }}
+														/>
+														<PlanTable>
+															<TableHead>
+																<TableRow>
+																	<TableCell>Название</TableCell>
+																	<TableCell>Тип</TableCell>
+																	<TableCell>Статус</TableCell>
+																	<TableCell>Привязанная публикация</TableCell>
+																	{plan.status === 'approved' && <TableCell>Действия</TableCell>}
+																</TableRow>
+															</TableHead>
+															<TableBody>
+																{plan.entries.map((entry) => (
+																	<TableRow key={entry.id}>
+																		<TableCell>{entry.title}</TableCell>
+																		<TableCell>{entry.type}</TableCell>
+																		<TableCell><StatusChip status={entry.status} /></TableCell>
+																		<TableCell>
+																			{entry.publication_id ? (
+																				<Typography
+																					sx={{
+																						color: '#0071E3',
+																						textDecoration: 'underline',
+																						cursor: 'pointer',
+																						'&:hover': { textDecoration: 'none' },
+																					}}
+																					onClick={() => navigate(`/publication/${entry.publication_id}`)}
+																				>
+																					{publishedPublications.find(pub => pub.id === entry.publication_id)?.title || 'Неизвестно'}
+																				</Typography>
+																			) : (
+																				'Не привязана'
+																			)}
+																		</TableCell>
+																		{plan.status === 'approved' && (
+																			<TableCell>
+																				{entry.publication_id ? (
+																					<IconButton
+																						onClick={() => handleUnlinkPublication(plan.id, entry.id)}
+																						sx={{ color: '#FF3B30' }}
+																						title="Отвязать публикацию"
+																					>
+																						<UnlinkIcon />
+																					</IconButton>
+																				) : (
+																					<IconButton
+																						onClick={() => handleOpenLinkDialog(plan.id, entry)}
+																						sx={{ color: '#0071E3' }}
+																						title="Привязать публикацию"
+																					>
+																						<LinkIcon />
+																					</IconButton>
+																				)}
+																			</TableCell>
+																		)}
+																	</TableRow>
+																))}
+															</TableBody>
+														</PlanTable>
+														{plan.status === 'approved' && (
+															<AppleButton
+																startIcon={<AddIcon />}
+																onClick={() => handleEditPlanClick(plan.id)}
+																sx={{ mt: 2 }}
+															>
+																Добавить запись
+															</AppleButton>
+														)}
+													</>
+												)}
+												{plan.return_comment && (
+													<Typography sx={{ mt: 2, color: '#FF3B30' }}>
+														Комментарий при возврате: {plan.return_comment}
+													</Typography>
+												)}
+											</AccordionDetails>
+										</Accordion>
+									))}
+
+									<Pagination
+										count={planTotalPages}
+										page={planPage}
+										onChange={handlePlanPageChange}
+										sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}
+									/>
+								</>
 							)}
 
 							{value === 4 && (
@@ -2336,40 +2446,76 @@ function Dashboard() {
 			<Dialog
 				open={openCreatePlanDialog}
 				onClose={() => setOpenCreatePlanDialog(false)}
-				maxWidth="sm"
-				fullWidth
-				PaperProps={{
-					sx: {
-						borderRadius: '16px',
-						boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-						backgroundColor: '#FFFFFF',
-					},
-				}}
+				sx={{ '& .MuiDialog-paper': { borderRadius: '16px', p: 2 } }}
 			>
-				<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600 }}>Создать план</DialogTitle>
+				<DialogTitle>Создать новый план</DialogTitle>
 				<DialogContent>
 					<AppleTextField
-						fullWidth
 						label="Год"
 						type="number"
 						value={newPlan.year}
-						onChange={(e) => setNewPlan({ ...newPlan, year: parseInt(e.target.value, 10) })}
+						onChange={(e) => setNewPlan({ ...newPlan, year: parseInt(e.target.value) || '' })}
+						fullWidth
 						margin="normal"
 						variant="outlined"
 					/>
 					<AppleTextField
-						fullWidth
 						label="Ожидаемое количество публикаций"
 						type="number"
 						value={newPlan.expectedCount}
-						onChange={(e) => setNewPlan({ ...newPlan, expectedCount: parseInt(e.target.value, 10) })}
+						onChange={(e) => setNewPlan({ ...newPlan, expectedCount: parseInt(e.target.value) || 1 })}
+						fullWidth
 						margin="normal"
 						variant="outlined"
 					/>
 				</DialogContent>
-				<DialogActions sx={{ p: 2 }}>
+				<DialogActions>
 					<CancelButton onClick={() => setOpenCreatePlanDialog(false)}>Отмена</CancelButton>
 					<AppleButton onClick={handleCreatePlan}>Создать</AppleButton>
+				</DialogActions>
+			</Dialog>
+			<Dialog
+				open={linkDialogOpen}
+				onClose={() => setLinkDialogOpen(false)}
+				sx={{ '& .MuiDialog-paper': { borderRadius: '16px', p: 2, minWidth: '500px' } }}
+			>
+				<DialogTitle>Привязать публикацию</DialogTitle>
+				<DialogContent>
+					<AppleTextField
+						fullWidth
+						label="Поиск публикации"
+						value={linkSearchQuery}
+						onChange={(e) => handleLinkSearch(e.target.value)}
+						margin="normal"
+						variant="outlined"
+					/>
+					<Table>
+						<TableHead>
+							<TableRow>
+								<TableCell>Название</TableCell>
+								<TableCell>Авторы</TableCell>
+								<TableCell>Действия</TableCell>
+							</TableRow>
+						</TableHead>
+						<TableBody>
+							{filteredPublishedPublications.map((pub) => (
+								<TableRow key={pub.id}>
+									<TableCell>{pub.title}</TableCell>
+									<TableCell>{pub.authors}</TableCell>
+									<TableCell>
+										<AppleButton
+											onClick={() => handleLinkPublication(selectedPlanEntry.planId, selectedPlanEntry.id, pub.id)}
+										>
+											Привязать
+										</AppleButton>
+									</TableCell>
+								</TableRow>
+							))}
+						</TableBody>
+					</Table>
+				</DialogContent>
+				<DialogActions>
+					<CancelButton onClick={() => setLinkDialogOpen(false)}>Отмена</CancelButton>
 				</DialogActions>
 			</Dialog>
 		</Container>
