@@ -25,6 +25,10 @@ import {
 	Fade,
 	MenuItem,
 	Button,
+	Accordion,
+	AccordionSummary,
+	AccordionDetails,
+	LinearProgress,
 } from '@mui/material';
 import { styled } from '@mui/system';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -34,6 +38,8 @@ import ReplayIcon from '@mui/icons-material/Replay';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import Visibility from '@mui/icons-material/Visibility';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
@@ -56,11 +62,13 @@ const AppleTable = styled(Table)({
 	borderSpacing: '0 8px',
 });
 
-const PlanTable = styled(Table)({
-	borderCollapse: 'separate',
-	borderSpacing: '0 8px',
-	'& td, & th': { border: 'none' },
-});
+const PlanTable = styled(Table)(({ theme }) => ({
+	borderRadius: '16px',
+	overflow: 'hidden',
+	backgroundColor: '#FFFFFF',
+	boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+	marginBottom: '16px',
+}));
 
 const AppleButton = styled(Button)({
 	borderRadius: '12px',
@@ -201,10 +209,11 @@ function ManagerDashboard() {
 
 	const fetchPlans = async (page) => {
 		try {
-			const response = await axios.get(`http://localhost:5000/admin_api/admin/plans?page=${page}&per_page=10`, {
+			const response = await axios.get(`http://localhost:5000/admin_api/admin/plans/needs-review?page=${page}&per_page=10`, {
 				withCredentials: true,
 				headers: { 'X-CSRFToken': csrfToken },
 			});
+			console.log('Данные планов с сервера:', response.data.plans); // Логируем данные для проверки
 			setPlans(response.data.plans);
 			setTotalPagesPlans(response.data.pages);
 		} catch (err) {
@@ -357,6 +366,12 @@ function ManagerDashboard() {
 			setError('Не удалось вернуть план. Попробуйте позже.');
 			setOpenError(true);
 		}
+	};
+
+	const calculateProgress = (plan) => {
+		const completed = plan.entries.filter((entry) => entry.publication_id).length;
+		const total = plan.expectedCount;
+		return total > 0 ? (completed / total) * 100 : 0;
 	};
 
 	return (
@@ -693,79 +708,92 @@ function ManagerDashboard() {
 								</Typography>
 								{plans.length > 0 ? (
 									plans.map((plan) => (
-										<PlanTable key={plan.id} sx={{ mb: 4 }}>
-											<TableHead>
-												<TableRow sx={{ backgroundColor: '#0071E3' }}>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Ожидаемые публикации</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Пользователь</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>
-														Действия
-													</TableCell>
-												</TableRow>
-											</TableHead>
-											<TableBody>
-												<TableRow
-													sx={{
-														'&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' },
-														borderBottom: '2px solid #E5E5EA',
-													}}
-												>
-													<TableCell sx={{ color: '#1D1D1F' }}>{plan.id}</TableCell>
-													<TableCell sx={{ color: '#1D1D1F' }}>{plan.year}</TableCell>
-													<TableCell sx={{ color: '#1D1D1F' }}>{plan.expectedCount}</TableCell>
-													<TableCell sx={{ color: '#1D1D1F' }}>{plan.user?.full_name || 'Не указан'}</TableCell>
-													<TableCell sx={{ color: '#1D1D1F' }}>
-														<StatusChip status={plan.status} />
-													</TableCell>
-													<TableCell sx={{ textAlign: 'center' }}>
-														<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-															{plan.status === 'needs_review' && (
-																<>
-																	<GreenButton
-																		startIcon={<CheckIcon />}
-																		onClick={() => handleApprovePlan(plan)}
-																	>
-																		Утвердить
-																	</GreenButton>
-																	<AppleButton
-																		startIcon={<ReplayIcon />}
-																		onClick={() => handleOpenReturnDialog(plan)}
-																	>
-																		На доработку
-																	</AppleButton>
-																</>
-															)}
+										<Accordion
+											key={plan.id}
+											sx={{
+												mb: 2,
+												borderRadius: '16px',
+												boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+											}}
+										>
+											<AccordionSummary expandIcon={<ExpandMoreIcon />}>
+												<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+													<Box>
+														<Typography variant="h6" sx={{ color: '#1D1D1F' }}>
+															План на {plan.year} год (Ожидаемое количество: {plan.expectedCount} | Текущее количество: {plan.entries.length})
+														</Typography>
+														<Typography variant="body2" sx={{ color: '#6E6E73', mt: 0.5 }}>
+															{plan.user && plan.user.full_name
+																? `${plan.user.full_name} (${plan.user.username || 'логин отсутствует'})`
+																: 'Пользователь не указан'}
+														</Typography>
+													</Box>
+													<StatusChip status={plan.status} />
+												</Box>
+											</AccordionSummary>
+											<AccordionDetails>
+												<>
+													<PlanTable>
+														<TableHead>
+															<TableRow>
+																<TableCell>Название</TableCell>
+																<TableCell>Тип</TableCell>
+																<TableCell>Статус</TableCell>
+															</TableRow>
+														</TableHead>
+														<TableBody>
+															{plan.entries.map((entry) => (
+																<TableRow key={entry.id}>
+																	<TableCell>{entry.title || 'Не указано'}</TableCell>
+																	<TableCell>
+																		{entry.type === 'article'
+																			? 'Статья'
+																			: entry.type === 'monograph'
+																				? 'Монография'
+																				: entry.type === 'conference'
+																					? 'Доклад/конференция'
+																					: entry.type || 'Не указано'}
+																	</TableCell>
+																	<TableCell>
+																		<StatusChip status={entry.status} />
+																	</TableCell>
+																</TableRow>
+															))}
+														</TableBody>
+													</PlanTable>
+													{plan.return_comment && (
+														<Typography
+															sx={{
+																mt: 2,
+																color: '#000000',
+																fontWeight: 600,
+																display: 'flex',
+																alignItems: 'center',
+																gap: 1,
+															}}
+														>
+															<WarningAmberIcon sx={{ color: '#FF3B30' }} />
+															Комментарий при возврате: {plan.return_comment}
+														</Typography>
+													)}
+													{plan.status === 'needs_review' && (
+														<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+															<GreenButton startIcon={<CheckIcon />} onClick={() => handleApprovePlan(plan)}>
+																Утвердить
+															</GreenButton>
+															<AppleButton startIcon={<ReplayIcon />} onClick={() => handleOpenReturnDialog(plan)}>
+																На доработку
+															</AppleButton>
 														</Box>
-													</TableCell>
-												</TableRow>
-											</TableBody>
-										</PlanTable>
+													)}
+												</>
+											</AccordionDetails>
+										</Accordion>
 									))
 								) : (
-									<AppleTable sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
-										<TableHead>
-											<TableRow sx={{ backgroundColor: '#0071E3' }}>
-												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
-												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
-												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Ожидаемые публикации</TableCell>
-												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Пользователь</TableCell>
-												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
-												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>
-													Действия
-												</TableCell>
-											</TableRow>
-										</TableHead>
-										<TableBody>
-											<TableRow>
-												<TableCell colSpan={6} sx={{ textAlign: 'center', color: '#6E6E73' }}>
-													Нет планов для проверки.
-												</TableCell>
-											</TableRow>
-										</TableBody>
-									</AppleTable>
+									<Typography sx={{ textAlign: 'center', color: '#6E6E73', mt: 2 }}>
+										Нет планов для проверки.
+									</Typography>
 								)}
 								<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
 									<Pagination
@@ -776,9 +804,8 @@ function ManagerDashboard() {
 										sx={{
 											'& .MuiPaginationItem-root': {
 												borderRadius: 20,
-												transition: 'all 0.3s ease',
-												'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
-												'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
+												'&:hover': { backgroundColor: 'grey.100' },
+												'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white' },
 											},
 										}}
 									/>

@@ -440,3 +440,22 @@ def get_publications_by_year(user_id):
         year = pub.year
         yearly_counts[year] = yearly_counts.get(year, 0) + 1
     return sorted(yearly_counts.items(), key=lambda x: x[0])
+
+
+@bp.route('admin/plans/needs-review', methods=['GET'])
+@login_required
+def get_needs_review_plans():
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    
+    # Запрос планов со статусом 'needs_review'
+    plans_query = Plan.query.filter_by(status='needs_review')
+    pagination = plans_query.paginate(page=page, per_page=per_page, error_out=False)
+    
+    plans = [plan.to_dict() for plan in pagination.items]
+    
+    return jsonify({
+        'plans': plans,
+        'pages': pagination.pages,
+        'total': pagination.total
+    })

@@ -142,9 +142,12 @@ class Plan(db.Model):
             'expectedCount': self.expectedCount,
             'fillType': self.fillType,
             'status': self.status,
-            'user': {'full_name': self.user.full_name if self.user else None} if self.user else None,
+            'user': {
+                'full_name': self.user.full_name if self.user else None,
+                'username': self.user.username if self.user else None  # Добавляем username
+            } if self.user else None,
             'entries': [entry.to_dict() for entry in self.entries],
-            'return_comment': self.return_comment  # Добавляем комментарий в ответ
+            'return_comment': self.return_comment
         }
 
 class PlanEntry(db.Model):
