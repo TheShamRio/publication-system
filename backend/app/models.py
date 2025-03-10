@@ -154,27 +154,25 @@ class PlanEntry(db.Model):
     type = db.Column(db.String(50), nullable=True)  # Для ручного заполнения
     publication_id = db.Column(db.Integer, db.ForeignKey('publication.id'), nullable=True)  # Для привязки
     status = db.Column(db.String(50), nullable=False, default='planned')  # 'planned', 'in_progress', 'completed'
+    isPostApproval = db.Column(db.Boolean, nullable=False, default=False)  # Новое поле
 
     plan = db.relationship('Plan', back_populates='entries')
     publication = db.relationship('Publication', back_populates='plan_entries', lazy=True)
-
-
 
     def to_dict(self):
         from flask_login import current_user
         result = {
             'id': self.id,
-        'title': self.title,
-        'type': self.type,
-        'publication_id': self.publication_id,  # Оставляем поле publication_id для совместимости
-        'status': self.status,
-        'publication': {
-            'id': self.publication.id,
-            'title': self.publication.title
-        } if self.publication else None  # Добавляем данные о публикации, если она привязана
-    }
-        
-        # Поле status не включаем для обычных пользователей
+            'title': self.title,
+            'type': self.type,
+            'publication_id': self.publication_id,
+            'status': self.status,
+            'isPostApproval': self.isPostApproval,  # Добавляем поле в ответ
+            'publication': {
+                'id': self.publication.id,
+                'title': self.publication.title
+            } if self.publication else None
+        }
         if current_user.is_authenticated and current_user.role in ['admin', 'manager']:
             result['status'] = self.status
         return result

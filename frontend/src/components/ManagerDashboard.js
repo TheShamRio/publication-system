@@ -134,6 +134,49 @@ function ManagerDashboard() {
 	const [selectedPlan, setSelectedPlan] = useState(null);
 	const [returnComment, setReturnComment] = useState('');
 
+	const handleDownload = async (fileUrl, fileName) => {
+		// Проверяем, что fileUrl существует и является строкой
+		if (!fileUrl || typeof fileUrl !== 'string' || fileUrl.trim() === '') {
+			console.error('Некорректный fileUrl:', fileUrl);
+			setError('Некорректный URL файла. Обратитесь к администратору.');
+			setOpenError(true);
+			return;
+		}
+
+		// Убеждаемся, что fileUrl начинается с '/', если это относительный путь
+		const normalizedFileUrl = fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`;
+		const fullUrl = `http://localhost:5000${normalizedFileUrl}`;
+		console.log('Попытка скачать файл с URL:', fullUrl);
+
+		try {
+			const response = await axios.get(fullUrl, {
+				responseType: 'blob',
+				withCredentials: true,
+				headers: {
+					'X-CSRFToken': csrfToken,
+				},
+			});
+
+			const blob = new Blob([response.data]);
+			const url = window.URL.createObjectURL(blob);
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = fileName || normalizedFileUrl.split('/').pop();
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+			window.URL.revokeObjectURL(url);
+		} catch (err) {
+			console.error('Ошибка при скачивании файла:', err);
+			if (err.response) {
+				setError(`Ошибка сервера: ${err.response.status}. Не удалось скачать файл.`);
+			} else {
+				setError('Не удалось скачать файл. Проверьте подключение или URL.');
+			}
+			setOpenError(true);
+		}
+	};
+
 	useEffect(() => {
 		if (!isAuthenticated || user.role !== 'manager') navigate('/login');
 		fetchNeedsReviewPublications(currentPageNeedsReview);
@@ -419,17 +462,10 @@ function ManagerDashboard() {
 														<TableCell sx={{ color: '#1D1D1F' }}>{pub.user?.full_name || 'Не указан'}</TableCell>
 														<TableCell sx={{ textAlign: 'center' }}>
 															<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-																{pub.file_url && (
+																{pub.file_url && pub.file_url.trim() !== '' && (
 																	<IconButton
 																		aria-label="download"
-																		onClick={() => {
-																			const link = document.createElement('a');
-																			link.href = `http://localhost:5000${pub.file_url}`;
-																			link.download = pub.file_url.split('/').pop();
-																			document.body.appendChild(link);
-																			link.click();
-																			document.body.removeChild(link);
-																		}}
+																		onClick={() => handleDownload(pub.file_url, pub.file_url.split('/').pop())}
 																		sx={{
 																			color: '#0071E3',
 																			borderRadius: '8px',

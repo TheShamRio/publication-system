@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request, make_response, current_app, send_from_directory
+from flask import Blueprint, jsonify, request, make_response, current_app, send_file
 from .extensions import db, login_manager, csrf
 from .models import User, Publication, Comment, Plan, PlanEntry
 from .utils import allowed_file
@@ -12,7 +12,6 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph
 from reportlab.lib.pagesizes import letter
 from bibtexparser.bibdatabase import BibDatabase
 from bibtexparser.bwriter import BibTexWriter
-from flask import send_file
 import logging
 from datetime import datetime, UTC
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -62,7 +61,7 @@ def get_publication(pub_id):
         'year': publication.year,
         'type': publication.type,
         'status': publication.status,
-        'file_url': f"/uploads/{os.path.basename(publication.file_url)}" if publication.file_url else None,
+        'file_url': publication.file_url if publication.file_url else None,
         'user': {
             'id': publication.user.id if publication.user else None,
             'full_name': publication.user.full_name if publication.user else None},
@@ -432,15 +431,25 @@ def manage_publication(pub_id):
             return jsonify({"error": "Неподдерживаемый формат данных. Используйте application/json или multipart/form-data."}), 415
 
         old_status = publication.status
+
         if 'file' in request.files:
             file = request.files['file']
             if file and allowed_file(file.filename):
-                if publication.file_url and os.path.exists(publication.file_url):
-                    os.remove(publication.file_url)
+                if publication.file_url:
+                    old_file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
+                    if os.path.exists(old_file_path):
+                        os.remove(old_file_path)
                 filename = secure_filename(file.filename)
                 file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+                if os.path.exists(file_path):
+                    base, extension = os.path.splitext(filename)
+                    counter = 1
+                    while os.path.exists(file_path):
+                        filename = f"{base}_{counter}{extension}"
+                        file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+                        counter += 1
                 file.save(file_path)
-                publication.file_url = file_path
+                publication.file_url = f"/uploads/{filename}"
 
         publication.title = data.get('title', publication.title)
         publication.authors = data.get('authors', publication.authors)
@@ -480,8 +489,10 @@ def manage_publication(pub_id):
 
     elif request.method == 'DELETE':
         try:
-            if publication.file_url and os.path.exists(publication.file_url):
-                os.remove(publication.file_url)
+            if publication.file_url:
+                file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
+                if os.path.exists(file_path):
+                    os.remove(file_path)
             db.session.delete(publication)
             db.session.commit()
             return jsonify({'message': 'Публикация успешно удалена'}), 200
@@ -518,6 +529,13 @@ def upload_file():
 
     filename = secure_filename(file.filename)
     file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+    if os.path.exists(file_path):
+        base, extension = os.path.splitext(filename)
+        counter = 1
+        while os.path.exists(file_path):
+            filename = f"{base}_{counter}{extension}"
+            file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+            counter += 1
     file.save(file_path)
 
     publication = Publication(
@@ -526,10 +544,11 @@ def upload_file():
         year=year,
         type=type,
         status='draft',
-        file_url=file_path,
+        file_url=f"/uploads/{filename}",
         user_id=current_user.id,
         returned_for_revision=False,
     )
+
     db.session.add(publication)
     db.session.commit()
 
@@ -608,12 +627,21 @@ def attach_file(pub_id):
 
     file = request.files['file']
     if file and allowed_file(file.filename):
-        if publication.file_url and os.path.exists(publication.file_url):
-            os.remove(publication.file_url)
+        if publication.file_url:
+            old_file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
+            if os.path.exists(old_file_path):
+                os.remove(old_file_path)
         filename = secure_filename(file.filename)
         file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+        if os.path.exists(file_path):
+            base, extension = os.path.splitext(filename)
+            counter = 1
+            while os.path.exists(file_path):
+                filename = f"{base}_{counter}{extension}"
+                file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+                counter += 1
         file.save(file_path)
-        publication.file_url = file_path
+        publication.file_url = f"/uploads/{filename}"
 
         try:
             db.session.commit()
@@ -694,13 +722,12 @@ def get_plans():
     per_page = request.args.get('per_page', 10, type=int)
     plans = Plan.query.filter_by(user_id=current_user.id).order_by(Plan.year.desc()).paginate(page=page, per_page=per_page)
     return jsonify({
-        'plans': [plan.to_dict() for plan in plans.items],  # Убедимся, что to_dict возвращает полные данные
+        'plans': [plan.to_dict() for plan in plans.items],
         'total': plans.total,
         'pages': plans.pages,
         'current_page': plans.page
     })
 
-# Обновляем маршрут POST /plans для поддержки добавления записей с publication_id
 @bp.route('/plans', methods=['POST'])
 @login_required
 def create_plan():
@@ -733,6 +760,7 @@ def create_plan():
             type=entry_data.get('type'),
             publication_id=entry_data.get('publication_id'),
             status=entry_data.get('status', 'planned'),
+            isPostApproval=False,
             plan=plan
         )
         if entry.publication_id:
@@ -745,7 +773,6 @@ def create_plan():
     db.session.commit()
     return jsonify({'message': f'Plan created with ID {plan.id}', 'plan': plan.to_dict()}), 201
 
-# Обновляем маршрут PUT /plans для поддержки редактирования утверждённых планов
 @bp.route('/plans/<int:plan_id>', methods=['PUT'])
 @login_required
 def update_plan(plan_id):
@@ -754,7 +781,6 @@ def update_plan(plan_id):
     if not plan:
         return jsonify({'error': 'Plan not found or unauthorized'}), 404
     
-    # Разрешаем редактирование только черновиков, возвращённых планов и добавление записей в утверждённые
     if plan.status not in ['draft', 'returned', 'approved']:
         return jsonify({'error': 'Cannot edit plan that is under review'}), 403
 
@@ -765,29 +791,32 @@ def update_plan(plan_id):
     if not isinstance(data['year'], int) or data['year'] < 1900 or data['year'] > 2100:
         return jsonify({'error': 'Invalid year'}), 400
     
-    if not isinstance(data['expectedCount'], int) or data['expectedCount'] < 1:
-        return jsonify({'error': 'Expected count must be at least 1'}), 400
-    
     if data['fillType'] not in ['manual', 'link']:
         return jsonify({'error': 'Invalid fill type'}), 400
 
-    # Если план утверждён, не позволяем менять основные поля, только добавлять записи
     if plan.status == 'approved':
-        # Сохраняем существующие записи
         existing_entries = {entry.id: entry for entry in plan.entries}
         new_entries = []
         for entry_data in data['entries']:
             entry_id = entry_data.get('id')
             if entry_id and entry_id in existing_entries:
-                # Существующие записи не редактируем, только сохраняем
-                continue
+                entry = existing_entries[entry_id]
+                entry.title = entry_data.get('title', entry.title)
+                entry.type = entry_data.get('type', entry.type)
+                entry.publication_id = entry_data.get('publication_id', entry.publication_id)
+                entry.status = entry_data.get('status', entry.status)
+                if entry.publication_id:
+                    publication = Publication.query.filter_by(id=entry.publication_id, user_id=current_user.id, status='published').first()
+                    if not publication:
+                        db.session.rollback()
+                        return jsonify({'error': f'Publication with ID {entry.publication_id} not found or not published'}), 404
             else:
-                # Добавляем новые записи
                 new_entry = PlanEntry(
-                    title=entry_data.get('title'),
-                    type=entry_data.get('type'),
+                    title=entry_data.get('title', ''),
+                    type=entry_data.get('type', 'article'),
                     publication_id=entry_data.get('publication_id'),
                     status=entry_data.get('status', 'planned'),
+                    isPostApproval=True,
                     plan=plan
                 )
                 if new_entry.publication_id:
@@ -798,9 +827,7 @@ def update_plan(plan_id):
                 new_entries.append(new_entry)
                 db.session.add(new_entry)
     else:
-        # Для черновиков и возвращённых планов обновляем полностью
         plan.year = data['year']
-        plan.expectedCount = data['expectedCount']
         plan.fillType = data['fillType']
         PlanEntry.query.filter_by(plan_id=plan.id).delete()
         for entry_data in data['entries']:
@@ -809,6 +836,7 @@ def update_plan(plan_id):
                 type=entry_data.get('type'),
                 publication_id=entry_data.get('publication_id'),
                 status=entry_data.get('status', 'planned'),
+                isPostApproval=False,
                 plan=plan
             )
             if entry.publication_id:
@@ -854,7 +882,6 @@ def submit_plan_for_review(plan_id):
     db.session.commit()
     return jsonify({'message': 'План отправлен на проверку', 'plan': plan.to_dict()}), 200
 
-# Новый маршрут для привязки публикации к записи плана
 @bp.route('/plans/<int:plan_id>/entries/<int:entry_id>/link', methods=['POST'])
 @login_required
 def link_publication_to_plan_entry(plan_id, entry_id):
@@ -867,7 +894,6 @@ def link_publication_to_plan_entry(plan_id, entry_id):
     if not entry:
         return jsonify({'error': 'Entry not found'}), 404
     
-    # Привязка доступна только для утверждённых планов
     if plan.status != 'approved':
         return jsonify({'error': 'Can only link publications to approved plans'}), 403
     
@@ -883,12 +909,15 @@ def link_publication_to_plan_entry(plan_id, entry_id):
     if not publication:
         return jsonify({'error': f'Publication with ID {publication_id} not found or not published'}), 404
 
+    existing_link = PlanEntry.query.filter_by(publication_id=publication_id).first()
+    if existing_link:
+        return jsonify({'error': f'Publication with ID {publication_id} is already linked to another plan entry'}), 400
+
     entry.publication_id = publication_id
-    entry.status = 'completed'  # Обновляем статус записи на "выполнено"
+    entry.status = 'completed'
     db.session.commit()
     return jsonify({'message': 'Publication linked successfully', 'entry': entry.to_dict()}), 200
 
-# Новый маршрут для отвязки публикации от записи плана
 @bp.route('/plans/<int:plan_id>/entries/<int:entry_id>/unlink', methods=['POST'])
 @login_required
 def unlink_publication_from_plan_entry(plan_id, entry_id):
@@ -901,7 +930,6 @@ def unlink_publication_from_plan_entry(plan_id, entry_id):
     if not entry:
         return jsonify({'error': 'Entry not found'}), 404
     
-    # Отвязка доступна только для утверждённых планов
     if plan.status != 'approved':
         return jsonify({'error': 'Can only unlink publications from approved plans'}), 403
     
@@ -909,6 +937,6 @@ def unlink_publication_from_plan_entry(plan_id, entry_id):
         return jsonify({'error': 'No publication linked to this entry'}), 400
 
     entry.publication_id = None
-    entry.status = 'planned'  # Возвращаем статус "запланировано"
+    entry.status = 'planned'
     db.session.commit()
     return jsonify({'message': 'Publication unlinked successfully', 'entry': entry.to_dict()}), 200

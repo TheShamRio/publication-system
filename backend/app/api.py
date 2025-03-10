@@ -13,7 +13,6 @@ from datetime import datetime
 bp = Blueprint('admin_api', __name__, url_prefix='/admin_api')
 logger = logging.getLogger(__name__)
 
-# Проверка, является ли пользователь администратором или управляющим
 def admin_or_manager_required(f):
     @login_required
     def wrapper(*args, **kwargs):
@@ -24,7 +23,6 @@ def admin_or_manager_required(f):
     wrapper.__name__ = f.__name__
     return wrapper
 
-# Проверка, является ли пользователь администратором
 def admin_required(f):
     @login_required
     def wrapper(*args, **kwargs):
@@ -173,9 +171,12 @@ def update_publication(pub_id):
     if 'file' in request.files:
         file = request.files['file']
         if file and allowed_file(file.filename):
+            if publication.file_url:
+                old_file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
+                if os.path.exists(old_file_path):
+                    os.remove(old_file_path)
             filename = secure_filename(file.filename)
             file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-
             if os.path.exists(file_path):
                 base, extension = os.path.splitext(filename)
                 counter = 1
@@ -183,7 +184,6 @@ def update_publication(pub_id):
                     filename = f"{base}_{counter}{extension}"
                     file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
                     counter += 1
-
             try:
                 file.save(file_path)
                 publication.file_url = f"/uploads/{filename}"
@@ -347,7 +347,7 @@ def get_all_plans():
     }), 200
 
 @bp.route('/admin/plans/<int:plan_id>', methods=['PUT'])
-@admin_required  # Ограничиваем только для админа
+@admin_required
 def update_plan(plan_id):
     logger.debug(f"Получен PUT запрос для /admin_api/admin/plans/{plan_id}")
     plan = Plan.query.get_or_404(plan_id)
@@ -389,7 +389,7 @@ def update_plan(plan_id):
     return jsonify({'message': 'Plan updated successfully', 'plan': plan.to_dict()}), 200
 
 @bp.route('/admin/plans/<int:plan_id>', methods=['DELETE'])
-@admin_required  # Ограничиваем только для админа
+@admin_required
 def delete_plan(plan_id):
     logger.debug(f"Получен DELETE запрос для /admin_api/admin/plans/{plan_id}")
     plan = Plan.query.get_or_404(plan_id)
@@ -426,7 +426,7 @@ def return_plan_for_revision(plan_id):
         return jsonify({'error': 'Комментарий обязателен'}), 400
 
     plan.status = 'returned'
-    plan.return_comment = comment  # Сохраняем комментарий
+    plan.return_comment = comment
     db.session.commit()
     return jsonify({'message': 'План возвращён на доработку', 'plan': plan.to_dict()}), 200
 

@@ -16,7 +16,7 @@ export function AuthProvider({ children }) {
 		});
 		return {
 			isAuthenticated: !!storedUser,
-			user: parsedUser || null, // Полный объект пользователя
+			user: parsedUser || null,
 			role: parsedUser?.role || null,
 			csrfToken: storedCsrfToken || null,
 			isLoading: true,
@@ -41,14 +41,13 @@ export function AuthProvider({ children }) {
 				};
 				setAuthState({
 					isAuthenticated: true,
-					user: userData, // Полный объект пользователя
+					user: userData,
 					role: userData.role,
 					csrfToken: authState.csrfToken,
 					isLoading: false,
 				});
 				localStorage.setItem('user', JSON.stringify(userData));
 
-				// Обновляем CSRF-токен после успешной проверки
 				const tokenResponse = await axios.get('http://localhost:5000/api/csrf-token', {
 					withCredentials: true,
 				});
@@ -92,7 +91,7 @@ export function AuthProvider({ children }) {
 		console.log('AuthContext: Пользователь вошёл:', user);
 		setAuthState({
 			isAuthenticated: true,
-			user: user, // Сохраняем полный объект пользователя
+			user: user,
 			role: user.role,
 			csrfToken: authState.csrfToken,
 			isLoading: false,
@@ -113,12 +112,12 @@ export function AuthProvider({ children }) {
 		localStorage.removeItem('csrfToken');
 	};
 
-	const updateAuthState = (newState) => {
-		console.log('AuthContext: Обновление состояния:', newState);
+	const setUser = (newUser) => {
 		setAuthState((prevState) => ({
 			...prevState,
-			...newState,
+			user: newUser,
 		}));
+		localStorage.setItem('user', JSON.stringify(newUser));
 	};
 
 	const setCsrfToken = (token) => {
@@ -131,7 +130,7 @@ export function AuthProvider({ children }) {
 	};
 
 	return (
-		<AuthContext.Provider value={{ ...authState, login, logout, updateAuthState, setCsrfToken }}>
+		<AuthContext.Provider value={{ ...authState, login, logout, setUser, setCsrfToken }}>
 			{children}
 		</AuthContext.Provider>
 	);

@@ -166,7 +166,7 @@ const DetailsButton = styled(Button)(({ theme }) => ({
 }));
 
 function Dashboard() {
-	const { user, csrfToken, setCsrfToken } = useAuth();
+	const { user, csrfToken, setCsrfToken, setUser } = useAuth();
 	const [loadingUser, setLoadingUser] = useState(true);
 	const [showCurrentPassword, setShowCurrentPassword] = useState(false);
 	const [showNewPassword, setShowNewPassword] = useState(false);
@@ -208,8 +208,6 @@ function Dashboard() {
 	const [openChangePasswordDialog, setOpenChangePasswordDialog] = useState(false);
 	const [currentPassword, setCurrentPassword] = useState('');
 	const [newPassword, setNewPassword] = useState('');
-	const [passwordError, setPasswordError] = useState('');
-	const [passwordSuccess, setPasswordSuccess] = useState('');
 	const [pubTypes, setPubTypes] = useState({ article: 0, monograph: 0, conference: 0 });
 	const [pubStatuses, setPubStatuses] = useState({ draft: 0, needs_review: 0, published: 0 });
 	const [totalCitations, setTotalCitations] = useState(0);
@@ -234,6 +232,7 @@ function Dashboard() {
 	const plansPerPage = 10;
 	const navigate = useNavigate();
 	const chartRef = useRef(null);
+
 
 	const validPublicationTypes = ['article', 'monograph', 'conference'];
 	const validPlanStatuses = ['planned', 'in_progress', 'completed'];
@@ -330,7 +329,8 @@ function Dashboard() {
 				isSaved: true,
 				entries: plan.entries.map(entry => ({
 					...entry,
-					publication_id: entry.publication_id || null, // Убеждаемся, что publication_id присутствует
+					publication_id: entry.publication_id || null,
+					isPostApproval: entry.isPostApproval || false, // Устанавливаем false для старых записей, если не указано
 				})),
 			})).sort((a, b) => b.year - a.year);
 			console.log('Обновлённые планы:', sortedPlans); // Логируем для проверки
@@ -390,8 +390,6 @@ function Dashboard() {
 		setOpenChangePasswordDialog(true);
 		setCurrentPassword('');
 		setNewPassword('');
-		setPasswordError('');
-		setPasswordSuccess('');
 		setShowCurrentPassword(false);
 		setShowNewPassword(false);
 	};
@@ -413,9 +411,10 @@ function Dashboard() {
 				}
 			);
 
-			setPasswordSuccess('Пароль успешно обновлен!');
-			setPasswordError('');
-			setOpenChangePasswordDialog(false);
+			setSuccess('Пароль успешно обновлен!'); // Устанавливаем глобальное состояние успеха
+			setOpenSuccess(true); // Показываем уведомление
+			setError(''); // Сбрасываем ошибку
+			setOpenChangePasswordDialog(false); // Закрываем диалог
 			setCurrentPassword('');
 			setNewPassword('');
 			setShowCurrentPassword(false);
@@ -423,13 +422,14 @@ function Dashboard() {
 		} catch (err) {
 			console.error('Ошибка изменения пароля:', err);
 			if (err.response) {
-				setPasswordError(
+				setError(
 					`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные данные.'}`
-				);
+				); // Устанавливаем глобальное состояние ошибки
 			} else {
-				setPasswordError('Ошибка сети. Проверьте подключение и сервер.');
+				setError('Ошибка сети. Проверьте подключение и сервер.');
 			}
-			setPasswordSuccess('');
+			setOpenError(true); // Показываем уведомление об ошибке
+			setSuccess(''); // Сбрасываем успех
 		}
 	};
 
@@ -437,8 +437,7 @@ function Dashboard() {
 		setOpenChangePasswordDialog(false);
 		setCurrentPassword('');
 		setNewPassword('');
-		setPasswordError('');
-		setPasswordSuccess('');
+
 		setShowCurrentPassword(false);
 		setShowNewPassword(false);
 	};
@@ -451,15 +450,7 @@ function Dashboard() {
 		setShowNewPassword(!showNewPassword);
 	};
 
-	useEffect(() => {
-		if (passwordError || passwordSuccess) {
-			const timer = setTimeout(() => {
-				setPasswordError('');
-				setPasswordSuccess('');
-			}, 5000);
-			return () => clearTimeout(timer);
-		}
-	}, [passwordError, passwordSuccess]);
+
 
 	const handleFileUpload = async (e) => {
 		e.preventDefault();
@@ -746,13 +737,18 @@ function Dashboard() {
 					headers: { 'X-CSRFToken': csrfToken },
 				}
 			);
+			// Обновляем данные пользователя в контексте
+			setUser({
+				...user,
+				last_name: response.data.user.last_name,
+				first_name: response.data.user.first_name,
+				middle_name: response.data.user.middle_name,
+			});
+			// Устанавливаем сообщение об успехе для отображения в карточке
 			setSuccess('Личные данные успешно обновлены!');
 			setOpenSuccess(true);
 			setError('');
-			setEditLastName(response.data.user.last_name);
-			setEditFirstName(response.data.user.first_name);
-			setEditMiddleName(response.data.user.middle_name);
-			setOpenEditUserDialog(false);
+			setOpenEditUserDialog(false); // Закрываем диалог сразу после успешного сохранения
 		} catch (err) {
 			console.error('Ошибка редактирования данных:', err.response?.data || err);
 			if (err.response) {
@@ -976,8 +972,15 @@ function Dashboard() {
 				plan.id === planId
 					? {
 						...plan,
-						expectedCount: plan.expectedCount + 1,
-						entries: [...plan.entries, { title: '', type: 'article', status: 'planned' }],
+						entries: [
+							...plan.entries,
+							{
+								title: '',
+								type: 'article',
+								status: 'planned',
+								isPostApproval: true // Новая запись после утверждения
+							},
+						],
 					}
 					: plan
 			)
@@ -990,7 +993,6 @@ function Dashboard() {
 				plan.id === planId
 					? {
 						...plan,
-						expectedCount: plan.expectedCount - 1,
 						entries: plan.entries.filter((_, i) => i !== index),
 						isSaved: false,
 					}
@@ -998,20 +1000,20 @@ function Dashboard() {
 			)
 		);
 	};
-
 	const handleSavePlan = async (plan) => {
 		try {
 			await refreshCsrfToken();
-			const newEntries = plan.entries.filter(entry => !entry.id); // Фильтруем только новые записи
 			const planData = {
 				year: plan.year,
-				expectedCount: plan.entries.length,
+				expectedCount: plan.expectedCount,
 				fillType: 'manual',
-				entries: newEntries.map(entry => ({
+				entries: plan.entries.map(entry => ({
+					id: entry.id || undefined, // Сохраняем id для существующих записей
 					title: entry.title || '',
 					type: entry.type || 'article',
 					status: entry.status || 'planned',
 					publication_id: entry.publication_id || null,
+					isPostApproval: entry.isPostApproval || false, // Сохраняем флаг
 				})),
 			};
 			console.log('Saving plan with:', planData);
@@ -1109,10 +1111,25 @@ function Dashboard() {
 		setPlanToDelete(null);
 	};
 
-	// Функция для фильтрации публикаций в диалоге привязки
 	const handleLinkSearch = (query) => {
 		setLinkSearchQuery(query);
-		const filtered = publishedPublications.filter(
+
+		// Собираем все publication_id из записей всех планов
+		const linkedPublicationIds = new Set(
+			plans.flatMap(plan =>
+				plan.entries
+					.filter(entry => entry.publication_id)
+					.map(entry => entry.publication_id)
+			)
+		);
+
+		// Фильтруем публикации, исключая уже привязанные
+		const availablePublications = publishedPublications.filter(
+			pub => !linkedPublicationIds.has(pub.id)
+		);
+
+		// Применяем поиск по отфильтрованным данным
+		const filtered = availablePublications.filter(
 			(pub) =>
 				pub.title.toLowerCase().includes(query.toLowerCase()) ||
 				pub.authors.toLowerCase().includes(query.toLowerCase())
@@ -1120,12 +1137,25 @@ function Dashboard() {
 		setFilteredPublishedPublications(filtered);
 	};
 
-	// Функция открытия диалога привязки
 	const handleOpenLinkDialog = (planId, entry) => {
+		// Собираем все publication_id из записей всех планов
+		const linkedPublicationIds = new Set(
+			plans.flatMap(plan =>
+				plan.entries
+					.filter(entry => entry.publication_id) // Фильтруем записи с publication_id
+					.map(entry => entry.publication_id)
+			)
+		);
+
+		// Фильтруем только те публикации, которые ещё не привязаны
+		const availablePublications = publishedPublications.filter(
+			pub => !linkedPublicationIds.has(pub.id)
+		);
+
 		setSelectedPlanEntry({ planId, ...entry });
 		setLinkDialogOpen(true);
 		setLinkSearchQuery('');
-		setFilteredPublishedPublications(publishedPublications);
+		setFilteredPublishedPublications(availablePublications);
 	};
 
 	// Функция привязки публикации
@@ -1147,7 +1177,7 @@ function Dashboard() {
 			console.log('Ответ сервера:', response.data);
 			setSuccess('Публикация успешно привязана!');
 			setOpenSuccess(true);
-			await Promise.all([fetchPlans(planPage), fetchAllPublications()]); // Обновляем и планы, и публикации
+			await Promise.all([fetchPlans(planPage), fetchAllPublications()]);
 			setLinkDialogOpen(false);
 		} catch (err) {
 			console.error('Ошибка привязки:', err.response?.data || err.message);
@@ -1301,10 +1331,45 @@ function Dashboard() {
 												<Typography variant="body1" sx={{ color: '#1D1D1F', mb: 2 }}>
 													Логин: {user.username}
 												</Typography>
-												<Box sx={{ display: 'flex', gap: 2 }}>
+												<Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
 													<AppleButton onClick={handleEditUserClick}>Редактировать данные</AppleButton>
 													<AppleButton onClick={handleChangePasswordClick}>Изменить пароль</AppleButton>
 												</Box>
+												{/* Добавляем уведомление об успехе или ошибке внизу карточки */}
+												<Collapse in={openSuccess}>
+													{success && (
+														<Alert
+															severity="success"
+															sx={{
+																mt: 2,
+																borderRadius: '12px',
+																backgroundColor: '#E7F8E7',
+																color: '#1D1D1F',
+																boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+															}}
+															onClose={() => setOpenSuccess(false)}
+														>
+															{success}
+														</Alert>
+													)}
+												</Collapse>
+												<Collapse in={openError}>
+													{error && (
+														<Alert
+															severity="error"
+															sx={{
+																mt: 2,
+																borderRadius: '12px',
+																backgroundColor: '#FFF1F0',
+																color: '#1D1D1F',
+																boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+															}}
+															onClose={() => setOpenError(false)}
+														>
+															{error}
+														</Alert>
+													)}
+												</Collapse>
 											</Box>
 										) : (
 											<Typography sx={{ color: '#6E6E73' }}>Данные пользователя не найдены.</Typography>
@@ -1851,209 +1916,308 @@ function Dashboard() {
 										</AppleButton>
 									</Box>
 
-									{plans.map((plan) => (
-										<Accordion
-											key={plan.id}
-											sx={{
-												mb: 2,
-												borderRadius: '16px',
-												boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-											}}
-										>
-											<AccordionSummary expandIcon={<ExpandMoreIcon />}>
-												<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-													<Typography variant="h6" sx={{ color: '#1D1D1F' }}>
-														План на {plan.year} год (Ожидаемое количество: {plan.expectedCount})
-													</Typography>
-													<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-														<StatusChip status={plan.status} />
-														{(plan.status === 'draft' || plan.status === 'returned') && (
-															<>
-																<IconButton
-																	onClick={(e) => {
-																		e.stopPropagation();
-																		handleEditPlanClick(plan.id);
-																	}}
-																	sx={{ color: '#0071E3' }}
-																>
-																	<EditIcon />
-																</IconButton>
-																<IconButton
-																	onClick={(e) => {
-																		e.stopPropagation();
-																		handleDeletePlanClick(plan);
-																	}}
-																	sx={{ color: '#FF3B30' }}
-																>
-																	<DeleteIcon />
-																</IconButton>
-																<IconButton
-																	onClick={(e) => {
-																		e.stopPropagation();
-																		handleSubmitPlanForReview(plan);
-																	}}
-																	sx={{ color: '#0071E3' }}
-																	disabled={!areAllTitlesFilled(plan)}
-																	title={areAllTitlesFilled(plan) ? 'Отправить на проверку' : 'Заполните все заголовки'}
-																>
-																	<PublishIcon />
-																</IconButton>
-															</>
-														)}
-													</Box>
-												</Box>
-											</AccordionSummary>
-											<AccordionDetails>
-												{editingPlanId === plan.id ? (
-													<>
-														<PlanTable>
-															<TableHead>
-																<TableRow>
-																	<TableCell>Название</TableCell>
-																	<TableCell>Тип</TableCell>
-																	<TableCell>Статус</TableCell>
-																	<TableCell>Действия</TableCell>
-																</TableRow>
-															</TableHead>
-															<TableBody>
-																{plan.entries.map((entry, index) => (
-																	<TableRow key={index}>
-																		<TableCell>
-																			<AppleTextField
-																				value={entry.title}
-																				onChange={(e) => handlePlanEntryChange(plan.id, index, 'title', e.target.value)}
-																				fullWidth
-																				variant="outlined"
-																			/>
-																		</TableCell>
-																		<TableCell>
-																			<AppleTextField
-																				select
-																				value={entry.type}
-																				onChange={(e) => handlePlanEntryChange(plan.id, index, 'type', e.target.value)}
-																				fullWidth
-																				variant="outlined"
-																			>
-																				<MenuItem value="article">Статья</MenuItem>
-																				<MenuItem value="monograph">Монография</MenuItem>
-																				<MenuItem value="conference">Доклад/конференция</MenuItem>
-																			</AppleTextField>
-																		</TableCell>
-																		<TableCell>
-																			<StatusChip status={entry.status} />
-																		</TableCell>
-																		<TableCell>
-																			<IconButton
-																				onClick={() => handleDeletePlanEntry(plan.id, index)}
-																				sx={{ color: '#FF3B30' }}
-																			>
-																				<DeleteIcon />
-																			</IconButton>
-																		</TableCell>
-																	</TableRow>
-																))}
-															</TableBody>
-														</PlanTable>
-														<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-															<AppleButton
-																startIcon={<AddIcon />}
-																onClick={() => handleAddPlanEntry(plan.id)}
-															>
-																Добавить запись
-															</AppleButton>
-															<GreenButton
-																startIcon={<SaveIcon />}
-																onClick={() => handleSavePlan(plan)}
-																disabled={!areAllTitlesFilled(plan)}
-															>
-																Сохранить
-															</GreenButton>
+									{plans.map((plan) => {
+										// Сортировка записей плана
+										const sortedEntries = [...plan.entries].sort((a, b) => {
+											// Сначала сортируем по наличию publication_id (с публикациями выше)
+											if (a.publication_id && !b.publication_id) return -1;
+											if (!a.publication_id && b.publication_id) return 1;
+											// Если оба с publication_id или оба без, сортируем по времени создания (позже добавленные ниже)
+											// Если нет created_at, используем порядок в массиве (предполагаем, что новые добавляются в конец)
+											return (b.created_at || 0) - (a.created_at || 0); // Если created_at нет, используем 0
+										});
+
+										// Разделяем на утвержденные (до утверждения) и дополнительные (после утверждения)
+										const preApprovalEntries = sortedEntries.filter(entry => !entry.isPostApproval);
+										const postApprovalEntries = sortedEntries.filter(entry => entry.isPostApproval);
+
+										return (
+											<Accordion
+												key={plan.id}
+												sx={{
+													mb: 2,
+													borderRadius: '16px',
+													boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+												}}
+											>
+												<AccordionSummary expandIcon={<ExpandMoreIcon />}>
+													<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+														<Typography variant="h6" sx={{ color: '#1D1D1F' }}>
+															План на {plan.year} год (Ожидаемое количество: {plan.expectedCount} | Текущее количество: {plan.entries.length})
+														</Typography>
+														<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+															<StatusChip status={plan.status} />
+															{(plan.status === 'draft' || plan.status === 'returned') && (
+																<>
+																	<IconButton
+																		onClick={(e) => {
+																			e.stopPropagation();
+																			handleEditPlanClick(plan.id);
+																		}}
+																		sx={{ color: '#0071E3' }}
+																	>
+																		<EditIcon />
+																	</IconButton>
+																	<IconButton
+																		onClick={(e) => {
+																			e.stopPropagation();
+																			handleDeletePlanClick(plan);
+																		}}
+																		sx={{ color: '#FF3B30' }}
+																	>
+																		<DeleteIcon />
+																	</IconButton>
+																	<IconButton
+																		onClick={(e) => {
+																			e.stopPropagation();
+																			handleSubmitPlanForReview(plan);
+																		}}
+																		sx={{ color: '#0071E3' }}
+																		disabled={!areAllTitlesFilled(plan)}
+																		title={areAllTitlesFilled(plan) ? 'Отправить на проверку' : 'Заполните все заголовки'}
+																	>
+																		<PublishIcon />
+																	</IconButton>
+																</>
+															)}
 														</Box>
-													</>
-												) : (
-													<>
-														<LinearProgress
-															variant="determinate"
-															value={calculateProgress(plan)}
-															sx={{ mb: 2, height: 8, borderRadius: 4 }}
-														/>
-														<PlanTable>
-															<TableHead>
-																<TableRow>
-																	<TableCell>Название</TableCell>
-																	<TableCell>Тип</TableCell>
-																	<TableCell>Статус</TableCell>
-																	<TableCell>Привязанная публикация</TableCell>
-																	{plan.status === 'approved' && <TableCell>Действия</TableCell>}
-																</TableRow>
-															</TableHead>
-															<TableBody>
-																{plan.entries.map((entry) => (
-																	<TableRow key={entry.id}>
-																		<TableCell>{entry.title}</TableCell>
-																		<TableCell>{entry.type}</TableCell>
-																		<TableCell><StatusChip status={entry.status} /></TableCell>
-																		<TableCell>
-																			{entry.publication_id ? (
-																				<Typography
-																					sx={{
-																						color: '#0071E3',
-																						textDecoration: 'underline',
-																						cursor: 'pointer',
-																						'&:hover': { textDecoration: 'none' },
-																					}}
-																					onClick={() => navigate(`/publication/${entry.publication_id}`)}
+													</Box>
+												</AccordionSummary>
+												<AccordionDetails>
+													{editingPlanId === plan.id ? (
+														<>
+															<PlanTable>
+																<TableHead>
+																	<TableRow>
+																		<TableCell>Название</TableCell>
+																		<TableCell>Тип</TableCell>
+																		<TableCell>Статус</TableCell>
+																		<TableCell>Действия</TableCell>
+																	</TableRow>
+																</TableHead>
+																<TableBody>
+																	{plan.entries.map((entry, index) => (
+																		<TableRow key={index}>
+																			<TableCell>
+																				<AppleTextField
+																					value={entry.title}
+																					onChange={(e) => handlePlanEntryChange(plan.id, index, 'title', e.target.value)}
+																					fullWidth
+																					variant="outlined"
+																				/>
+																			</TableCell>
+																			<TableCell>
+																				<AppleTextField
+																					select
+																					value={entry.type}
+																					onChange={(e) => handlePlanEntryChange(plan.id, index, 'type', e.target.value)}
+																					fullWidth
+																					variant="outlined"
 																				>
-																					{publishedPublications.find(pub => pub.id === entry.publication_id)?.title || 'Неизвестно'}
-																				</Typography>
-																			) : (
-																				'Не привязана'
-																			)}
-																		</TableCell>
-																		{plan.status === 'approved' && (
+																					<MenuItem value="article">Статья</MenuItem>
+																					<MenuItem value="monograph">Монография</MenuItem>
+																					<MenuItem value="conference">Доклад/конференция</MenuItem>
+																				</AppleTextField>
+																			</TableCell>
+																			<TableCell>
+																				<StatusChip status={entry.status} />
+																			</TableCell>
+																			<TableCell>
+																				<IconButton
+																					onClick={() => handleDeletePlanEntry(plan.id, index)}
+																					sx={{ color: '#FF3B30' }}
+																				>
+																					<DeleteIcon />
+																				</IconButton>
+																			</TableCell>
+																		</TableRow>
+																	))}
+																</TableBody>
+															</PlanTable>
+															<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+																<AppleButton
+																	startIcon={<AddIcon />}
+																	onClick={() => handleAddPlanEntry(plan.id)}
+																>
+																	Добавить запись
+																</AppleButton>
+																<GreenButton
+																	startIcon={<SaveIcon />}
+																	onClick={() => handleSavePlan(plan)}
+																	disabled={!areAllTitlesFilled(plan)}
+																>
+																	Сохранить
+																</GreenButton>
+															</Box>
+														</>
+													) : (
+														<>
+															<Typography sx={{ mb: 1 }}>Прогресс выполнения:</Typography>
+															<Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+																<LinearProgress
+																	variant="determinate"
+																	value={Math.min(calculateProgress(plan), 100)}
+																	sx={{
+																		height: 8,
+																		borderRadius: 4,
+																		flexGrow: 1,
+																		backgroundColor: '#E5E5EA',
+																		'& .MuiLinearProgress-bar': { backgroundColor: '#34C759' },
+																	}}
+																/>
+																<Typography
+																	variant="body2"
+																	sx={{
+																		minWidth: '50px',
+																		textAlign: 'right',
+																		color: calculateProgress(plan) > 100 ? '#FF9500' : '#1D1D1F',
+																	}}
+																>
+																	{Math.round(calculateProgress(plan))}%
+																</Typography>
+															</Box>
+															<PlanTable>
+																<TableHead>
+																	<TableRow>
+																		<TableCell>Название</TableCell>
+																		<TableCell>Тип</TableCell>
+																		<TableCell>Статус</TableCell>
+																		<TableCell>Привязанная публикация</TableCell>
+																		{plan.status === 'approved' && <TableCell>Действия</TableCell>}
+																	</TableRow>
+																</TableHead>
+																<TableBody>
+																	{/* Утверждённые работы (до утверждения плана) */}
+																	{preApprovalEntries.map((entry) => (
+																		<TableRow key={entry.id}>
+																			<TableCell>{entry.title}</TableCell>
+																			<TableCell>{entry.type}</TableCell>
+																			<TableCell><StatusChip status={entry.status} /></TableCell>
 																			<TableCell>
 																				{entry.publication_id ? (
-																					<IconButton
-																						onClick={() => handleUnlinkPublication(plan.id, entry.id)}
-																						sx={{ color: '#FF3B30' }}
-																						title="Отвязать публикацию"
+																					<Typography
+																						sx={{
+																							color: '#0071E3',
+																							textDecoration: 'underline',
+																							cursor: 'pointer',
+																							'&:hover': { textDecoration: 'none' },
+																						}}
+																						onClick={() => navigate(`/publication/${entry.publication_id}`)}
 																					>
-																						<UnlinkIcon />
-																					</IconButton>
+																						{publishedPublications.find(pub => pub.id === entry.publication_id)?.title || 'Неизвестно'}
+																					</Typography>
 																				) : (
-																					<IconButton
-																						onClick={() => handleOpenLinkDialog(plan.id, entry)}
-																						sx={{ color: '#0071E3' }}
-																						title="Привязать публикацию"
-																					>
-																						<LinkIcon />
-																					</IconButton>
+																					'Не привязана'
 																				)}
 																			</TableCell>
-																		)}
-																	</TableRow>
-																))}
-															</TableBody>
-														</PlanTable>
-														{plan.status === 'approved' && (
-															<AppleButton
-																startIcon={<AddIcon />}
-																onClick={() => handleEditPlanClick(plan.id)}
-																sx={{ mt: 2 }}
-															>
-																Добавить запись
-															</AppleButton>
-														)}
-													</>
-												)}
-												{plan.return_comment && (
-													<Typography sx={{ mt: 2, color: '#FF3B30' }}>
-														Комментарий при возврате: {plan.return_comment}
-													</Typography>
-												)}
-											</AccordionDetails>
-										</Accordion>
-									))}
+																			{plan.status === 'approved' && (
+																				<TableCell>
+																					{entry.publication_id ? (
+																						<IconButton
+																							onClick={() => handleUnlinkPublication(plan.id, entry.id)}
+																							sx={{ color: '#FF3B30' }}
+																							title="Отвязать публикацию"
+																						>
+																							<UnlinkIcon />
+																						</IconButton>
+																					) : (
+																						<IconButton
+																							onClick={() => handleOpenLinkDialog(plan.id, entry)}
+																							sx={{ color: '#0071E3' }}
+																							title="Привязать публикацию"
+																						>
+																							<LinkIcon />
+																						</IconButton>
+																					)}
+																				</TableCell>
+																			)}
+																		</TableRow>
+																	))}
+																	{/* Дополнительные работы (после утверждения) */}
+																	{postApprovalEntries.length > 0 && (
+																		<TableRow>
+																			<TableCell colSpan={5} sx={{ fontWeight: 600, color: '#6E6E73', padding: '16px 20px' }}>
+																				Дополнительные работы (добавлены после утверждения)
+																			</TableCell>
+																		</TableRow>
+																	)}
+																	{postApprovalEntries.map((entry) => (
+																		<TableRow key={entry.id}>
+																			<TableCell>{entry.title}</TableCell>
+																			<TableCell>{entry.type}</TableCell>
+																			<TableCell><StatusChip status={entry.status} /></TableCell>
+																			<TableCell>
+																				{entry.publication_id ? (
+																					<Typography
+																						sx={{
+																							color: '#0071E3',
+																							textDecoration: 'underline',
+																							cursor: 'pointer',
+																							'&:hover': { textDecoration: 'none' },
+																						}}
+																						onClick={() => navigate(`/publication/${entry.publication_id}`)}
+																					>
+																						{publishedPublications.find(pub => pub.id === entry.publication_id)?.title || 'Неизвестно'}
+																					</Typography>
+																				) : (
+																					'Не привязана'
+																				)}
+																			</TableCell>
+																			{plan.status === 'approved' && (
+																				<TableCell>
+																					{entry.publication_id ? (
+																						<IconButton
+																							onClick={() => handleUnlinkPublication(plan.id, entry.id)}
+																							sx={{ color: '#FF3B30' }}
+																							title="Отвязать публикацию"
+																						>
+																							<UnlinkIcon />
+																						</IconButton>
+																					) : (
+																						<IconButton
+																							onClick={() => handleOpenLinkDialog(plan.id, entry)}
+																							sx={{ color: '#0071E3' }}
+																							title="Привязать публикацию"
+																						>
+																							<LinkIcon />
+																						</IconButton>
+																					)}
+																				</TableCell>
+																			)}
+																		</TableRow>
+																	))}
+																</TableBody>
+															</PlanTable>
+															{plan.status === 'approved' && (
+																<AppleButton
+																	startIcon={<AddIcon />}
+																	onClick={() => handleEditPlanClick(plan.id)}
+																	sx={{ mt: 2 }}
+																>
+																	Добавить запись
+																</AppleButton>
+															)}
+															{plan.return_comment && plan.status !== 'approved' && (
+																<Typography
+																	sx={{
+																		mt: 2,
+																		color: '#000000',
+																		fontWeight: 600,
+																		display: 'flex',
+																		alignItems: 'center',
+																		gap: 1,
+																	}}
+																>
+																	<WarningAmberIcon sx={{ color: '#FF3B30' }} />
+																	Комментарий при возврате: {plan.return_comment}
+																</Typography>
+															)}
+														</>
+													)}
+												</AccordionDetails>
+											</Accordion>
+										);
+									})}
 
 									<Pagination
 										count={planTotalPages}
@@ -2191,34 +2355,6 @@ function Dashboard() {
 								),
 							}}
 						/>
-						<Collapse in={passwordError !== ''}>
-							<Alert
-								severity="error"
-								sx={{
-									mt: 2,
-									borderRadius: '12px',
-									backgroundColor: '#FFF1F0',
-									color: '#1D1D1F',
-									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-								}}
-							>
-								{passwordError}
-							</Alert>
-						</Collapse>
-						<Collapse in={passwordSuccess !== ''}>
-							<Alert
-								severity="success"
-								sx={{
-									mt: 2,
-									borderRadius: '12px',
-									backgroundColor: '#E7F8E7',
-									color: '#1D1D1F',
-									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-								}}
-							>
-								{passwordSuccess}
-							</Alert>
-						</Collapse>
 					</form>
 				</DialogContent>
 				<DialogActions sx={{ p: 2 }}>
