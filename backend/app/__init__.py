@@ -34,8 +34,8 @@ def create_app():
     csrf.init_app(app)
 
     # Настройка CORS
-    CORS(app, resources={r"/*": {"origins": "http://localhost:3001"}}, supports_credentials=True)
-
+    allowed_origins = ["http://localhost:3000", "http://localhost:3001"]
+    CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=True)
     # Обработка предварительных запросов
     @app.before_request
     def handle_preflight():
