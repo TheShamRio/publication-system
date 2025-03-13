@@ -1,5 +1,4 @@
 D:\publication-system\backend\app\__init__.py
-
 from flask import Flask, send_from_directory, make_response, request
 from flask_cors import CORS
 from .extensions import db, migrate, login_manager, csrf
@@ -36,8 +35,8 @@ def create_app():
     csrf.init_app(app)
 
     # Настройка CORS
-    CORS(app, resources={r"/*": {"origins": "http://localhost:3001"}}, supports_credentials=True)
-
+    allowed_origins = ["http://localhost:3000", "http://localhost:3001"]
+    CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=True)
     # Обработка предварительных запросов
     @app.before_request
     def handle_preflight():
@@ -73,7 +72,8 @@ def create_app():
 @login_manager.user_loader
 def load_user(user_id):
     return User.query.get(int(user_id))
-		--------------
+
+		-------------------------
 		D:\publication-system\backend\app\analytics.py
 		from .extensions import db
 from .models import Publication
@@ -88,7 +88,7 @@ def get_publications_by_year(user_id=None):
         query = query.filter(Publication.user_id == user_id)
     # Сортируем результаты по году в порядке возрастания
     return query.order_by(Publication.year.asc()).all()
-		-------------
+		---------
 		D:\publication-system\backend\app\api.py
 		from flask import Blueprint, jsonify, request, send_file
 from werkzeug.utils import secure_filename
@@ -105,7 +105,6 @@ from datetime import datetime
 bp = Blueprint('admin_api', __name__, url_prefix='/admin_api')
 logger = logging.getLogger(__name__)
 
-# Проверка, является ли пользователь администратором или управляющим
 def admin_or_manager_required(f):
     @login_required
     def wrapper(*args, **kwargs):
@@ -116,7 +115,6 @@ def admin_or_manager_required(f):
     wrapper.__name__ = f.__name__
     return wrapper
 
-# Проверка, является ли пользователь администратором
 def admin_required(f):
     @login_required
     def wrapper(*args, **kwargs):
@@ -265,9 +263,12 @@ def update_publication(pub_id):
     if 'file' in request.files:
         file = request.files['file']
         if file and allowed_file(file.filename):
+            if publication.file_url:
+                old_file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
+                if os.path.exists(old_file_path):
+                    os.remove(old_file_path)
             filename = secure_filename(file.filename)
             file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-
             if os.path.exists(file_path):
                 base, extension = os.path.splitext(filename)
                 counter = 1
@@ -275,7 +276,6 @@ def update_publication(pub_id):
                     filename = f"{base}_{counter}{extension}"
                     file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
                     counter += 1
-
             try:
                 file.save(file_path)
                 publication.file_url = f"/uploads/{filename}"
@@ -439,7 +439,7 @@ def get_all_plans():
     }), 200
 
 @bp.route('/admin/plans/<int:plan_id>', methods=['PUT'])
-@admin_required  # Ограничиваем только для админа
+@admin_required
 def update_plan(plan_id):
     logger.debug(f"Получен PUT запрос для /admin_api/admin/plans/{plan_id}")
     plan = Plan.query.get_or_404(plan_id)
@@ -481,7 +481,7 @@ def update_plan(plan_id):
     return jsonify({'message': 'Plan updated successfully', 'plan': plan.to_dict()}), 200
 
 @bp.route('/admin/plans/<int:plan_id>', methods=['DELETE'])
-@admin_required  # Ограничиваем только для админа
+@admin_required
 def delete_plan(plan_id):
     logger.debug(f"Получен DELETE запрос для /admin_api/admin/plans/{plan_id}")
     plan = Plan.query.get_or_404(plan_id)
@@ -518,7 +518,7 @@ def return_plan_for_revision(plan_id):
         return jsonify({'error': 'Комментарий обязателен'}), 400
 
     plan.status = 'returned'
-    plan.return_comment = comment  # Сохраняем комментарий
+    plan.return_comment = comment
     db.session.commit()
     return jsonify({'message': 'План возвращён на доработку', 'plan': plan.to_dict()}), 200
 
@@ -532,7 +532,26 @@ def get_publications_by_year(user_id):
         year = pub.year
         yearly_counts[year] = yearly_counts.get(year, 0) + 1
     return sorted(yearly_counts.items(), key=lambda x: x[0])
-		------------------
+
+
+@bp.route('admin/plans/needs-review', methods=['GET'])
+@login_required
+def get_needs_review_plans():
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    
+    # Запрос планов со статусом 'needs_review'
+    plans_query = Plan.query.filter_by(status='needs_review')
+    pagination = plans_query.paginate(page=page, per_page=per_page, error_out=False)
+    
+    plans = [plan.to_dict() for plan in pagination.items]
+    
+    return jsonify({
+        'plans': plans,
+        'pages': pagination.pages,
+        'total': pagination.total
+    })
+		-------------
 		D:\publication-system\backend\app\extensions.py
 		from flask_sqlalchemy import SQLAlchemy
 from flask_migrate import Migrate
@@ -543,7 +562,7 @@ db = SQLAlchemy()
 migrate = Migrate()
 login_manager = LoginManager()
 csrf = CSRFProtect()  # Инициализируем CSRFProtect
------------------
+------------------
 D:\publication-system\backend\app\middleware.py
 from functools import wraps
 from flask import jsonify
@@ -564,7 +583,8 @@ def admin_required(f):
         logger.debug(f"Доступ предоставлен для пользователя {current_user.username}")
         return f(*args, **kwargs)
     return decorated
-		-------------------
+
+		------------
 		D:\publication-system\backend\app\models.py
 		from datetime import datetime
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -710,9 +730,12 @@ class Plan(db.Model):
             'expectedCount': self.expectedCount,
             'fillType': self.fillType,
             'status': self.status,
-            'user': {'full_name': self.user.full_name if self.user else None} if self.user else None,
+            'user': {
+                'full_name': self.user.full_name if self.user else None,
+                'username': self.user.username if self.user else None  # Добавляем username
+            } if self.user else None,
             'entries': [entry.to_dict() for entry in self.entries],
-            'return_comment': self.return_comment  # Добавляем комментарий в ответ
+            'return_comment': self.return_comment
         }
 
 class PlanEntry(db.Model):
@@ -722,6 +745,7 @@ class PlanEntry(db.Model):
     type = db.Column(db.String(50), nullable=True)  # Для ручного заполнения
     publication_id = db.Column(db.Integer, db.ForeignKey('publication.id'), nullable=True)  # Для привязки
     status = db.Column(db.String(50), nullable=False, default='planned')  # 'planned', 'in_progress', 'completed'
+    isPostApproval = db.Column(db.Boolean, nullable=False, default=False)  # Новое поле
 
     plan = db.relationship('Plan', back_populates='entries')
     publication = db.relationship('Publication', back_populates='plan_entries', lazy=True)
@@ -732,16 +756,20 @@ class PlanEntry(db.Model):
             'id': self.id,
             'title': self.title,
             'type': self.type,
-            'publicationId': self.publication_id,
-            'publication': self.publication.to_dict() if self.publication else None
+            'publication_id': self.publication_id,
+            'status': self.status,
+            'isPostApproval': self.isPostApproval,  # Добавляем поле в ответ
+            'publication': {
+                'id': self.publication.id,
+                'title': self.publication.title
+            } if self.publication else None
         }
-        # Поле status не включаем для обычных пользователей
         if current_user.is_authenticated and current_user.role in ['admin', 'manager']:
             result['status'] = self.status
         return result
 				---------------
 				D:\publication-system\backend\app\routes.py
-				from flask import Blueprint, jsonify, request, make_response, current_app, send_from_directory
+				from flask import Blueprint, jsonify, request, make_response, current_app, send_file
 from .extensions import db, login_manager, csrf
 from .models import User, Publication, Comment, Plan, PlanEntry
 from .utils import allowed_file
@@ -755,7 +783,6 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph
 from reportlab.lib.pagesizes import letter
 from bibtexparser.bibdatabase import BibDatabase
 from bibtexparser.bwriter import BibTexWriter
-from flask import send_file
 import logging
 from datetime import datetime, UTC
 from werkzeug.security import generate_password_hash, check_password_hash
@@ -805,7 +832,7 @@ def get_publication(pub_id):
         'year': publication.year,
         'type': publication.type,
         'status': publication.status,
-        'file_url': f"/uploads/{os.path.basename(publication.file_url)}" if publication.file_url else None,
+        'file_url': publication.file_url if publication.file_url else None,
         'user': {
             'id': publication.user.id if publication.user else None,
             'full_name': publication.user.full_name if publication.user else None},
@@ -1175,15 +1202,25 @@ def manage_publication(pub_id):
             return jsonify({"error": "Неподдерживаемый формат данных. Используйте application/json или multipart/form-data."}), 415
 
         old_status = publication.status
+
         if 'file' in request.files:
             file = request.files['file']
             if file and allowed_file(file.filename):
-                if publication.file_url and os.path.exists(publication.file_url):
-                    os.remove(publication.file_url)
+                if publication.file_url:
+                    old_file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
+                    if os.path.exists(old_file_path):
+                        os.remove(old_file_path)
                 filename = secure_filename(file.filename)
                 file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+                if os.path.exists(file_path):
+                    base, extension = os.path.splitext(filename)
+                    counter = 1
+                    while os.path.exists(file_path):
+                        filename = f"{base}_{counter}{extension}"
+                        file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+                        counter += 1
                 file.save(file_path)
-                publication.file_url = file_path
+                publication.file_url = f"/uploads/{filename}"
 
         publication.title = data.get('title', publication.title)
         publication.authors = data.get('authors', publication.authors)
@@ -1223,8 +1260,10 @@ def manage_publication(pub_id):
 
     elif request.method == 'DELETE':
         try:
-            if publication.file_url and os.path.exists(publication.file_url):
-                os.remove(publication.file_url)
+            if publication.file_url:
+                file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
+                if os.path.exists(file_path):
+                    os.remove(file_path)
             db.session.delete(publication)
             db.session.commit()
             return jsonify({'message': 'Публикация успешно удалена'}), 200
@@ -1261,6 +1300,13 @@ def upload_file():
 
     filename = secure_filename(file.filename)
     file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+    if os.path.exists(file_path):
+        base, extension = os.path.splitext(filename)
+        counter = 1
+        while os.path.exists(file_path):
+            filename = f"{base}_{counter}{extension}"
+            file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+            counter += 1
     file.save(file_path)
 
     publication = Publication(
@@ -1269,10 +1315,11 @@ def upload_file():
         year=year,
         type=type,
         status='draft',
-        file_url=file_path,
+        file_url=f"/uploads/{filename}",
         user_id=current_user.id,
         returned_for_revision=False,
     )
+
     db.session.add(publication)
     db.session.commit()
 
@@ -1351,12 +1398,21 @@ def attach_file(pub_id):
 
     file = request.files['file']
     if file and allowed_file(file.filename):
-        if publication.file_url and os.path.exists(publication.file_url):
-            os.remove(publication.file_url)
+        if publication.file_url:
+            old_file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
+            if os.path.exists(old_file_path):
+                os.remove(old_file_path)
         filename = secure_filename(file.filename)
         file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+        if os.path.exists(file_path):
+            base, extension = os.path.splitext(filename)
+            counter = 1
+            while os.path.exists(file_path):
+                filename = f"{base}_{counter}{extension}"
+                file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+                counter += 1
         file.save(file_path)
-        publication.file_url = file_path
+        publication.file_url = f"/uploads/{filename}"
 
         try:
             db.session.commit()
@@ -1475,6 +1531,7 @@ def create_plan():
             type=entry_data.get('type'),
             publication_id=entry_data.get('publication_id'),
             status=entry_data.get('status', 'planned'),
+            isPostApproval=False,
             plan=plan
         )
         if entry.publication_id:
@@ -1495,8 +1552,8 @@ def update_plan(plan_id):
     if not plan:
         return jsonify({'error': 'Plan not found or unauthorized'}), 404
     
-    if plan.status not in ['draft', 'returned']:
-        return jsonify({'error': 'Cannot edit plan that is under review or approved'}), 403
+    if plan.status not in ['draft', 'returned', 'approved']:
+        return jsonify({'error': 'Cannot edit plan that is under review'}), 403
 
     data = request.get_json()
     if not all(k in data for k in ('year', 'expectedCount', 'fillType', 'entries')):
@@ -1505,33 +1562,60 @@ def update_plan(plan_id):
     if not isinstance(data['year'], int) or data['year'] < 1900 or data['year'] > 2100:
         return jsonify({'error': 'Invalid year'}), 400
     
-    if not isinstance(data['expectedCount'], int) or data['expectedCount'] < 1:
-        return jsonify({'error': 'Expected count must be at least 1'}), 400
-    
     if data['fillType'] not in ['manual', 'link']:
         return jsonify({'error': 'Invalid fill type'}), 400
 
-    plan.year = data['year']
-    plan.expectedCount = data['expectedCount']
-    plan.fillType = data['fillType']
-
-    PlanEntry.query.filter_by(plan_id=plan.id).delete()
-    db.session.commit()
-
-    for entry_data in data['entries']:
-        entry = PlanEntry(
-            title=entry_data.get('title'),
-            type=entry_data.get('type'),
-            publication_id=entry_data.get('publication_id'),
-            status=entry_data.get('status', 'planned'),
-            plan=plan
-        )
-        if entry.publication_id:
-            publication = Publication.query.filter_by(id=entry.publication_id, user_id=current_user.id, status='published').first()
-            if not publication:
-                db.session.rollback()
-                return jsonify({'error': f'Publication with ID {entry.publication_id} not found or not published'}), 404
-        db.session.add(entry)
+    if plan.status == 'approved':
+        existing_entries = {entry.id: entry for entry in plan.entries}
+        new_entries = []
+        for entry_data in data['entries']:
+            entry_id = entry_data.get('id')
+            if entry_id and entry_id in existing_entries:
+                entry = existing_entries[entry_id]
+                entry.title = entry_data.get('title', entry.title)
+                entry.type = entry_data.get('type', entry.type)
+                entry.publication_id = entry_data.get('publication_id', entry.publication_id)
+                entry.status = entry_data.get('status', entry.status)
+                if entry.publication_id:
+                    publication = Publication.query.filter_by(id=entry.publication_id, user_id=current_user.id, status='published').first()
+                    if not publication:
+                        db.session.rollback()
+                        return jsonify({'error': f'Publication with ID {entry.publication_id} not found or not published'}), 404
+            else:
+                new_entry = PlanEntry(
+                    title=entry_data.get('title', ''),
+                    type=entry_data.get('type', 'article'),
+                    publication_id=entry_data.get('publication_id'),
+                    status=entry_data.get('status', 'planned'),
+                    isPostApproval=True,
+                    plan=plan
+                )
+                if new_entry.publication_id:
+                    publication = Publication.query.filter_by(id=new_entry.publication_id, user_id=current_user.id, status='published').first()
+                    if not publication:
+                        db.session.rollback()
+                        return jsonify({'error': f'Publication with ID {new_entry.publication_id} not found or not published'}), 404
+                new_entries.append(new_entry)
+                db.session.add(new_entry)
+    else:
+        plan.year = data['year']
+        plan.fillType = data['fillType']
+        PlanEntry.query.filter_by(plan_id=plan.id).delete()
+        for entry_data in data['entries']:
+            entry = PlanEntry(
+                title=entry_data.get('title'),
+                type=entry_data.get('type'),
+                publication_id=entry_data.get('publication_id'),
+                status=entry_data.get('status', 'planned'),
+                isPostApproval=False,
+                plan=plan
+            )
+            if entry.publication_id:
+                publication = Publication.query.filter_by(id=entry.publication_id, user_id=current_user.id, status='published').first()
+                if not publication:
+                    db.session.rollback()
+                    return jsonify({'error': f'Publication with ID {entry.publication_id} not found or not published'}), 404
+            db.session.add(entry)
 
     db.session.commit()
     return jsonify({'message': 'Plan updated successfully', 'plan': plan.to_dict()}), 200
@@ -1559,7 +1643,6 @@ def submit_plan_for_review(plan_id):
     if not plan:
         return jsonify({'error': 'Plan not found or unauthorized'}), 404
     
-    # Разрешаем отправку из состояний 'draft' и 'returned'
     if plan.status not in ['draft', 'returned']:
         return jsonify({'error': 'План уже отправлен на проверку или утверждён'}), 400
     
@@ -1569,7 +1652,66 @@ def submit_plan_for_review(plan_id):
     plan.status = 'needs_review'
     db.session.commit()
     return jsonify({'message': 'План отправлен на проверку', 'plan': plan.to_dict()}), 200
-		------------------
+
+@bp.route('/plans/<int:plan_id>/entries/<int:entry_id>/link', methods=['POST'])
+@login_required
+def link_publication_to_plan_entry(plan_id, entry_id):
+    logger.debug(f"Получен POST запрос для /plans/{plan_id}/entries/{entry_id}/link")
+    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
+    if not plan:
+        return jsonify({'error': 'Plan not found or unauthorized'}), 404
+    
+    entry = PlanEntry.query.filter_by(id=entry_id, plan_id=plan_id).first()
+    if not entry:
+        return jsonify({'error': 'Entry not found'}), 404
+    
+    if plan.status != 'approved':
+        return jsonify({'error': 'Can only link publications to approved plans'}), 403
+    
+    if entry.publication_id:
+        return jsonify({'error': 'Entry already linked to a publication'}), 400
+
+    data = request.get_json()
+    publication_id = data.get('publication_id')
+    if not publication_id:
+        return jsonify({'error': 'Publication ID is required'}), 400
+
+    publication = Publication.query.filter_by(id=publication_id, user_id=current_user.id, status='published').first()
+    if not publication:
+        return jsonify({'error': f'Publication with ID {publication_id} not found or not published'}), 404
+
+    existing_link = PlanEntry.query.filter_by(publication_id=publication_id).first()
+    if existing_link:
+        return jsonify({'error': f'Publication with ID {publication_id} is already linked to another plan entry'}), 400
+
+    entry.publication_id = publication_id
+    entry.status = 'completed'
+    db.session.commit()
+    return jsonify({'message': 'Publication linked successfully', 'entry': entry.to_dict()}), 200
+
+@bp.route('/plans/<int:plan_id>/entries/<int:entry_id>/unlink', methods=['POST'])
+@login_required
+def unlink_publication_from_plan_entry(plan_id, entry_id):
+    logger.debug(f"Получен POST запрос для /plans/{plan_id}/entries/{entry_id}/unlink")
+    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
+    if not plan:
+        return jsonify({'error': 'Plan not found or unauthorized'}), 404
+    
+    entry = PlanEntry.query.filter_by(id=entry_id, plan_id=plan_id).first()
+    if not entry:
+        return jsonify({'error': 'Entry not found'}), 404
+    
+    if plan.status != 'approved':
+        return jsonify({'error': 'Can only unlink publications from approved plans'}), 403
+    
+    if not entry.publication_id:
+        return jsonify({'error': 'No publication linked to this entry'}), 400
+
+    entry.publication_id = None
+    entry.status = 'planned'
+    db.session.commit()
+    return jsonify({'message': 'Publication unlinked successfully', 'entry': entry.to_dict()}), 200
+		----------------
 		D:\publication-system\backend\app\server.py
 		from flask import Flask, request, send_file
 from flask_cors import CORS
@@ -1621,7 +1763,7 @@ def convert_docx_to_pdf():
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
-		---------------------
+		----------------------
 		D:\publication-system\backend\app\utils.py
 		from werkzeug.utils import secure_filename
 import os
@@ -1629,7 +1771,7 @@ import os
 def allowed_file(filename, allowed_extensions=['pdf', 'docx', 'bib']):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in allowed_extensions
 
-------------------------
+-----------------
 D:\publication-system\backend\config.py
 import os
 
@@ -1646,17 +1788,53 @@ class Config:
 
 if not os.path.exists(Config.UPLOAD_FOLDER):
     os.makedirs(Config.UPLOAD_FOLDER)
-		-----------------------------
-		D:\publication-system\backend\run.py
-		from app import create_app
+		-----------------
+		D:\publication-system\backend\requirements.txt
+		alembic==1.14.1
+bibtexparser==1.4.3
+blinker==1.9.0
+cachelib==0.13.0
+chardet==5.2.0
+click==8.1.8
+colorama==0.4.6
+Flask==3.1.0
+Flask-Cors==5.0.0
+Flask-Login==0.6.3
+Flask-Migrate==4.1.0
+Flask-Session==0.8.0
+Flask-SQLAlchemy==3.1.1
+Flask-WTF==1.2.2
+greenlet==3.1.1
+grep==0.3.2
+itsdangerous==2.2.0
+Jinja2==3.1.5
+lxml==5.3.1
+Mako==1.3.9
+MarkupSafe==3.0.2
+msgspec==0.19.0
+pillow==11.1.0
+plum-dispatch==1.7.4
+psycopg2-binary==2.9.10
+pyparsing==3.2.1
+python-docx==1.1.2
+reportlab==4.3.1
+Spire.Doc==13.1.0
+SQLAlchemy==2.0.38
+typing_extensions==4.12.2
+Werkzeug==3.1.3
+WTForms==3.2.1
+
+-------------
+D:\publication-system\backend\run.py
+from app import create_app
 
 app = create_app()
 
 if __name__ == "__main__":
-    app.run(debug=True, host='0.0.0.0', port=5000)
-		---------------
-		D:\publication-system\frontend\src\components\AdminDashboard.js
-		import React, { useState, useEffect } from 'react';
+    app.run(debug=True, host='0.0.0.0', port=5000)\
+-----------------
+D:\publication-system\frontend\src\components\AdminDashboard.js
+import React, { useState, useEffect } from 'react';
 import {
 	Container,
 	Typography,
@@ -2866,7 +3044,7 @@ function AdminDashboard() {
 }
 
 export default AdminDashboard;
---------------------
+-----------
 D:\publication-system\frontend\src\components\CommentSection.js
 import React, { useState } from 'react';
 import {
@@ -3012,7 +3190,7 @@ const CommentSection = ({ comments, publicationId, onCommentAdded }) => {
 };
 
 export default CommentSection;
-------------------
+---------------
 D:\publication-system\frontend\src\components\Dashboard.js
 import React, { useState, useEffect, useRef } from 'react';
 import { Line } from 'react-chartjs-2';
@@ -3039,6 +3217,7 @@ import {
 	DialogContent,
 	DialogActions,
 	IconButton,
+	LinearProgress, // Добавляем шкалу прогресса
 	Tabs,
 	Tab,
 	Accordion,
@@ -3056,6 +3235,8 @@ import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SaveIcon from '@mui/icons-material/Save';
 import PublishIcon from '@mui/icons-material/Publish';
+import LinkIcon from '@mui/icons-material/Link'; // Добавляем иконку для привязки
+import UnlinkIcon from '@mui/icons-material/LinkOff';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import DownloadIcon from '@mui/icons-material/Download';
 import Visibility from '@mui/icons-material/Visibility';
@@ -3179,7 +3360,7 @@ const DetailsButton = styled(Button)(({ theme }) => ({
 }));
 
 function Dashboard() {
-	const { user, csrfToken, setCsrfToken } = useAuth();
+	const { user, csrfToken, setCsrfToken, setUser } = useAuth();
 	const [loadingUser, setLoadingUser] = useState(true);
 	const [showCurrentPassword, setShowCurrentPassword] = useState(false);
 	const [showNewPassword, setShowNewPassword] = useState(false);
@@ -3221,14 +3402,16 @@ function Dashboard() {
 	const [openChangePasswordDialog, setOpenChangePasswordDialog] = useState(false);
 	const [currentPassword, setCurrentPassword] = useState('');
 	const [newPassword, setNewPassword] = useState('');
-	const [passwordError, setPasswordError] = useState('');
-	const [passwordSuccess, setPasswordSuccess] = useState('');
 	const [pubTypes, setPubTypes] = useState({ article: 0, monograph: 0, conference: 0 });
 	const [pubStatuses, setPubStatuses] = useState({ draft: 0, needs_review: 0, published: 0 });
 	const [totalCitations, setTotalCitations] = useState(0);
 	const [searchQuery, setSearchQuery] = useState('');
 	const [filterType, setFilterType] = useState('all');
 	const [filterStatus, setFilterStatus] = useState('all');
+	const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+	const [selectedPlanEntry, setSelectedPlanEntry] = useState(null);
+	const [filteredPublishedPublications, setFilteredPublishedPublications] = useState([]);
+	const [linkSearchQuery, setLinkSearchQuery] = useState('');
 	const [currentPage, setCurrentPage] = useState(1);
 	const [totalPages, setTotalPages] = useState(1);
 	const [publicationsTransitionKey, setPublicationsTransitionKey] = useState(0);
@@ -3243,6 +3426,7 @@ function Dashboard() {
 	const plansPerPage = 10;
 	const navigate = useNavigate();
 	const chartRef = useRef(null);
+
 
 	const validPublicationTypes = ['article', 'monograph', 'conference'];
 	const validPlanStatuses = ['planned', 'in_progress', 'completed'];
@@ -3270,11 +3454,12 @@ function Dashboard() {
 					per_page: 9999,
 					search: '',
 					type: 'all',
-					status: 'all',
+					status: 'published', // Фильтруем только опубликованные
 				},
 			});
 			const allPubs = pubResponse.data.publications || [];
-			setPublishedPublications(allPubs.filter(pub => pub.status === 'published'));
+			setPublishedPublications(allPubs);
+			setFilteredPublishedPublications(allPubs);
 			return allPubs;
 		} catch (err) {
 			console.error('Ошибка загрузки всех публикаций:', err);
@@ -3335,8 +3520,14 @@ function Dashboard() {
 			});
 			const sortedPlans = (response.data.plans || []).map(plan => ({
 				...plan,
-				isSaved: true, // Планы с сервера считаются сохранёнными
+				isSaved: true,
+				entries: plan.entries.map(entry => ({
+					...entry,
+					publication_id: entry.publication_id || null,
+					isPostApproval: entry.isPostApproval || false, // Устанавливаем false для старых записей, если не указано
+				})),
 			})).sort((a, b) => b.year - a.year);
+			console.log('Обновлённые планы:', sortedPlans); // Логируем для проверки
 			setPlans(sortedPlans);
 			setPlanPage(page);
 			const total = response.data.total || 0;
@@ -3348,7 +3539,6 @@ function Dashboard() {
 			setOpenError(true);
 		}
 	};
-
 	const updateAnalytics = (allPublications) => {
 		const types = { article: 0, monograph: 0, conference: 0 };
 		const statuses = { draft: 0, needs_review: 0, published: 0 };
@@ -3377,6 +3567,7 @@ function Dashboard() {
 	useEffect(() => {
 		fetchData(1, searchQuery, filterType, filterStatus);
 		fetchPlans(1);
+		fetchAllPublications(); // Добавляем вызов 
 	}, [navigate, searchQuery, filterType, filterStatus]);
 
 	const currentPublications = filteredPublications;
@@ -3393,8 +3584,6 @@ function Dashboard() {
 		setOpenChangePasswordDialog(true);
 		setCurrentPassword('');
 		setNewPassword('');
-		setPasswordError('');
-		setPasswordSuccess('');
 		setShowCurrentPassword(false);
 		setShowNewPassword(false);
 	};
@@ -3416,9 +3605,10 @@ function Dashboard() {
 				}
 			);
 
-			setPasswordSuccess('Пароль успешно обновлен!');
-			setPasswordError('');
-			setOpenChangePasswordDialog(false);
+			setSuccess('Пароль успешно обновлен!'); // Устанавливаем глобальное состояние успеха
+			setOpenSuccess(true); // Показываем уведомление
+			setError(''); // Сбрасываем ошибку
+			setOpenChangePasswordDialog(false); // Закрываем диалог
 			setCurrentPassword('');
 			setNewPassword('');
 			setShowCurrentPassword(false);
@@ -3426,13 +3616,14 @@ function Dashboard() {
 		} catch (err) {
 			console.error('Ошибка изменения пароля:', err);
 			if (err.response) {
-				setPasswordError(
+				setError(
 					`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные данные.'}`
-				);
+				); // Устанавливаем глобальное состояние ошибки
 			} else {
-				setPasswordError('Ошибка сети. Проверьте подключение и сервер.');
+				setError('Ошибка сети. Проверьте подключение и сервер.');
 			}
-			setPasswordSuccess('');
+			setOpenError(true); // Показываем уведомление об ошибке
+			setSuccess(''); // Сбрасываем успех
 		}
 	};
 
@@ -3440,8 +3631,7 @@ function Dashboard() {
 		setOpenChangePasswordDialog(false);
 		setCurrentPassword('');
 		setNewPassword('');
-		setPasswordError('');
-		setPasswordSuccess('');
+
 		setShowCurrentPassword(false);
 		setShowNewPassword(false);
 	};
@@ -3454,15 +3644,7 @@ function Dashboard() {
 		setShowNewPassword(!showNewPassword);
 	};
 
-	useEffect(() => {
-		if (passwordError || passwordSuccess) {
-			const timer = setTimeout(() => {
-				setPasswordError('');
-				setPasswordSuccess('');
-			}, 5000);
-			return () => clearTimeout(timer);
-		}
-	}, [passwordError, passwordSuccess]);
+
 
 	const handleFileUpload = async (e) => {
 		e.preventDefault();
@@ -3749,13 +3931,18 @@ function Dashboard() {
 					headers: { 'X-CSRFToken': csrfToken },
 				}
 			);
+			// Обновляем данные пользователя в контексте
+			setUser({
+				...user,
+				last_name: response.data.user.last_name,
+				first_name: response.data.user.first_name,
+				middle_name: response.data.user.middle_name,
+			});
+			// Устанавливаем сообщение об успехе для отображения в карточке
 			setSuccess('Личные данные успешно обновлены!');
 			setOpenSuccess(true);
 			setError('');
-			setEditLastName(response.data.user.last_name);
-			setEditFirstName(response.data.user.first_name);
-			setEditMiddleName(response.data.user.middle_name);
-			setOpenEditUserDialog(false);
+			setOpenEditUserDialog(false); // Закрываем диалог сразу после успешного сохранения
 		} catch (err) {
 			console.error('Ошибка редактирования данных:', err.response?.data || err);
 			if (err.response) {
@@ -3979,8 +4166,15 @@ function Dashboard() {
 				plan.id === planId
 					? {
 						...plan,
-						expectedCount: plan.expectedCount + 1,
-						entries: [...plan.entries, { title: '', type: 'article', status: 'planned' }],
+						entries: [
+							...plan.entries,
+							{
+								title: '',
+								type: 'article',
+								status: 'planned',
+								isPostApproval: true // Новая запись после утверждения
+							},
+						],
 					}
 					: plan
 			)
@@ -3993,7 +4187,6 @@ function Dashboard() {
 				plan.id === planId
 					? {
 						...plan,
-						expectedCount: plan.expectedCount - 1,
 						entries: plan.entries.filter((_, i) => i !== index),
 						isSaved: false,
 					}
@@ -4001,18 +4194,20 @@ function Dashboard() {
 			)
 		);
 	};
-
 	const handleSavePlan = async (plan) => {
 		try {
 			await refreshCsrfToken();
 			const planData = {
 				year: plan.year,
-				expectedCount: plan.entries.length,
+				expectedCount: plan.expectedCount,
 				fillType: 'manual',
 				entries: plan.entries.map(entry => ({
+					id: entry.id || undefined, // Сохраняем id для существующих записей
 					title: entry.title || '',
 					type: entry.type || 'article',
-					status: 'planned',
+					status: entry.status || 'planned',
+					publication_id: entry.publication_id || null,
+					isPostApproval: entry.isPostApproval || false, // Сохраняем флаг
 				})),
 			};
 			console.log('Saving plan with:', planData);
@@ -4029,7 +4224,7 @@ function Dashboard() {
 			setEditingPlanId(null);
 			setPlans(prevPlans =>
 				prevPlans.map(p =>
-					p.id === plan.id ? { ...p, entries: planData.entries, isSaved: true } : p
+					p.id === plan.id ? { ...p, entries: response.data.plan.entries, isSaved: true } : p
 				)
 			);
 			await fetchPlans(planPage);
@@ -4108,6 +4303,110 @@ function Dashboard() {
 		}
 		setOpenDeleteDialog(false);
 		setPlanToDelete(null);
+	};
+
+	const handleLinkSearch = (query) => {
+		setLinkSearchQuery(query);
+
+		// Собираем все publication_id из записей всех планов
+		const linkedPublicationIds = new Set(
+			plans.flatMap(plan =>
+				plan.entries
+					.filter(entry => entry.publication_id)
+					.map(entry => entry.publication_id)
+			)
+		);
+
+		// Фильтруем публикации, исключая уже привязанные
+		const availablePublications = publishedPublications.filter(
+			pub => !linkedPublicationIds.has(pub.id)
+		);
+
+		// Применяем поиск по отфильтрованным данным
+		const filtered = availablePublications.filter(
+			(pub) =>
+				pub.title.toLowerCase().includes(query.toLowerCase()) ||
+				pub.authors.toLowerCase().includes(query.toLowerCase())
+		);
+		setFilteredPublishedPublications(filtered);
+	};
+
+	const handleOpenLinkDialog = (planId, entry) => {
+		// Собираем все publication_id из записей всех планов
+		const linkedPublicationIds = new Set(
+			plans.flatMap(plan =>
+				plan.entries
+					.filter(entry => entry.publication_id) // Фильтруем записи с publication_id
+					.map(entry => entry.publication_id)
+			)
+		);
+
+		// Фильтруем только те публикации, которые ещё не привязаны
+		const availablePublications = publishedPublications.filter(
+			pub => !linkedPublicationIds.has(pub.id)
+		);
+
+		setSelectedPlanEntry({ planId, ...entry });
+		setLinkDialogOpen(true);
+		setLinkSearchQuery('');
+		setFilteredPublishedPublications(availablePublications);
+	};
+
+	// Функция привязки публикации
+	const handleLinkPublication = async (planId, entryId, publicationId) => {
+		try {
+			await refreshCsrfToken();
+			console.log('Отправка запроса привязки:', { planId, entryId, publicationId });
+			const response = await axios.post(
+				`http://localhost:5000/api/plans/${planId}/entries/${entryId}/link`,
+				{ publication_id: publicationId },
+				{
+					withCredentials: true,
+					headers: {
+						'X-CSRFToken': csrfToken,
+						'Content-Type': 'application/json',
+					},
+				}
+			);
+			console.log('Ответ сервера:', response.data);
+			setSuccess('Публикация успешно привязана!');
+			setOpenSuccess(true);
+			await Promise.all([fetchPlans(planPage), fetchAllPublications()]);
+			setLinkDialogOpen(false);
+		} catch (err) {
+			console.error('Ошибка привязки:', err.response?.data || err.message);
+			setError(err.response?.data?.error || 'Не удалось привязать публикацию.');
+			setOpenError(true);
+		}
+	};
+
+
+	// Функция отвязки публикации
+	const handleUnlinkPublication = async (planId, entryId) => {
+		try {
+			await refreshCsrfToken();
+			await axios.post(
+				`http://localhost:5000/api/plans/${planId}/entries/${entryId}/unlink`,
+				{},
+				{
+					withCredentials: true,
+					headers: { 'X-CSRFToken': csrfToken },
+				}
+			);
+			setSuccess('Публикация успешно отвязана!');
+			setOpenSuccess(true);
+			fetchPlans(planPage);
+		} catch (err) {
+			setError(err.response?.data?.error || 'Не удалось отвязать публикацию.');
+			setOpenError(true);
+		}
+	};
+
+	// Функция вычисления прогресса выполнения плана
+	const calculateProgress = (plan) => {
+		const completed = plan.entries.filter((entry) => entry.publication_id).length;
+		const total = plan.expectedCount;
+		return total > 0 ? (completed / total) * 100 : 0;
 	};
 
 	const handlePlanEntryChange = (planId, index, field, value) => {
@@ -4226,10 +4525,45 @@ function Dashboard() {
 												<Typography variant="body1" sx={{ color: '#1D1D1F', mb: 2 }}>
 													Логин: {user.username}
 												</Typography>
-												<Box sx={{ display: 'flex', gap: 2 }}>
+												<Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
 													<AppleButton onClick={handleEditUserClick}>Редактировать данные</AppleButton>
 													<AppleButton onClick={handleChangePasswordClick}>Изменить пароль</AppleButton>
 												</Box>
+												{/* Добавляем уведомление об успехе или ошибке внизу карточки */}
+												<Collapse in={openSuccess}>
+													{success && (
+														<Alert
+															severity="success"
+															sx={{
+																mt: 2,
+																borderRadius: '12px',
+																backgroundColor: '#E7F8E7',
+																color: '#1D1D1F',
+																boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+															}}
+															onClose={() => setOpenSuccess(false)}
+														>
+															{success}
+														</Alert>
+													)}
+												</Collapse>
+												<Collapse in={openError}>
+													{error && (
+														<Alert
+															severity="error"
+															sx={{
+																mt: 2,
+																borderRadius: '12px',
+																backgroundColor: '#FFF1F0',
+																color: '#1D1D1F',
+																boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+															}}
+															onClose={() => setOpenError(false)}
+														>
+															{error}
+														</Alert>
+													)}
+												</Collapse>
 											</Box>
 										) : (
 											<Typography sx={{ color: '#6E6E73' }}>Данные пользователя не найдены.</Typography>
@@ -4757,217 +5091,335 @@ function Dashboard() {
 							)}
 
 							{value === 3 && (
-								<Box sx={{ mt: 4 }}>
-									<Typography
-										variant="h5"
-										gutterBottom
-										sx={{
-											mt: 4,
-											color: '#1D1D1F',
-											fontWeight: 600,
-											textAlign: 'center',
-										}}
-									>
-										Планы публикаций
-									</Typography>
-									<AppleButton onClick={() => setOpenCreatePlanDialog(true)} sx={{ mt: 2, mb: 4 }}>
-										Создать план
-									</AppleButton>
-									{plans.length > 0 ? (
-										plans.map((plan) => (
-											<PlanTable key={plan.id} sx={{ mb: 4 }}>
-												<TableHead>
-													<TableRow sx={{ backgroundColor: '#0071E3' }}>
-														<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
-														<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
-														<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Ожидаемые публикации</TableCell>
-														<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
-														<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>
-															Действия
-														</TableCell>
-													</TableRow>
-												</TableHead>
-												<TableBody>
-													<TableRow
-														sx={{
-															'&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' },
-															borderBottom: '2px solid #E5E5EA',
-														}}
-													>
-														<TableCell sx={{ color: '#1D1D1F' }}>{plan.id}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{plan.year}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{plan.expectedCount}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
+								<>
+									<Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+										<Typography
+											variant="h5"
+											sx={{
+												color: '#1D1D1F',
+												fontWeight: 600,
+											}}
+										>
+											Ваши планы
+										</Typography>
+										<AppleButton
+											startIcon={<AddIcon />}
+											onClick={() => setOpenCreatePlanDialog(true)}
+										>
+											Создать план
+										</AppleButton>
+									</Box>
+
+									{plans.map((plan) => {
+										// Сортировка записей плана
+										const sortedEntries = [...plan.entries].sort((a, b) => {
+											// Сначала сортируем по наличию publication_id (с публикациями выше)
+											if (a.publication_id && !b.publication_id) return -1;
+											if (!a.publication_id && b.publication_id) return 1;
+											// Если оба с publication_id или оба без, сортируем по времени создания (позже добавленные ниже)
+											// Если нет created_at, используем порядок в массиве (предполагаем, что новые добавляются в конец)
+											return (b.created_at || 0) - (a.created_at || 0); // Если created_at нет, используем 0
+										});
+
+										// Разделяем на утвержденные (до утверждения) и дополнительные (после утверждения)
+										const preApprovalEntries = sortedEntries.filter(entry => !entry.isPostApproval);
+										const postApprovalEntries = sortedEntries.filter(entry => entry.isPostApproval);
+
+										return (
+											<Accordion
+												key={plan.id}
+												sx={{
+													mb: 2,
+													borderRadius: '16px',
+													boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+												}}
+											>
+												<AccordionSummary expandIcon={<ExpandMoreIcon />}>
+													<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+														<Typography variant="h6" sx={{ color: '#1D1D1F' }}>
+															План на {plan.year} год (Ожидаемое количество: {plan.expectedCount} | Текущее количество: {plan.entries.length})
+														</Typography>
+														<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
 															<StatusChip status={plan.status} />
-														</TableCell>
-														<TableCell sx={{ textAlign: 'center' }}>
-															<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-																{(plan.status === 'draft' || plan.status === 'returned') && (
-																	<>
-																		<IconButton
-																			aria-label="edit"
-																			onClick={() => handleEditPlanClick(plan.id)}
-																			sx={{
-																				color: '#0071E3',
-																				borderRadius: '8px',
-																				'&:hover': {
-																					color: '#FFFFFF',
-																					backgroundColor: '#0071E3',
-																					boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																				},
-																			}}
-																		>
-																			<EditIcon />
-																		</IconButton>
-																		<IconButton
-																			aria-label="delete"
-																			onClick={() => handleDeletePlanClick(plan)}
-																			sx={{
-																				color: '#0071E3',
-																				borderRadius: '8px',
-																				'&:hover': {
-																					color: '#FFFFFF',
-																					backgroundColor: '#0071E3',
-																					boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																				},
-																			}}
-																		>
-																			<DeleteIcon />
-																		</IconButton>
-																		{plan.isSaved && areAllTitlesFilled(plan) && (
-																			<IconButton
-																				aria-label="submit-for-review"
-																				onClick={() => handleSubmitPlanForReview(plan)}
-																				sx={{
-																					color: 'green',
-																					borderRadius: '8px',
-																					'&:hover': {
-																						color: '#FFFFFF',
-																						backgroundColor: 'green',
-																						boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																					},
-																				}}
-																			>
-																				<PublishIcon />
-																			</IconButton>
-																		)}
-																	</>
-																)}
-															</Box>
-														</TableCell>
-													</TableRow>
-													{plan.entries.map((entry, index) => (
-														<TableRow key={`${plan.id}-${index}`}>
-															<TableCell sx={{ color: '#1D1D1F', pl: 4 }}>{index + 1}</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>
-																<AppleTextField
-																	fullWidth
-																	value={entry.title}
-																	onChange={(e) => handlePlanEntryChange(plan.id, index, 'title', e.target.value)}
-																	disabled={editingPlanId !== plan.id || (plan.status !== 'draft' && plan.status !== 'returned')}
-																	variant="outlined"
-																	sx={{ backgroundColor: editingPlanId === plan.id && (plan.status === 'draft' || plan.status === 'returned') ? '#FFFFFF' : '#F5F5F7' }}
-																/>
-															</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>
-																<AppleTextField
-																	fullWidth
-																	select
-																	value={entry.type}
-																	onChange={(e) => handlePlanEntryChange(plan.id, index, 'type', e.target.value)}
-																	disabled={editingPlanId !== plan.id || (plan.status !== 'draft' && plan.status !== 'returned')}
-																	variant="outlined"
-																	sx={{ backgroundColor: editingPlanId === plan.id && (plan.status === 'draft' || plan.status === 'returned') ? '#FFFFFF' : '#F5F5F7' }}
-																>
-																	<MenuItem value="article">Статья</MenuItem>
-																	<MenuItem value="monograph">Монография</MenuItem>
-																	<MenuItem value="conference">Доклад/конференция</MenuItem>
-																</AppleTextField>
-															</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>
-																<StatusChip status={entry.status} />
-															</TableCell>
-															<TableCell sx={{ textAlign: 'center' }}>
-																{editingPlanId === plan.id && (plan.status === 'draft' || plan.status === 'returned') && (
+															{(plan.status === 'draft' || plan.status === 'returned') && (
+																<>
 																	<IconButton
-																		aria-label="delete-entry"
-																		onClick={() => handleDeletePlanEntry(plan.id, index)}
-																		sx={{
-																			color: '#FF3B30',
-																			borderRadius: '8px',
-																			'&:hover': {
-																				color: '#FFFFFF',
-																				backgroundColor: '#FF3B30',
-																				boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																			},
+																		onClick={(e) => {
+																			e.stopPropagation();
+																			handleEditPlanClick(plan.id);
 																		}}
+																		sx={{ color: '#0071E3' }}
+																	>
+																		<EditIcon />
+																	</IconButton>
+																	<IconButton
+																		onClick={(e) => {
+																			e.stopPropagation();
+																			handleDeletePlanClick(plan);
+																		}}
+																		sx={{ color: '#FF3B30' }}
 																	>
 																		<DeleteIcon />
 																	</IconButton>
-																)}
-															</TableCell>
-														</TableRow>
-													))}
-													{plan.status === 'returned' && plan.return_comment && (
-														<TableRow>
-															<TableCell colSpan={5} sx={{ pl: 4, color: '#1D1D1F' }}>
-																<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-																	<WarningAmberIcon sx={{ color: '#FF3B30' }} />
-																	<Typography variant="body2" sx={{ color: '#1D1D1F' }}>
-																		Комментарий: {plan.return_comment}
-																	</Typography>
-																</Box>
-															</TableCell>
-														</TableRow>
-													)}
-													{editingPlanId === plan.id && (plan.status === 'draft' || plan.status === 'returned') && (
+																	<IconButton
+																		onClick={(e) => {
+																			e.stopPropagation();
+																			handleSubmitPlanForReview(plan);
+																		}}
+																		sx={{ color: '#0071E3' }}
+																		disabled={!areAllTitlesFilled(plan)}
+																		title={areAllTitlesFilled(plan) ? 'Отправить на проверку' : 'Заполните все заголовки'}
+																	>
+																		<PublishIcon />
+																	</IconButton>
+																</>
+															)}
+														</Box>
+													</Box>
+												</AccordionSummary>
+												<AccordionDetails>
+													{editingPlanId === plan.id ? (
 														<>
-															<TableRow>
-																<TableCell colSpan={5} sx={{ textAlign: 'center', py: 1 }}>
-																	<AppleButton onClick={() => handleAddPlanEntry(plan.id)} sx={{ mt: 1 }}>
-																		<AddIcon sx={{ mr: 1 }} /> Добавить запись
-																	</AppleButton>
-																</TableCell>
-															</TableRow>
-															<TableRow>
-																<TableCell colSpan={5} sx={{ textAlign: 'right', py: 1 }}>
-																	<AppleButton onClick={() => handleSavePlan(plan)} sx={{ mt: 1, mr: 2 }}>
-																		Сохранить
-																	</AppleButton>
-																	{plan.isSaved && areAllTitlesFilled(plan) && (
-																		<GreenButton onClick={() => handleSubmitPlanForReview(plan)} sx={{ mt: 1 }}>
-																			Отправить на проверку
-																		</GreenButton>
+															<PlanTable>
+																<TableHead>
+																	<TableRow>
+																		<TableCell>Название</TableCell>
+																		<TableCell>Тип</TableCell>
+																		<TableCell>Статус</TableCell>
+																		<TableCell>Действия</TableCell>
+																	</TableRow>
+																</TableHead>
+																<TableBody>
+																	{plan.entries.map((entry, index) => (
+																		<TableRow key={index}>
+																			<TableCell>
+																				<AppleTextField
+																					value={entry.title}
+																					onChange={(e) => handlePlanEntryChange(plan.id, index, 'title', e.target.value)}
+																					fullWidth
+																					variant="outlined"
+																				/>
+																			</TableCell>
+																			<TableCell>
+																				<AppleTextField
+																					select
+																					value={entry.type}
+																					onChange={(e) => handlePlanEntryChange(plan.id, index, 'type', e.target.value)}
+																					fullWidth
+																					variant="outlined"
+																				>
+																					<MenuItem value="article">Статья</MenuItem>
+																					<MenuItem value="monograph">Монография</MenuItem>
+																					<MenuItem value="conference">Доклад/конференция</MenuItem>
+																				</AppleTextField>
+																			</TableCell>
+																			<TableCell>
+																				<StatusChip status={entry.status} />
+																			</TableCell>
+																			<TableCell>
+																				<IconButton
+																					onClick={() => handleDeletePlanEntry(plan.id, index)}
+																					sx={{ color: '#FF3B30' }}
+																				>
+																					<DeleteIcon />
+																				</IconButton>
+																			</TableCell>
+																		</TableRow>
+																	))}
+																</TableBody>
+															</PlanTable>
+															<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+																<AppleButton
+																	startIcon={<AddIcon />}
+																	onClick={() => handleAddPlanEntry(plan.id)}
+																>
+																	Добавить запись
+																</AppleButton>
+																<GreenButton
+																	startIcon={<SaveIcon />}
+																	onClick={() => handleSavePlan(plan)}
+																	disabled={!areAllTitlesFilled(plan)}
+																>
+																	Сохранить
+																</GreenButton>
+															</Box>
+														</>
+													) : (
+														<>
+															<Typography sx={{ mb: 1 }}>Прогресс выполнения:</Typography>
+															<Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+																<LinearProgress
+																	variant="determinate"
+																	value={Math.min(calculateProgress(plan), 100)}
+																	sx={{
+																		height: 8,
+																		borderRadius: 4,
+																		flexGrow: 1,
+																		backgroundColor: '#E5E5EA',
+																		'& .MuiLinearProgress-bar': { backgroundColor: '#34C759' },
+																	}}
+																/>
+																<Typography
+																	variant="body2"
+																	sx={{
+																		minWidth: '50px',
+																		textAlign: 'right',
+																		color: calculateProgress(plan) > 100 ? '#FF9500' : '#1D1D1F',
+																	}}
+																>
+																	{Math.round(calculateProgress(plan))}%
+																</Typography>
+															</Box>
+															<PlanTable>
+																<TableHead>
+																	<TableRow>
+																		<TableCell>Название</TableCell>
+																		<TableCell>Тип</TableCell>
+																		<TableCell>Статус</TableCell>
+																		<TableCell>Привязанная публикация</TableCell>
+																		{plan.status === 'approved' && <TableCell>Действия</TableCell>}
+																	</TableRow>
+																</TableHead>
+																<TableBody>
+																	{/* Утверждённые работы (до утверждения плана) */}
+																	{preApprovalEntries.map((entry) => (
+																		<TableRow key={entry.id}>
+																			<TableCell>{entry.title}</TableCell>
+																			<TableCell>{entry.type}</TableCell>
+																			<TableCell><StatusChip status={entry.status} /></TableCell>
+																			<TableCell>
+																				{entry.publication_id ? (
+																					<Typography
+																						sx={{
+																							color: '#0071E3',
+																							textDecoration: 'underline',
+																							cursor: 'pointer',
+																							'&:hover': { textDecoration: 'none' },
+																						}}
+																						onClick={() => navigate(`/publication/${entry.publication_id}`)}
+																					>
+																						{publishedPublications.find(pub => pub.id === entry.publication_id)?.title || 'Неизвестно'}
+																					</Typography>
+																				) : (
+																					'Не привязана'
+																				)}
+																			</TableCell>
+																			{plan.status === 'approved' && (
+																				<TableCell>
+																					{entry.publication_id ? (
+																						<IconButton
+																							onClick={() => handleUnlinkPublication(plan.id, entry.id)}
+																							sx={{ color: '#FF3B30' }}
+																							title="Отвязать публикацию"
+																						>
+																							<UnlinkIcon />
+																						</IconButton>
+																					) : (
+																						<IconButton
+																							onClick={() => handleOpenLinkDialog(plan.id, entry)}
+																							sx={{ color: '#0071E3' }}
+																							title="Привязать публикацию"
+																						>
+																							<LinkIcon />
+																						</IconButton>
+																					)}
+																				</TableCell>
+																			)}
+																		</TableRow>
+																	))}
+																	{/* Дополнительные работы (после утверждения) */}
+																	{postApprovalEntries.length > 0 && (
+																		<TableRow>
+																			<TableCell colSpan={5} sx={{ fontWeight: 600, color: '#6E6E73', padding: '16px 20px' }}>
+																				Дополнительные работы (добавлены после утверждения)
+																			</TableCell>
+																		</TableRow>
 																	)}
-																</TableCell>
-															</TableRow>
+																	{postApprovalEntries.map((entry) => (
+																		<TableRow key={entry.id}>
+																			<TableCell>{entry.title}</TableCell>
+																			<TableCell>{entry.type}</TableCell>
+																			<TableCell><StatusChip status={entry.status} /></TableCell>
+																			<TableCell>
+																				{entry.publication_id ? (
+																					<Typography
+																						sx={{
+																							color: '#0071E3',
+																							textDecoration: 'underline',
+																							cursor: 'pointer',
+																							'&:hover': { textDecoration: 'none' },
+																						}}
+																						onClick={() => navigate(`/publication/${entry.publication_id}`)}
+																					>
+																						{publishedPublications.find(pub => pub.id === entry.publication_id)?.title || 'Неизвестно'}
+																					</Typography>
+																				) : (
+																					'Не привязана'
+																				)}
+																			</TableCell>
+																			{plan.status === 'approved' && (
+																				<TableCell>
+																					{entry.publication_id ? (
+																						<IconButton
+																							onClick={() => handleUnlinkPublication(plan.id, entry.id)}
+																							sx={{ color: '#FF3B30' }}
+																							title="Отвязать публикацию"
+																						>
+																							<UnlinkIcon />
+																						</IconButton>
+																					) : (
+																						<IconButton
+																							onClick={() => handleOpenLinkDialog(plan.id, entry)}
+																							sx={{ color: '#0071E3' }}
+																							title="Привязать публикацию"
+																						>
+																							<LinkIcon />
+																						</IconButton>
+																					)}
+																				</TableCell>
+																			)}
+																		</TableRow>
+																	))}
+																</TableBody>
+															</PlanTable>
+															{plan.status === 'approved' && (
+																<AppleButton
+																	startIcon={<AddIcon />}
+																	onClick={() => handleEditPlanClick(plan.id)}
+																	sx={{ mt: 2 }}
+																>
+																	Добавить запись
+																</AppleButton>
+															)}
+															{plan.return_comment && plan.status !== 'approved' && (
+																<Typography
+																	sx={{
+																		mt: 2,
+																		color: '#000000',
+																		fontWeight: 600,
+																		display: 'flex',
+																		alignItems: 'center',
+																		gap: 1,
+																	}}
+																>
+																	<WarningAmberIcon sx={{ color: '#FF3B30' }} />
+																	Комментарий при возврате: {plan.return_comment}
+																</Typography>
+															)}
 														</>
 													)}
-												</TableBody>
-											</PlanTable>
-										))
-									) : (
-										<Typography sx={{ color: '#6E6E73', textAlign: 'center', mt: 4 }}>
-											У вас ещё нет ни одного плана. Нажмите "Создать план", чтобы добавить новый план публикаций.
-										</Typography>
-									)}
-									<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-										<Pagination
-											count={planTotalPages}
-											page={planPage}
-											onChange={handlePlanPageChange}
-											color="primary"
-											sx={{
-												'& .MuiPaginationItem-root': {
-													borderRadius: 20,
-													transition: 'all 0.3s ease',
-													'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
-													'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
-												},
-											}}
-										/>
-									</Box>
-								</Box>
+												</AccordionDetails>
+											</Accordion>
+										);
+									})}
+
+									<Pagination
+										count={planTotalPages}
+										page={planPage}
+										onChange={handlePlanPageChange}
+										sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}
+									/>
+								</>
 							)}
 
 							{value === 4 && (
@@ -5097,34 +5549,6 @@ function Dashboard() {
 								),
 							}}
 						/>
-						<Collapse in={passwordError !== ''}>
-							<Alert
-								severity="error"
-								sx={{
-									mt: 2,
-									borderRadius: '12px',
-									backgroundColor: '#FFF1F0',
-									color: '#1D1D1F',
-									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-								}}
-							>
-								{passwordError}
-							</Alert>
-						</Collapse>
-						<Collapse in={passwordSuccess !== ''}>
-							<Alert
-								severity="success"
-								sx={{
-									mt: 2,
-									borderRadius: '12px',
-									backgroundColor: '#E7F8E7',
-									color: '#1D1D1F',
-									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-								}}
-							>
-								{passwordSuccess}
-							</Alert>
-						</Collapse>
 					</form>
 				</DialogContent>
 				<DialogActions sx={{ p: 2 }}>
@@ -5352,40 +5776,76 @@ function Dashboard() {
 			<Dialog
 				open={openCreatePlanDialog}
 				onClose={() => setOpenCreatePlanDialog(false)}
-				maxWidth="sm"
-				fullWidth
-				PaperProps={{
-					sx: {
-						borderRadius: '16px',
-						boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-						backgroundColor: '#FFFFFF',
-					},
-				}}
+				sx={{ '& .MuiDialog-paper': { borderRadius: '16px', p: 2 } }}
 			>
-				<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600 }}>Создать план</DialogTitle>
+				<DialogTitle>Создать новый план</DialogTitle>
 				<DialogContent>
 					<AppleTextField
-						fullWidth
 						label="Год"
 						type="number"
 						value={newPlan.year}
-						onChange={(e) => setNewPlan({ ...newPlan, year: parseInt(e.target.value, 10) })}
+						onChange={(e) => setNewPlan({ ...newPlan, year: parseInt(e.target.value) || '' })}
+						fullWidth
 						margin="normal"
 						variant="outlined"
 					/>
 					<AppleTextField
-						fullWidth
 						label="Ожидаемое количество публикаций"
 						type="number"
 						value={newPlan.expectedCount}
-						onChange={(e) => setNewPlan({ ...newPlan, expectedCount: parseInt(e.target.value, 10) })}
+						onChange={(e) => setNewPlan({ ...newPlan, expectedCount: parseInt(e.target.value) || 1 })}
+						fullWidth
 						margin="normal"
 						variant="outlined"
 					/>
 				</DialogContent>
-				<DialogActions sx={{ p: 2 }}>
+				<DialogActions>
 					<CancelButton onClick={() => setOpenCreatePlanDialog(false)}>Отмена</CancelButton>
 					<AppleButton onClick={handleCreatePlan}>Создать</AppleButton>
+				</DialogActions>
+			</Dialog>
+			<Dialog
+				open={linkDialogOpen}
+				onClose={() => setLinkDialogOpen(false)}
+				sx={{ '& .MuiDialog-paper': { borderRadius: '16px', p: 2, minWidth: '500px' } }}
+			>
+				<DialogTitle>Привязать публикацию</DialogTitle>
+				<DialogContent>
+					<AppleTextField
+						fullWidth
+						label="Поиск публикации"
+						value={linkSearchQuery}
+						onChange={(e) => handleLinkSearch(e.target.value)}
+						margin="normal"
+						variant="outlined"
+					/>
+					<Table>
+						<TableHead>
+							<TableRow>
+								<TableCell>Название</TableCell>
+								<TableCell>Авторы</TableCell>
+								<TableCell>Действия</TableCell>
+							</TableRow>
+						</TableHead>
+						<TableBody>
+							{filteredPublishedPublications.map((pub) => (
+								<TableRow key={pub.id}>
+									<TableCell>{pub.title}</TableCell>
+									<TableCell>{pub.authors}</TableCell>
+									<TableCell>
+										<AppleButton
+											onClick={() => handleLinkPublication(selectedPlanEntry.planId, selectedPlanEntry.id, pub.id)}
+										>
+											Привязать
+										</AppleButton>
+									</TableCell>
+								</TableRow>
+							))}
+						</TableBody>
+					</Table>
+				</DialogContent>
+				<DialogActions>
+					<CancelButton onClick={() => setLinkDialogOpen(false)}>Отмена</CancelButton>
 				</DialogActions>
 			</Dialog>
 		</Container>
@@ -5393,7 +5853,7 @@ function Dashboard() {
 }
 
 export default Dashboard;
--------------
+----------------
 D:\publication-system\frontend\src\components\Footer.js
 import React from 'react';
 import { Container, Typography, Link, Grid, Box } from '@mui/material';
@@ -5455,7 +5915,7 @@ function Footer() {
 
 export default React.memo(Footer); // Сохраняем React.memo для оптимизации
 
-------------------
+-----------------
 D:\publication-system\frontend\src\components\Header.js
 import React from 'react';
 import { AppBar, Toolbar, Typography, Button, Box } from '@mui/material';
@@ -5590,7 +6050,7 @@ function Header() {
 }
 
 export default Header;
-----------------
+---------------
 D:\publication-system\frontend\src\components\Home.js
 import React, { useState, useEffect, useMemo } from 'react';
 import {
@@ -5909,7 +6369,7 @@ function Home() {
 }
 
 export default Home;
------------------
+----------
 D:\publication-system\frontend\src\components\Layout.js
 import React from 'react';
 import { Outlet, useNavigate } from 'react-router-dom';
@@ -5972,7 +6432,7 @@ function Layout() {
 }
 
 export default Layout;
---------------------
+--------------
 D:\publication-system\frontend\src\components\Login.js
 import React, { useState } from 'react';
 import { TextField, Button, Container, Typography, Box, Card, CardContent, Alert } from '@mui/material';
@@ -5981,123 +6441,117 @@ import { useAuth } from '../contexts/AuthContext';
 import axios from 'axios';
 
 function Login() {
-    const [username, setUsername] = useState('');
-    const [password, setPassword] = useState('');
-    const [error, setError] = useState('');
-    const [isLoading, setIsLoading] = useState(false); // Состояние загрузки
-    const navigate = useNavigate();
-    const { login, updateAuthState, setCsrfToken } = useAuth();
+	const [username, setUsername] = useState('');
+	const [password, setPassword] = useState('');
+	const [error, setError] = useState('');
+	const [isLoading, setIsLoading] = useState(false);
+	const navigate = useNavigate();
+	const { login, setCsrfToken } = useAuth(); // Убираем updateAuthState
 
-    const handleSubmit = async (e) => {
-        e.preventDefault();
-        if (isLoading) return; // Предотвращаем повторные отправки
-        setIsLoading(true);
-        setError('');
+	const handleSubmit = async (e) => {
+		e.preventDefault();
+		if (isLoading) return;
+		setIsLoading(true);
+		setError('');
 
-        try {
-            const response = await axios.post('http://localhost:5000/api/login', {
-                username,
-                password,
-            }, { withCredentials: true });
+		try {
+			const response = await axios.post('http://localhost:5000/api/login', {
+				username,
+				password,
+			}, { withCredentials: true });
 
-            if (response.data.message === 'Успешная авторизация') {
-                const userData = {
-                    id: response.data.user.id,
-                    username: response.data.user.username,
-                    role: response.data.user.role || 'user',
-                    last_name: response.data.user.last_name || '',
-                    first_name: response.data.user.first_name || '',
-                    middle_name: response.data.user.middle_name || '',
-                };
-                localStorage.setItem('user', JSON.stringify(userData));
-                login(userData); // Передаём полный объект userData
-                updateAuthState({
-                    isAuthenticated: true,
-                    role: userData.role,
-                    username: userData.username,
-                    user: userData, // Сохраняем полный объект пользователя
-                });
-                console.log('User logged in, role:', userData.role);
+			if (response.data.message === 'Успешная авторизация') {
+				const userData = {
+					id: response.data.user.id,
+					username: response.data.user.username,
+					role: response.data.user.role || 'user',
+					last_name: response.data.user.last_name || '',
+					first_name: response.data.user.first_name || '',
+					middle_name: response.data.user.middle_name || '',
+				};
+				localStorage.setItem('user', JSON.stringify(userData));
+				login(userData); // Используем только login для обновления состояния
+				console.log('User logged in, role:', userData.role);
 
-                // Получаем CSRF-токен после логина
-                try {
-                    const tokenResponse = await axios.get('http://localhost:5000/api/csrf-token', {
-                        withCredentials: true,
-                    });
-                    setCsrfToken(tokenResponse.data.csrf_token);
-                    console.log('CSRF Token сохранён после логина:', tokenResponse.data.csrf_token);
-                } catch (err) {
-                    console.error('Ошибка получения CSRF-токена после логина:', err);
-                }
+				// Получаем CSRF-токен после логина
+				try {
+					const tokenResponse = await axios.get('http://localhost:5000/api/csrf-token', {
+						withCredentials: true,
+					});
+					setCsrfToken(tokenResponse.data.csrf_token);
+					console.log('CSRF Token сохранён после логина:', tokenResponse.data.csrf_token);
+				} catch (err) {
+					console.error('Ошибка получения CSRF-токена после логина:', err);
+				}
 
-                navigate(userData.role === 'admin' ? '/admin' : '/dashboard', { replace: true });
-            }
-        } catch (err) {
-            if (err.response && err.response.data.error === 'Неверное имя пользователя или пароль') {
-                setError('Неверные учетные данные. Проверьте имя пользователя и пароль.');
-            } else {
-                setError('Произошла ошибка при входе. Попробуйте позже.');
-            }
-            console.error('Login error:', err);
-        } finally {
-            setIsLoading(false); // Сбрасываем состояние загрузки
-        }
-    };
+				navigate(userData.role === 'admin' ? '/admin' : '/dashboard', { replace: true });
+			}
+		} catch (err) {
+			if (err.response && err.response.data.error === 'Неверное имя пользователя или пароль') {
+				setError('Неверные учетные данные. Проверьте имя пользователя и пароль.');
+			} else {
+				setError('Произошла ошибка при входе. Попробуйте позже.');
+			}
+			console.error('Login error:', err);
+		} finally {
+			setIsLoading(false);
+		}
+	};
 
-    return (
-        <Container maxWidth="sm" sx={{ mt: 8 }}>
-            <Card elevation={4} sx={{ p: 4, borderRadius: 16, backgroundColor: 'white', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
-                <CardContent>
-                    <Typography variant="h4" gutterBottom align="center" sx={{ mb: 3, color: '#1976D2' }}>
-                        Вход в Систему Публикаций
-                    </Typography>
-                    {error && (
-                        <Alert severity="error" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setError('')}>
-                            {error}
-                        </Alert>
-                    )}
-                    <form onSubmit={handleSubmit}>
-                        <TextField
-                            fullWidth
-                            label="Логин"
-                            value={username}
-                            onChange={(e) => setUsername(e.target.value)}
-                            margin="normal"
-                            variant="outlined"
-                            sx={{ mb: 2, borderRadius: 8 }}
-                            autoComplete="username"
-                            disabled={isLoading}
-                        />
-                        <TextField
-                            fullWidth
-                            label="Пароль"
-                            type="password"
-                            value={password}
-                            onChange={(e) => setPassword(e.target.value)}
-                            margin="normal"
-                            variant="outlined"
-                            sx={{ borderRadius: 8 }}
-                            autoComplete="current-password"
-                            disabled={isLoading}
-                        />
-                        <Button
-                            type="submit"
-                            variant="contained"
-                            fullWidth
-                            sx={{ mt: 3, py: 1.5, borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
-                            disabled={isLoading}
-                        >
-                            {isLoading ? 'Вход...' : 'Войти'}
-                        </Button>
-                    </form>
-                </CardContent>
-            </Card>
-        </Container>
-    );
+	return (
+		<Container maxWidth="sm" sx={{ mt: 8 }}>
+			<Card elevation={4} sx={{ p: 4, borderRadius: 16, backgroundColor: 'white', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.1)' }}>
+				<CardContent>
+					<Typography variant="h4" gutterBottom align="center" sx={{ mb: 3, color: '#1976D2' }}>
+						Вход в Систему Публикаций
+					</Typography>
+					{error && (
+						<Alert severity="error" sx={{ mb: 2, borderRadius: 8 }} onClose={() => setError('')}>
+							{error}
+						</Alert>
+					)}
+					<form onSubmit={handleSubmit}>
+						<TextField
+							fullWidth
+							label="Логин"
+							value={username}
+							onChange={(e) => setUsername(e.target.value)}
+							margin="normal"
+							variant="outlined"
+							sx={{ mb: 2, borderRadius: 8 }}
+							autoComplete="username"
+							disabled={isLoading}
+						/>
+						<TextField
+							fullWidth
+							label="Пароль"
+							type="password"
+							value={password}
+							onChange={(e) => setPassword(e.target.value)}
+							margin="normal"
+							variant="outlined"
+							sx={{ borderRadius: 8 }}
+							autoComplete="current-password"
+							disabled={isLoading}
+						/>
+						<Button
+							type="submit"
+							variant="contained"
+							fullWidth
+							sx={{ mt: 3, py: 1.5, borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)' } }}
+							disabled={isLoading}
+						>
+							{isLoading ? 'Вход...' : 'Войти'}
+						</Button>
+					</form>
+				</CardContent>
+			</Card>
+		</Container>
+	);
 }
 
 export default Login;
----------------
+-------------
 D:\publication-system\frontend\src\components\ManagerDashboard.js
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -6126,6 +6580,10 @@ import {
 	Fade,
 	MenuItem,
 	Button,
+	Accordion,
+	AccordionSummary,
+	AccordionDetails,
+	LinearProgress,
 } from '@mui/material';
 import { styled } from '@mui/system';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -6135,6 +6593,8 @@ import ReplayIcon from '@mui/icons-material/Replay';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import Visibility from '@mui/icons-material/Visibility';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
@@ -6157,11 +6617,13 @@ const AppleTable = styled(Table)({
 	borderSpacing: '0 8px',
 });
 
-const PlanTable = styled(Table)({
-	borderCollapse: 'separate',
-	borderSpacing: '0 8px',
-	'& td, & th': { border: 'none' },
-});
+const PlanTable = styled(Table)(({ theme }) => ({
+	borderRadius: '16px',
+	overflow: 'hidden',
+	backgroundColor: '#FFFFFF',
+	boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+	marginBottom: '16px',
+}));
 
 const AppleButton = styled(Button)({
 	borderRadius: '12px',
@@ -6235,6 +6697,49 @@ function ManagerDashboard() {
 	const [selectedPlan, setSelectedPlan] = useState(null);
 	const [returnComment, setReturnComment] = useState('');
 
+	const handleDownload = async (fileUrl, fileName) => {
+		// Проверяем, что fileUrl существует и является строкой
+		if (!fileUrl || typeof fileUrl !== 'string' || fileUrl.trim() === '') {
+			console.error('Некорректный fileUrl:', fileUrl);
+			setError('Некорректный URL файла. Обратитесь к администратору.');
+			setOpenError(true);
+			return;
+		}
+
+		// Убеждаемся, что fileUrl начинается с '/', если это относительный путь
+		const normalizedFileUrl = fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`;
+		const fullUrl = `http://localhost:5000${normalizedFileUrl}`;
+		console.log('Попытка скачать файл с URL:', fullUrl);
+
+		try {
+			const response = await axios.get(fullUrl, {
+				responseType: 'blob',
+				withCredentials: true,
+				headers: {
+					'X-CSRFToken': csrfToken,
+				},
+			});
+
+			const blob = new Blob([response.data]);
+			const url = window.URL.createObjectURL(blob);
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = fileName || normalizedFileUrl.split('/').pop();
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+			window.URL.revokeObjectURL(url);
+		} catch (err) {
+			console.error('Ошибка при скачивании файла:', err);
+			if (err.response) {
+				setError(`Ошибка сервера: ${err.response.status}. Не удалось скачать файл.`);
+			} else {
+				setError('Не удалось скачать файл. Проверьте подключение или URL.');
+			}
+			setOpenError(true);
+		}
+	};
+
 	useEffect(() => {
 		if (!isAuthenticated || user.role !== 'manager') navigate('/login');
 		fetchNeedsReviewPublications(currentPageNeedsReview);
@@ -6259,10 +6764,11 @@ function ManagerDashboard() {
 
 	const fetchPlans = async (page) => {
 		try {
-			const response = await axios.get(`http://localhost:5000/admin_api/admin/plans?page=${page}&per_page=10`, {
+			const response = await axios.get(`http://localhost:5000/admin_api/admin/plans/needs-review?page=${page}&per_page=10`, {
 				withCredentials: true,
 				headers: { 'X-CSRFToken': csrfToken },
 			});
+			console.log('Данные планов с сервера:', response.data.plans); // Логируем данные для проверки
 			setPlans(response.data.plans);
 			setTotalPagesPlans(response.data.pages);
 		} catch (err) {
@@ -6417,6 +6923,12 @@ function ManagerDashboard() {
 		}
 	};
 
+	const calculateProgress = (plan) => {
+		const completed = plan.entries.filter((entry) => entry.publication_id).length;
+		const total = plan.expectedCount;
+		return total > 0 ? (completed / total) * 100 : 0;
+	};
+
 	return (
 		<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
 			<AppleCard elevation={4} sx={{ p: 4, borderRadius: '16px', backgroundColor: '#FFFFFF' }}>
@@ -6520,17 +7032,10 @@ function ManagerDashboard() {
 														<TableCell sx={{ color: '#1D1D1F' }}>{pub.user?.full_name || 'Не указан'}</TableCell>
 														<TableCell sx={{ textAlign: 'center' }}>
 															<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-																{pub.file_url && (
+																{pub.file_url && pub.file_url.trim() !== '' && (
 																	<IconButton
 																		aria-label="download"
-																		onClick={() => {
-																			const link = document.createElement('a');
-																			link.href = `http://localhost:5000${pub.file_url}`;
-																			link.download = pub.file_url.split('/').pop();
-																			document.body.appendChild(link);
-																			link.click();
-																			document.body.removeChild(link);
-																		}}
+																		onClick={() => handleDownload(pub.file_url, pub.file_url.split('/').pop())}
 																		sx={{
 																			color: '#0071E3',
 																			borderRadius: '8px',
@@ -6758,79 +7263,92 @@ function ManagerDashboard() {
 								</Typography>
 								{plans.length > 0 ? (
 									plans.map((plan) => (
-										<PlanTable key={plan.id} sx={{ mb: 4 }}>
-											<TableHead>
-												<TableRow sx={{ backgroundColor: '#0071E3' }}>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Ожидаемые публикации</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Пользователь</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
-													<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>
-														Действия
-													</TableCell>
-												</TableRow>
-											</TableHead>
-											<TableBody>
-												<TableRow
-													sx={{
-														'&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' },
-														borderBottom: '2px solid #E5E5EA',
-													}}
-												>
-													<TableCell sx={{ color: '#1D1D1F' }}>{plan.id}</TableCell>
-													<TableCell sx={{ color: '#1D1D1F' }}>{plan.year}</TableCell>
-													<TableCell sx={{ color: '#1D1D1F' }}>{plan.expectedCount}</TableCell>
-													<TableCell sx={{ color: '#1D1D1F' }}>{plan.user?.full_name || 'Не указан'}</TableCell>
-													<TableCell sx={{ color: '#1D1D1F' }}>
-														<StatusChip status={plan.status} />
-													</TableCell>
-													<TableCell sx={{ textAlign: 'center' }}>
-														<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-															{plan.status === 'needs_review' && (
-																<>
-																	<GreenButton
-																		startIcon={<CheckIcon />}
-																		onClick={() => handleApprovePlan(plan)}
-																	>
-																		Утвердить
-																	</GreenButton>
-																	<AppleButton
-																		startIcon={<ReplayIcon />}
-																		onClick={() => handleOpenReturnDialog(plan)}
-																	>
-																		На доработку
-																	</AppleButton>
-																</>
-															)}
+										<Accordion
+											key={plan.id}
+											sx={{
+												mb: 2,
+												borderRadius: '16px',
+												boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+											}}
+										>
+											<AccordionSummary expandIcon={<ExpandMoreIcon />}>
+												<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+													<Box>
+														<Typography variant="h6" sx={{ color: '#1D1D1F' }}>
+															План на {plan.year} год (Ожидаемое количество: {plan.expectedCount} | Текущее количество: {plan.entries.length})
+														</Typography>
+														<Typography variant="body2" sx={{ color: '#6E6E73', mt: 0.5 }}>
+															{plan.user && plan.user.full_name
+																? `${plan.user.full_name} (${plan.user.username || 'логин отсутствует'})`
+																: 'Пользователь не указан'}
+														</Typography>
+													</Box>
+													<StatusChip status={plan.status} />
+												</Box>
+											</AccordionSummary>
+											<AccordionDetails>
+												<>
+													<PlanTable>
+														<TableHead>
+															<TableRow>
+																<TableCell>Название</TableCell>
+																<TableCell>Тип</TableCell>
+																<TableCell>Статус</TableCell>
+															</TableRow>
+														</TableHead>
+														<TableBody>
+															{plan.entries.map((entry) => (
+																<TableRow key={entry.id}>
+																	<TableCell>{entry.title || 'Не указано'}</TableCell>
+																	<TableCell>
+																		{entry.type === 'article'
+																			? 'Статья'
+																			: entry.type === 'monograph'
+																				? 'Монография'
+																				: entry.type === 'conference'
+																					? 'Доклад/конференция'
+																					: entry.type || 'Не указано'}
+																	</TableCell>
+																	<TableCell>
+																		<StatusChip status={entry.status} />
+																	</TableCell>
+																</TableRow>
+															))}
+														</TableBody>
+													</PlanTable>
+													{plan.return_comment && (
+														<Typography
+															sx={{
+																mt: 2,
+																color: '#000000',
+																fontWeight: 600,
+																display: 'flex',
+																alignItems: 'center',
+																gap: 1,
+															}}
+														>
+															<WarningAmberIcon sx={{ color: '#FF3B30' }} />
+															Комментарий при возврате: {plan.return_comment}
+														</Typography>
+													)}
+													{plan.status === 'needs_review' && (
+														<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+															<GreenButton startIcon={<CheckIcon />} onClick={() => handleApprovePlan(plan)}>
+																Утвердить
+															</GreenButton>
+															<AppleButton startIcon={<ReplayIcon />} onClick={() => handleOpenReturnDialog(plan)}>
+																На доработку
+															</AppleButton>
 														</Box>
-													</TableCell>
-												</TableRow>
-											</TableBody>
-										</PlanTable>
+													)}
+												</>
+											</AccordionDetails>
+										</Accordion>
 									))
 								) : (
-									<AppleTable sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
-										<TableHead>
-											<TableRow sx={{ backgroundColor: '#0071E3' }}>
-												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
-												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
-												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Ожидаемые публикации</TableCell>
-												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Пользователь</TableCell>
-												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
-												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>
-													Действия
-												</TableCell>
-											</TableRow>
-										</TableHead>
-										<TableBody>
-											<TableRow>
-												<TableCell colSpan={6} sx={{ textAlign: 'center', color: '#6E6E73' }}>
-													Нет планов для проверки.
-												</TableCell>
-											</TableRow>
-										</TableBody>
-									</AppleTable>
+									<Typography sx={{ textAlign: 'center', color: '#6E6E73', mt: 2 }}>
+										Нет планов для проверки.
+									</Typography>
 								)}
 								<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
 									<Pagination
@@ -6841,9 +7359,8 @@ function ManagerDashboard() {
 										sx={{
 											'& .MuiPaginationItem-root': {
 												borderRadius: 20,
-												transition: 'all 0.3s ease',
-												'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
-												'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
+												'&:hover': { backgroundColor: 'grey.100' },
+												'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white' },
 											},
 										}}
 									/>
@@ -7091,7 +7608,7 @@ function ManagerDashboard() {
 }
 
 export default ManagerDashboard;
------------------
+------------
 D:\publication-system\frontend\src\components\Publication.js
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
@@ -7447,9 +7964,8 @@ function Publication() {
 }
 
 export default Publication;
------------------
+---------
 D:\publication-system\frontend\src\components\Register.js
-
 import React, { useState, useEffect } from 'react';
 import { TextField, Button, Container, Typography, Box, Card, CardContent, Alert } from '@mui/material';
 import { useNavigate } from 'react-router-dom';
@@ -7628,9 +8144,8 @@ function Register() {
 }
 
 export default Register;
--------------------------------
+--------------
 D:\publication-system\frontend\src\components\StatusChip.js
-
 import React from 'react';
 import { Chip } from '@mui/material';
 
@@ -7716,7 +8231,7 @@ export function AuthProvider({ children }) {
 		});
 		return {
 			isAuthenticated: !!storedUser,
-			user: parsedUser || null, // Полный объект пользователя
+			user: parsedUser || null,
 			role: parsedUser?.role || null,
 			csrfToken: storedCsrfToken || null,
 			isLoading: true,
@@ -7741,14 +8256,13 @@ export function AuthProvider({ children }) {
 				};
 				setAuthState({
 					isAuthenticated: true,
-					user: userData, // Полный объект пользователя
+					user: userData,
 					role: userData.role,
 					csrfToken: authState.csrfToken,
 					isLoading: false,
 				});
 				localStorage.setItem('user', JSON.stringify(userData));
 
-				// Обновляем CSRF-токен после успешной проверки
 				const tokenResponse = await axios.get('http://localhost:5000/api/csrf-token', {
 					withCredentials: true,
 				});
@@ -7792,7 +8306,7 @@ export function AuthProvider({ children }) {
 		console.log('AuthContext: Пользователь вошёл:', user);
 		setAuthState({
 			isAuthenticated: true,
-			user: user, // Сохраняем полный объект пользователя
+			user: user,
 			role: user.role,
 			csrfToken: authState.csrfToken,
 			isLoading: false,
@@ -7813,12 +8327,12 @@ export function AuthProvider({ children }) {
 		localStorage.removeItem('csrfToken');
 	};
 
-	const updateAuthState = (newState) => {
-		console.log('AuthContext: Обновление состояния:', newState);
+	const setUser = (newUser) => {
 		setAuthState((prevState) => ({
 			...prevState,
-			...newState,
+			user: newUser,
 		}));
+		localStorage.setItem('user', JSON.stringify(newUser));
 	};
 
 	const setCsrfToken = (token) => {
@@ -7831,7 +8345,7 @@ export function AuthProvider({ children }) {
 	};
 
 	return (
-		<AuthContext.Provider value={{ ...authState, login, logout, updateAuthState, setCsrfToken }}>
+		<AuthContext.Provider value={{ ...authState, login, logout, setUser, setCsrfToken }}>
 			{children}
 		</AuthContext.Provider>
 	);
@@ -7840,9 +8354,75 @@ export function AuthProvider({ children }) {
 export function useAuth() {
 	return useContext(AuthContext);
 }
---------------------
-D:\publication-system\frontend\src\App.js
+----------------------
+D:\publication-system\frontend\src\utils\auth.js
+import axios from 'axios';
 
+const API_BASE = 'http://localhost:5000';
+
+export const makeAuthenticatedRequest = async (url, method = 'POST', data = {}, options = {}) => {
+    try {
+        const fullUrl = url.startsWith('http') ? url : `${API_BASE}${url}`;
+
+        // Получаем CSRF-токен из localStorage
+        const csrfToken = localStorage.getItem('csrfToken') || '';
+
+        console.log('Отправка запроса:', {
+            url: fullUrl,
+            method,
+            headers: {
+                'Content-Type': options.headers?.['Content-Type'] || 'application/json',
+                'X-CSRFToken': csrfToken, // Добавляем CSRF-токен
+                ...options.headers
+            }
+        });
+
+        const response = await axios({
+            method,
+            url: fullUrl,
+            data,
+            withCredentials: true,
+            headers: {
+                'Content-Type': options.headers?.['Content-Type'] || 'application/json',
+                'X-CSRFToken': csrfToken, // Добавляем CSRF-токен в заголовки
+                ...options.headers
+            }
+        });
+
+        console.log('Response from server:', response.data, response.status, response.headers);
+        return response;
+    } catch (err) {
+        console.error('Ошибка в makeAuthenticatedRequest:', err.response?.data || err, err.response?.status, err.response?.headers);
+        throw err;
+    }
+};
+
+export const login = async (username, password) => {
+    try {
+        const response = await makeAuthenticatedRequest('/api/login', 'POST', { username, password });
+        return response.data;
+    } catch (err) {
+        console.error('Ошибка авторизации:', err.response?.data || err);
+        throw err;
+    }
+};
+
+export const logout = async () => {
+    try {
+        const response = await makeAuthenticatedRequest('/api/logout', 'POST');
+        return response.data;
+    } catch (err) {
+        console.error('Ошибка выхода:', err.response?.data || err);
+        throw err;
+    }
+};
+
+export const isAuthenticated = () => {
+    const token = localStorage.getItem('token');
+    return !!token;
+};
+---------------
+D:\publication-system\frontend\src\App.js
 import React from 'react';
 import { Route, Routes, Navigate } from 'react-router-dom';
 import Home from './components/Home';
@@ -7980,7 +8560,7 @@ function App() {
 }
 
 export default App;
-----------------
+-------------------
 D:\publication-system\frontend\src\index.js
 import React from 'react';
 import ReactDOM from 'react-dom/client';
@@ -8001,64 +8581,5 @@ root.render(
 		</AuthProvider>
 	</ThemeProvider>
 );
------------------
-{
-	"name": "frontend",
-	"version": "0.1.0",
-	"private": true,
-	"dependencies": {
-		"@emotion/react": "^11.14.0",
-		"@emotion/styled": "^11.14.0",
-		"@mui/icons-material": "^6.4.5",
-		"@mui/material": "^6.4.5",
-		"@mui/system": "^6.4.3",
-		"@testing-library/dom": "^10.4.0",
-		"@testing-library/jest-dom": "^6.6.3",
-		"@testing-library/react": "^16.2.0",
-		"@testing-library/user-event": "^13.5.0",
-		"axios": "^1.7.9",
-		"buffer": "^6.0.3",
-		"chart.js": "^4.4.8",
-		"docx-preview": "^0.3.4",
-		"mammoth": "^1.9.0",
-		"react": "^18.2.0",
-		"react-chartjs-2": "^5.3.0",
-		"react-dom": "^18.2.0",
-		"react-lazy-load-image-component": "^1.6.3",
-		"react-pdf": "^7.7.0",
-		"react-router-dom": "^7.2.0",
-		"react-scripts": "5.0.1",
-		"web-vitals": "^2.1.4"
-	},
-	"scripts": {
-		"start": "react-app-rewired start",
-		"build": "react-app-rewired build",
-		"test": "react-app-rewired test",
-		"eject": "react-scripts eject"
-	},
-	"eslintConfig": {
-		"extends": [
-			"react-app",
-			"react-app/jest"
-		]
-	},
-	"browserslist": {
-		"production": [
-			">0.2%",
-			"not dead",
-			"not op_mini all"
-		],
-		"development": [
-			"last 1 chrome version",
-			"last 1 firefox version",
-			"last 1 safari version"
-		]
-	},
-	"devDependencies": {
-		"react-app-rewired": "^2.2.1"
-	}
-}
 
-
-Это файлы моего проекта, проанализируй и запомни их для дальнейших манипуляций, также отправляю тебе скриншоты структуры моего проекта. 
 

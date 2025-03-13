@@ -327,7 +327,8 @@ def check_username():
 def generate_password():
     import secrets
     import string
-    characters = string.ascii_letters + string.digits + string.punctuation
+    # Используем только буквы (строчные и заглавные) и цифры
+    characters = string.ascii_letters + string.digits
     password = ''.join(secrets.choice(characters) for _ in range(12))
     return jsonify({'password': password})
 
