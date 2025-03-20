@@ -142,7 +142,28 @@ function ManagerDashboard() {
 	const [selectedPlan, setSelectedPlan] = useState(null);
 	const [returnComment, setReturnComment] = useState('');
 
+	// Эффект для автоматического закрытия уведомлений через 3 секунды
+	useEffect(() => {
+		let errorTimer, successTimer;
 
+		if (openError) {
+			errorTimer = setTimeout(() => {
+				setOpenError(false);
+			}, 3000);
+		}
+
+		if (openSuccess) {
+			successTimer = setTimeout(() => {
+				setOpenSuccess(false);
+			}, 3000);
+		}
+
+		// Очистка таймеров при размонтировании компонента или при изменении состояний
+		return () => {
+			if (errorTimer) clearTimeout(errorTimer);
+			if (successTimer) clearTimeout(successTimer);
+		};
+	}, [openError, openSuccess]);
 
 	const handleDownload = async (fileUrl, fileName) => {
 		// Проверяем, что fileUrl существует и является строкой
@@ -544,7 +565,7 @@ function ManagerDashboard() {
 							</Typography>
 						)}
 
-						{value === 2 && (
+						{value == 2 && (
 							<>
 								<Typography
 									variant="h5"
@@ -746,10 +767,10 @@ function ManagerDashboard() {
 													severity="error"
 													sx={{
 														mt: 2,
-														borderRadius: "12px",
-														backgroundColor: "#FFF1F0",
-														color: "#1D1D1F",
-														boxShadow: "0 2px 4px rgba(0, 0, 0, 0.05)",
+														borderRadius: '12px',
+														backgroundColor: '#FFF1F0',
+														color: '#1D1D1F',
+														boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
 													}}
 													onClose={() => setOpenError(false)}
 												>
@@ -763,10 +784,10 @@ function ManagerDashboard() {
 													severity="success"
 													sx={{
 														mt: 2,
-														borderRadius: "12px",
-														backgroundColor: "#E7F8E7",
-														color: "#1D1D1F",
-														boxShadow: "0 2px 4px rgba(0, 0, 0, 0.05)",
+														borderRadius: '12px',
+														backgroundColor: '#E7F8E7',
+														color: '#1D1D1F',
+														boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
 													}}
 													onClose={() => setOpenSuccess(false)}
 												>
@@ -1089,40 +1110,44 @@ function ManagerDashboard() {
 							</DialogActions>
 						</Dialog>
 
-						<Collapse in={openError}>
-							{error && (
-								<Alert
-									severity="error"
-									sx={{
-										mt: 2,
-										borderRadius: '12px',
-										backgroundColor: '#FFF1F0',
-										color: '#1D1D1F',
-										boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-									}}
-									onClose={() => setOpenError(false)}
-								>
-									{error}
-								</Alert>
-							)}
-						</Collapse>
-						<Collapse in={openSuccess}>
-							{success && (
-								<Alert
-									severity="success"
-									sx={{
-										mt: 2,
-										borderRadius: '12px',
-										backgroundColor: '#E7F8E7',
-										color: '#1D1D1F',
-										boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-									}}
-									onClose={() => setOpenSuccess(false)}
-								>
-									{success}
-								</Alert>
-							)}
-						</Collapse>
+						{value !== 2 && (
+							<>
+								<Collapse in={openError}>
+									{error && (
+										<Alert
+											severity="error"
+											sx={{
+												mt: 2,
+												borderRadius: '12px',
+												backgroundColor: '#FFF1F0',
+												color: '#1D1D1F',
+												boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+											}}
+											onClose={() => setOpenError(false)}
+										>
+											{error}
+										</Alert>
+									)}
+								</Collapse>
+								<Collapse in={openSuccess}>
+									{success && (
+										<Alert
+											severity="success"
+											sx={{
+												mt: 2,
+												borderRadius: '12px',
+												backgroundColor: '#E7F8E7',
+												color: '#1D1D1F',
+												boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+											}}
+											onClose={() => setOpenSuccess(false)}
+										>
+											{success}
+										</Alert>
+									)}
+								</Collapse>
+							</>
+						)}
 					</>
 				)}
 			</AppleCard>
