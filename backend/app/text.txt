@@ -39,7 +39,7 @@ def create_app():
     CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=True)
     # Обработка предварительных запросов
     @app.before_request
-    def handle_preflight():
+    def handle_preflight(
         if request.method == 'OPTIONS':
             response = make_response()
             response.headers['Access-Control-Allow-Origin'] = 'http://localhost:3001'

@@ -45,6 +45,7 @@ import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import StatusChip from './StatusChip';
 
+// Стили остаются без изменений
 const AppleTextField = styled(TextField)({
 	'& .MuiOutlinedInput-root': {
 		borderRadius: '12px',
@@ -106,6 +107,11 @@ const CancelButton = styled(Button)({
 	'&:hover': { backgroundColor: '#C7C7CC', boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)' },
 });
 
+// Регулярное выражение для проверки одного слова ФИО
+const namePartRegex = /^[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?$/;
+// Регулярное выражение для полного ФИО (три слова)
+const fullNameRegex = /^[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?\s[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?\s[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?$/;
+
 function ManagerDashboard() {
 	const { user, csrfToken, isAuthenticated } = useAuth();
 	const navigate = useNavigate();
@@ -142,6 +148,11 @@ function ManagerDashboard() {
 	const [selectedPlan, setSelectedPlan] = useState(null);
 	const [returnComment, setReturnComment] = useState('');
 
+	// Новые состояния для ошибок валидации ФИО
+	const [lastNameError, setLastNameError] = useState('');
+	const [firstNameError, setFirstNameError] = useState('');
+	const [middleNameError, setMiddleNameError] = useState('');
+
 	// Эффект для автоматического закрытия уведомлений через 3 секунды
 	useEffect(() => {
 		let errorTimer, successTimer;
@@ -158,15 +169,53 @@ function ManagerDashboard() {
 			}, 3000);
 		}
 
-		// Очистка таймеров при размонтировании компонента или при изменении состояний
 		return () => {
 			if (errorTimer) clearTimeout(errorTimer);
 			if (successTimer) clearTimeout(successTimer);
 		};
 	}, [openError, openSuccess]);
 
+	// Функция валидации одного слова ФИО
+	const validateNamePart = (value, fieldName) => {
+		if (!value.trim()) {
+			return `${fieldName} обязательно для заполнения.`;
+		}
+		if (!namePartRegex.test(value)) {
+			return `${fieldName} должно начинаться с заглавной буквы, содержать только кириллические символы и быть длиной не менее 2 символов.`;
+		}
+		return '';
+	};
+
+	// Функция валидации полного ФИО
+	const validateFullName = (lastName, firstName, middleName) => {
+		const fullName = `${lastName} ${firstName} ${middleName}`;
+		if (!fullNameRegex.test(fullName)) {
+			return 'ФИО должно быть в формате "Иванов Иван Иванович" (три слова с заглавной буквы, разделённые пробелами).';
+		}
+		return '';
+	};
+
+	// Обработчики изменения полей с валидацией
+	const handleLastNameChange = (e) => {
+		const value = e.target.value;
+		setNewLastName(value);
+		setLastNameError(validateNamePart(value, 'Фамилия'));
+	};
+
+	const handleFirstNameChange = (e) => {
+		const value = e.target.value;
+		setNewFirstName(value);
+		setFirstNameError(validateNamePart(value, 'Имя'));
+	};
+
+	const handleMiddleNameChange = (e) => {
+		const value = e.target.value;
+		setNewMiddleName(value);
+		setMiddleNameError(validateNamePart(value, 'Отчество'));
+	};
+
+	// Остальные функции (handleDownload, fetchNeedsReviewPublications, fetchPlans и т.д.) остаются без изменений
 	const handleDownload = async (fileUrl, fileName) => {
-		// Проверяем, что fileUrl существует и является строкой
 		if (!fileUrl || typeof fileUrl !== 'string' || fileUrl.trim() === '') {
 			console.error('Некорректный fileUrl:', fileUrl);
 			setError('Некорректный URL файла. Обратитесь к администратору.');
@@ -174,7 +223,6 @@ function ManagerDashboard() {
 			return;
 		}
 
-		// Убеждаемся, что fileUrl начинается с '/', если это относительный путь
 		const normalizedFileUrl = fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`;
 		const fullUrl = `http://localhost:5000${normalizedFileUrl}`;
 		console.log('Попытка скачать файл с URL:', fullUrl);
@@ -236,7 +284,6 @@ function ManagerDashboard() {
 				withCredentials: true,
 				headers: { 'X-CSRFToken': csrfToken },
 			});
-			console.log('Данные планов с сервера:', response.data.plans); // Логируем данные для проверки
 			setPlans(response.data.plans);
 			setTotalPagesPlans(response.data.pages);
 		} catch (err) {
@@ -565,7 +612,7 @@ function ManagerDashboard() {
 							</Typography>
 						)}
 
-						{value == 2 && (
+						{value === 2 && (
 							<>
 								<Typography
 									variant="h5"
@@ -580,28 +627,34 @@ function ManagerDashboard() {
 											fullWidth
 											label="Фамилия"
 											value={newLastName}
-											onChange={(e) => setNewLastName(e.target.value)}
+											onChange={handleLastNameChange}
 											margin="normal"
 											variant="outlined"
 											autoComplete="family-name"
+											error={!!lastNameError}
+											helperText={lastNameError}
 										/>
 										<AppleTextField
 											fullWidth
 											label="Имя"
 											value={newFirstName}
-											onChange={(e) => setNewFirstName(e.target.value)}
+											onChange={handleFirstNameChange}
 											margin="normal"
 											variant="outlined"
 											autoComplete="given-name"
+											error={!!firstNameError}
+											helperText={firstNameError}
 										/>
 										<AppleTextField
 											fullWidth
 											label="Отчество"
 											value={newMiddleName}
-											onChange={(e) => setNewMiddleName(e.target.value)}
+											onChange={handleMiddleNameChange}
 											margin="normal"
 											variant="outlined"
 											autoComplete="additional-name"
+											error={!!middleNameError}
+											helperText={middleNameError}
 										/>
 										<AppleTextField
 											fullWidth
@@ -633,14 +686,25 @@ function ManagerDashboard() {
 											<AppleButton
 												startIcon={<RefreshIcon />}
 												onClick={async () => {
-													// Функция генерации логина из AdminDashboard.js
-													const generateUsername = async () => {
-														if (!newLastName || !newFirstName || !newMiddleName) {
-															setError('Для генерации логина необходимо заполнить ФИО.');
-															setOpenError(true);
-															return null;
-														}
+													// Проверка ФИО перед генерацией логина
+													const lastNameErr = validateNamePart(newLastName, 'Фамилия');
+													const firstNameErr = validateNamePart(newFirstName, 'Имя');
+													const middleNameErr = validateNamePart(newMiddleName, 'Отчество');
+													const fullNameErr = validateFullName(newLastName, newFirstName, newMiddleName);
 
+													if (lastNameErr || firstNameErr || middleNameErr || fullNameErr) {
+														setLastNameError(lastNameErr);
+														setFirstNameError(firstNameErr);
+														setMiddleNameError(middleNameErr);
+														if (fullNameErr) {
+															setError(fullNameErr);
+															setOpenError(true);
+														}
+														return;
+													}
+
+													// Функция генерации логина
+													const generateUsername = async () => {
 														const transliterate = (text) => {
 															const ruToEn = {
 																'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd',
@@ -719,17 +783,29 @@ function ManagerDashboard() {
 											<AppleButton
 												type="submit"
 												onClick={async () => {
-													if (
-														!newUsername.trim() ||
-														!newPassword.trim() ||
-														!newLastName.trim() ||
-														!newFirstName.trim() ||
-														!newMiddleName.trim()
-													) {
-														setError("Все поля обязательны.");
+													// Проверка ФИО перед регистрацией
+													const lastNameErr = validateNamePart(newLastName, 'Фамилия');
+													const firstNameErr = validateNamePart(newFirstName, 'Имя');
+													const middleNameErr = validateNamePart(newMiddleName, 'Отчество');
+													const fullNameErr = validateFullName(newLastName, newFirstName, newMiddleName);
+
+													if (lastNameErr || firstNameErr || middleNameErr || fullNameErr) {
+														setLastNameError(lastNameErr);
+														setFirstNameError(firstNameErr);
+														setMiddleNameError(middleNameErr);
+														if (fullNameErr) {
+															setError(fullNameErr);
+															setOpenError(true);
+														}
+														return;
+													}
+
+													if (!newUsername.trim() || !newPassword.trim()) {
+														setError("Логин и пароль обязательны.");
 														setOpenError(true);
 														return;
 													}
+
 													try {
 														await axios.post(
 															"http://localhost:5000/admin_api/admin/register",
@@ -749,6 +825,9 @@ function ManagerDashboard() {
 														setNewMiddleName("");
 														setNewUsername("");
 														setNewPassword("");
+														setLastNameError("");
+														setFirstNameError("");
+														setMiddleNameError("");
 													} catch (err) {
 														console.error("Ошибка регистрации:", err);
 														setError(
