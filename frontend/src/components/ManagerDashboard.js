@@ -107,22 +107,22 @@ const CancelButton = styled(Button)({
 	'&:hover': { backgroundColor: '#C7C7CC', boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)' },
 });
 
-// Регулярное выражение для проверки одного слова ФИО
+// Регулярные выражения для проверки ФИО
 const namePartRegex = /^[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?$/;
-// Регулярное выражение для полного ФИО (три слова)
 const fullNameRegex = /^[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?\s[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?\s[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?$/;
 
 function ManagerDashboard() {
 	const { user, csrfToken, isAuthenticated } = useAuth();
 	const navigate = useNavigate();
 	const [value, setValue] = useState(0);
-	const [needsReviewPublications, setNeedsReviewPublications] = useState([]);
+	const [publications, setPublications] = useState([]); // Все публикации
 	const [plans, setPlans] = useState([]);
-	const [currentPageNeedsReview, setCurrentPageNeedsReview] = useState(1);
+	const [currentPagePublications, setCurrentPagePublications] = useState(1);
 	const [currentPagePlans, setCurrentPagePlans] = useState(1);
-	const [totalPagesNeedsReview, setTotalPagesNeedsReview] = useState(1);
+	const [totalPagesPublications, setTotalPagesPublications] = useState(1);
 	const [totalPagesPlans, setTotalPagesPlans] = useState(1);
 	const [searchQuery, setSearchQuery] = useState('');
+	const [statusFilter, setStatusFilter] = useState('needs_review'); // Фильтр по статусу
 	const [loadingInitial, setLoadingInitial] = useState(true);
 	const [openEditDialog, setOpenEditDialog] = useState(false);
 	const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
@@ -147,55 +147,41 @@ function ManagerDashboard() {
 	const [openReturnDialog, setOpenReturnDialog] = useState(false);
 	const [selectedPlan, setSelectedPlan] = useState(null);
 	const [returnComment, setReturnComment] = useState('');
-
-	// Новые состояния для ошибок валидации ФИО
 	const [lastNameError, setLastNameError] = useState('');
 	const [firstNameError, setFirstNameError] = useState('');
 	const [middleNameError, setMiddleNameError] = useState('');
 
-	// Эффект для автоматического закрытия уведомлений через 3 секунды
+	// Эффект для автоматического закрытия уведомлений
 	useEffect(() => {
 		let errorTimer, successTimer;
-
 		if (openError) {
-			errorTimer = setTimeout(() => {
-				setOpenError(false);
-			}, 3000);
+			errorTimer = setTimeout(() => setOpenError(false), 3000);
 		}
-
 		if (openSuccess) {
-			successTimer = setTimeout(() => {
-				setOpenSuccess(false);
-			}, 3000);
+			successTimer = setTimeout(() => setOpenSuccess(false), 3000);
 		}
-
 		return () => {
 			if (errorTimer) clearTimeout(errorTimer);
 			if (successTimer) clearTimeout(successTimer);
 		};
 	}, [openError, openSuccess]);
 
-	// Функция валидации одного слова ФИО
+	// Валидация ФИО
 	const validateNamePart = (value, fieldName) => {
-		if (!value.trim()) {
-			return `${fieldName} обязательно для заполнения.`;
-		}
-		if (!namePartRegex.test(value)) {
-			return `${fieldName} должно начинаться с заглавной буквы, содержать только кириллические символы и быть длиной не менее 2 символов.`;
-		}
+		if (!value.trim()) return `${fieldName} обязательно для заполнения.`;
+		if (!namePartRegex.test(value))
+			return `${fieldName} должно начинаться с заглавной буквы, содержать только кириллицу и быть длиной не менее 2 символов.`;
 		return '';
 	};
 
-	// Функция валидации полного ФИО
 	const validateFullName = (lastName, firstName, middleName) => {
 		const fullName = `${lastName} ${firstName} ${middleName}`;
-		if (!fullNameRegex.test(fullName)) {
+		if (!fullNameRegex.test(fullName))
 			return 'ФИО должно быть в формате "Иванов Иван Иванович" (три слова с заглавной буквы, разделённые пробелами).';
-		}
 		return '';
 	};
 
-	// Обработчики изменения полей с валидацией
+	// Обработчики изменения полей ФИО
 	const handleLastNameChange = (e) => {
 		const value = e.target.value;
 		setNewLastName(value);
@@ -214,63 +200,23 @@ function ManagerDashboard() {
 		setMiddleNameError(validateNamePart(value, 'Отчество'));
 	};
 
-	// Остальные функции (handleDownload, fetchNeedsReviewPublications, fetchPlans и т.д.) остаются без изменений
-	const handleDownload = async (fileUrl, fileName) => {
-		if (!fileUrl || typeof fileUrl !== 'string' || fileUrl.trim() === '') {
-			console.error('Некорректный fileUrl:', fileUrl);
-			setError('Некорректный URL файла. Обратитесь к администратору.');
-			setOpenError(true);
-			return;
-		}
-
-		const normalizedFileUrl = fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`;
-		const fullUrl = `http://localhost:5000${normalizedFileUrl}`;
-		console.log('Попытка скачать файл с URL:', fullUrl);
-
+	// Загрузка публикаций с учётом фильтра по статусу
+	const fetchPublications = async (page) => {
 		try {
-			const response = await axios.get(fullUrl, {
-				responseType: 'blob',
-				withCredentials: true,
-				headers: {
-					'X-CSRFToken': csrfToken,
-				},
-			});
-
-			const blob = new Blob([response.data]);
-			const url = window.URL.createObjectURL(blob);
-			const link = document.createElement('a');
-			link.href = url;
-			link.download = fileName || normalizedFileUrl.split('/').pop();
-			document.body.appendChild(link);
-			link.click();
-			document.body.removeChild(link);
-			window.URL.revokeObjectURL(url);
-		} catch (err) {
-			console.error('Ошибка при скачивании файла:', err);
-			if (err.response) {
-				setError(`Ошибка сервера: ${err.response.status}. Не удалось скачать файл.`);
-			} else {
-				setError('Не удалось скачать файл. Проверьте подключение или URL.');
-			}
-			setOpenError(true);
-		}
-	};
-
-	useEffect(() => {
-		if (!isAuthenticated || user.role !== 'manager') navigate('/login');
-		fetchNeedsReviewPublications(currentPageNeedsReview);
-		fetchPlans(currentPagePlans);
-		setLoadingInitial(false);
-	}, [isAuthenticated, user, navigate, currentPageNeedsReview, currentPagePlans]);
-
-	const fetchNeedsReviewPublications = async (page) => {
-		try {
-			const response = await axios.get(`http://localhost:5000/admin_api/admin/publications/needs-review?page=${page}&per_page=10&search=${searchQuery}`, {
+			const response = await axios.get(`http://localhost:5000/admin_api/admin/publications`, {
 				withCredentials: true,
 				headers: { 'X-CSRFToken': csrfToken },
+				params: {
+					page,
+					per_page: 10,
+					search: searchQuery,
+					status: ['needs_review', 'returned_for_revision', 'published'].join(','), // Фильтр по допустимым статусам
+					sort_status: statusFilter, // Передаём приоритетный статус для сортировки
+				},
 			});
-			setNeedsReviewPublications(response.data.publications);
-			setTotalPagesNeedsReview(response.data.pages);
+			// Больше не сортируем на клиенте, сервер вернёт уже отсортированные данные
+			setPublications(response.data.publications);
+			setTotalPagesPublications(response.data.pages);
 		} catch (err) {
 			console.error('Ошибка загрузки публикаций:', err);
 			setError('Не удалось загрузить публикации. Попробуйте позже.');
@@ -293,23 +239,64 @@ function ManagerDashboard() {
 		}
 	};
 
+	// Загрузка данных при изменении страницы, статуса или поиска
+	useEffect(() => {
+		if (!isAuthenticated || user.role !== 'manager') navigate('/login');
+		setLoadingInitial(true);
+		fetchPublications(currentPagePublications);
+		fetchPlans(currentPagePlans);
+		setLoadingInitial(false);
+	}, [isAuthenticated, user, navigate, currentPagePublications, currentPagePlans, statusFilter, searchQuery]);
+
 	const handleTabChange = (event, newValue) => {
 		setValue(newValue);
 	};
 
-	const handleSearchChange = (event) => {
-		setSearchQuery(event.target.value);
-		fetchNeedsReviewPublications(1);
+	const handleSearchChange = (e) => {
+		setSearchQuery(e.target.value);
+		setCurrentPagePublications(1); // Сбрасываем страницу при новом поиске
 	};
 
-	const handlePageChangeNeedsReview = (event, value) => {
-		setCurrentPageNeedsReview(value);
-		fetchNeedsReviewPublications(value);
+	const handleStatusFilterChange = (e) => {
+		setStatusFilter(e.target.value);
+		setCurrentPagePublications(1); // Сбрасываем страницу при смене статуса
+	};
+
+	const handlePageChangePublications = (event, value) => {
+		setCurrentPagePublications(value);
 	};
 
 	const handlePageChangePlans = (event, value) => {
 		setCurrentPagePlans(value);
-		fetchPlans(value);
+	};
+
+	const handleDownload = async (fileUrl, fileName) => {
+		if (!fileUrl || typeof fileUrl !== 'string' || fileUrl.trim() === '') {
+			setError('Некорректный URL файла. Обратитесь к администратору.');
+			setOpenError(true);
+			return;
+		}
+		const normalizedFileUrl = fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`;
+		const fullUrl = `http://localhost:5000${normalizedFileUrl}`;
+		try {
+			const response = await axios.get(fullUrl, {
+				responseType: 'blob',
+				withCredentials: true,
+				headers: { 'X-CSRFToken': csrfToken },
+			});
+			const blob = new Blob([response.data]);
+			const url = window.URL.createObjectURL(blob);
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = fileName || normalizedFileUrl.split('/').pop();
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+			window.URL.revokeObjectURL(url);
+		} catch (err) {
+			setError(err.response ? `Ошибка сервера: ${err.response.status}` : 'Не удалось скачать файл.');
+			setOpenError(true);
+		}
 	};
 
 	const handleEditClick = (publication) => {
@@ -343,7 +330,6 @@ function ManagerDashboard() {
 			setOpenError(true);
 			return;
 		}
-
 		const formData = new FormData();
 		formData.append('title', editTitle);
 		formData.append('authors', editAuthors);
@@ -353,16 +339,15 @@ function ManagerDashboard() {
 		if (editFile) formData.append('file', editFile);
 
 		try {
-			const response = await axios.put(`http://localhost:5000/admin_api/admin/publications/${editPublication.id}`, formData, {
+			await axios.put(`http://localhost:5000/admin_api/admin/publications/${editPublication.id}`, formData, {
 				withCredentials: true,
 				headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'multipart/form-data' },
 			});
 			setSuccess('Публикация успешно обновлена!');
 			setOpenSuccess(true);
-			fetchNeedsReviewPublications(currentPageNeedsReview);
+			fetchPublications(currentPagePublications);
 			handleEditCancel();
 		} catch (err) {
-			console.error('Ошибка обновления публикации:', err);
 			setError('Не удалось обновить публикацию. Попробуйте позже.');
 			setOpenError(true);
 		}
@@ -382,11 +367,10 @@ function ManagerDashboard() {
 				});
 				setSuccess('Публикация успешно удалена!');
 				setOpenSuccess(true);
-				fetchNeedsReviewPublications(currentPageNeedsReview);
+				fetchPublications(currentPagePublications);
 				setOpenDeleteDialog(false);
 				setPublicationToDelete(null);
 			} catch (err) {
-				console.error('Ошибка удаления публикации:', err);
 				setError('Не удалось удалить публикацию. Попробуйте позже.');
 				setOpenError(true);
 			}
@@ -403,7 +387,6 @@ function ManagerDashboard() {
 			setOpenSuccess(true);
 			fetchPlans(currentPagePlans);
 		} catch (err) {
-			console.error('Ошибка утверждения плана:', err);
 			setError('Не удалось утвердить план. Попробуйте позже.');
 			setOpenError(true);
 		}
@@ -432,16 +415,9 @@ function ManagerDashboard() {
 			fetchPlans(currentPagePlans);
 			setOpenReturnDialog(false);
 		} catch (err) {
-			console.error('Ошибка возврата плана:', err);
 			setError('Не удалось вернуть план. Попробуйте позже.');
 			setOpenError(true);
 		}
-	};
-
-	const calculateProgress = (plan) => {
-		const completed = plan.entries.filter((entry) => entry.publication_id).length;
-		const total = plan.expectedCount;
-		return total > 0 ? (completed / total) * 100 : 0;
 	};
 
 	return (
@@ -486,10 +462,20 @@ function ManagerDashboard() {
 										onChange={handleSearchChange}
 										margin="normal"
 										variant="outlined"
-										InputProps={{
-											endAdornment: <IconButton sx={{ color: '#0071E3' }}></IconButton>,
-										}}
 									/>
+									<AppleTextField
+										select
+										label="Фильтр по статусу"
+										value={statusFilter}
+										onChange={handleStatusFilterChange}
+										margin="normal"
+										variant="outlined"
+										sx={{ mt: 2, width: '200px' }}
+									>
+										<MenuItem value="needs_review">На проверке</MenuItem>
+										<MenuItem value="returned_for_revision">Отправлено на доработку</MenuItem>
+										<MenuItem value="published">Опубликовано</MenuItem>
+									</AppleTextField>
 								</AppleCard>
 								<AppleTable sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
 									<TableHead>
@@ -508,8 +494,8 @@ function ManagerDashboard() {
 									</TableHead>
 									<Fade in={true} timeout={500}>
 										<TableBody>
-											{needsReviewPublications.length > 0 ? (
-												needsReviewPublications.map((pub) => (
+											{publications.length > 0 ? (
+												publications.map((pub) => (
 													<TableRow
 														key={pub.id}
 														sx={{
@@ -542,7 +528,7 @@ function ManagerDashboard() {
 																		: 'Неизвестный тип'}
 														</TableCell>
 														<TableCell sx={{ color: '#1D1D1F' }}>
-															<StatusChip status={pub.status} />
+															<StatusChip status={pub.status} role={user.role} />
 														</TableCell>
 														<TableCell sx={{ color: '#1D1D1F' }}>{pub.user?.full_name || 'Не указан'}</TableCell>
 														<TableCell sx={{ textAlign: 'center' }}>
@@ -571,7 +557,7 @@ function ManagerDashboard() {
 											) : (
 												<TableRow>
 													<TableCell colSpan={8} sx={{ textAlign: 'center', color: '#6E6E73' }}>
-														Нет публикаций, ожидающих проверки.
+														Нет публикаций с указанными статусами.
 													</TableCell>
 												</TableRow>
 											)}
@@ -580,9 +566,9 @@ function ManagerDashboard() {
 								</AppleTable>
 								<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
 									<Pagination
-										count={totalPagesNeedsReview}
-										page={currentPageNeedsReview}
-										onChange={handlePageChangeNeedsReview}
+										count={totalPagesPublications}
+										page={currentPagePublications}
+										onChange={handlePageChangePublications}
 										color="primary"
 										sx={{
 											'& .MuiPaginationItem-root': {
@@ -598,31 +584,18 @@ function ManagerDashboard() {
 						)}
 
 						{value === 1 && (
-							<Typography
-								variant="h5"
-								gutterBottom
-								sx={{
-									mt: 4,
-									color: '#1D1D1F',
-									fontWeight: 600,
-									textAlign: 'center',
-								}}
-							>
+							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
 								Статистика по кафедре
 							</Typography>
 						)}
 
 						{value === 2 && (
 							<>
-								<Typography
-									variant="h5"
-									gutterBottom
-									sx={{ mt: 4, color: "#1D1D1F", fontWeight: 600, textAlign: "center" }}
-								>
+								<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
 									Регистрация нового пользователя
 								</Typography>
-								<AppleCard sx={{ maxWidth: "none", mx: "auto", mt: 2, p: 4 }}>
-									<form onSubmit={(e) => { e.preventDefault(); }}>
+								<AppleCard sx={{ maxWidth: 'none', mx: 'auto', mt: 2, p: 4 }}>
+									<form onSubmit={(e) => e.preventDefault()}>
 										<AppleTextField
 											fullWidth
 											label="Фамилия"
@@ -668,7 +641,7 @@ function ManagerDashboard() {
 										<AppleTextField
 											fullWidth
 											label="Пароль"
-											type={showPassword ? "text" : "password"}
+											type={showPassword ? 'text' : 'password'}
 											value={newPassword}
 											onChange={(e) => setNewPassword(e.target.value)}
 											margin="normal"
@@ -682,11 +655,10 @@ function ManagerDashboard() {
 												),
 											}}
 										/>
-										<Box sx={{ display: "flex", gap: 2, mt: 2 }}>
+										<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
 											<AppleButton
 												startIcon={<RefreshIcon />}
 												onClick={async () => {
-													// Проверка ФИО перед генерацией логина
 													const lastNameErr = validateNamePart(newLastName, 'Фамилия');
 													const firstNameErr = validateNamePart(newFirstName, 'Имя');
 													const middleNameErr = validateNamePart(newMiddleName, 'Отчество');
@@ -703,7 +675,6 @@ function ManagerDashboard() {
 														return;
 													}
 
-													// Функция генерации логина
 													const generateUsername = async () => {
 														const transliterate = (text) => {
 															const ruToEn = {
@@ -717,12 +688,8 @@ function ManagerDashboard() {
 															};
 															return text.toLowerCase().split('').map(char => ruToEn[char] || char).join('');
 														};
-
-														const capitalizeFirstLetter = (string) => {
-															if (!string) return '';
-															return string.charAt(0).toUpperCase() + string.slice(1);
-														};
-
+														const capitalizeFirstLetter = (string) =>
+															string ? string.charAt(0).toUpperCase() + string.slice(1) : '';
 														const baseUsername = `${capitalizeFirstLetter(transliterate(newLastName))}${capitalizeFirstLetter(transliterate(newFirstName[0]))}${capitalizeFirstLetter(transliterate(newMiddleName[0]))}`;
 														let generatedUsername = baseUsername;
 														let suffix = 1;
@@ -734,13 +701,11 @@ function ManagerDashboard() {
 																	{ username: generatedUsername },
 																	{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
 																);
-																if (!response.data.exists) {
-																	break;
-																}
+																if (!response.data.exists) break;
 																generatedUsername = `${baseUsername}${suffix}`;
 																suffix++;
 															} catch (err) {
-																setError('Ошибка проверки логина. Попробуйте снова.');
+																setError('Ошибка проверки логина.');
 																setOpenError(true);
 																return null;
 															}
@@ -752,16 +717,16 @@ function ManagerDashboard() {
 													if (!generatedUsername) return;
 
 													try {
-														const response = await axios.get(
-															'http://localhost:5000/admin_api/admin/generate-password',
-															{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
-														);
+														const response = await axios.get('http://localhost:5000/admin_api/admin/generate-password', {
+															withCredentials: true,
+															headers: { 'X-CSRFToken': csrfToken },
+														});
 														setNewUsername(generatedUsername);
 														setNewPassword(response.data.password);
 														setSuccess('Логин и пароль успешно сгенерированы.');
 														setOpenSuccess(true);
 													} catch (err) {
-														setError('Ошибка генерации пароля. Попробуйте снова.');
+														setError('Ошибка генерации пароля.');
 														setOpenError(true);
 													}
 												}}
@@ -771,10 +736,8 @@ function ManagerDashboard() {
 											<AppleButton
 												startIcon={<ContentCopyIcon />}
 												onClick={() => {
-													navigator.clipboard.writeText(
-														`Логин: ${newUsername}\nПароль: ${newPassword}`
-													);
-													setSuccess("Данные скопированы в буфер обмена!");
+													navigator.clipboard.writeText(`Логин: ${newUsername}\nПароль: ${newPassword}`);
+													setSuccess('Данные скопированы в буфер обмена!');
 													setOpenSuccess(true);
 												}}
 											>
@@ -783,7 +746,6 @@ function ManagerDashboard() {
 											<AppleButton
 												type="submit"
 												onClick={async () => {
-													// Проверка ФИО перед регистрацией
 													const lastNameErr = validateNamePart(newLastName, 'Фамилия');
 													const firstNameErr = validateNamePart(newFirstName, 'Имя');
 													const middleNameErr = validateNamePart(newMiddleName, 'Отчество');
@@ -801,14 +763,14 @@ function ManagerDashboard() {
 													}
 
 													if (!newUsername.trim() || !newPassword.trim()) {
-														setError("Логин и пароль обязательны.");
+														setError('Логин и пароль обязательны.');
 														setOpenError(true);
 														return;
 													}
 
 													try {
 														await axios.post(
-															"http://localhost:5000/admin_api/admin/register",
+															'http://localhost:5000/admin_api/admin/register',
 															{
 																username: newUsername,
 																password: newPassword,
@@ -816,23 +778,20 @@ function ManagerDashboard() {
 																first_name: newFirstName,
 																middle_name: newMiddleName,
 															},
-															{ withCredentials: true, headers: { "X-CSRFToken": csrfToken } }
+															{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
 														);
-														setSuccess("Пользователь успешно зарегистрирован!");
+														setSuccess('Пользователь успешно зарегистрирован!');
 														setOpenSuccess(true);
-														setNewLastName("");
-														setNewFirstName("");
-														setNewMiddleName("");
-														setNewUsername("");
-														setNewPassword("");
-														setLastNameError("");
-														setFirstNameError("");
-														setMiddleNameError("");
+														setNewLastName('');
+														setNewFirstName('');
+														setNewMiddleName('');
+														setNewUsername('');
+														setNewPassword('');
+														setLastNameError('');
+														setFirstNameError('');
+														setMiddleNameError('');
 													} catch (err) {
-														console.error("Ошибка регистрации:", err);
-														setError(
-															err.response?.data?.error || "Не удалось зарегистрировать пользователя."
-														);
+														setError(err.response?.data?.error || 'Не удалось зарегистрировать пользователя.');
 														setOpenError(true);
 													}
 												}}
@@ -844,13 +803,7 @@ function ManagerDashboard() {
 											{error && (
 												<Alert
 													severity="error"
-													sx={{
-														mt: 2,
-														borderRadius: '12px',
-														backgroundColor: '#FFF1F0',
-														color: '#1D1D1F',
-														boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-													}}
+													sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#FFF1F0', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
 													onClose={() => setOpenError(false)}
 												>
 													{error}
@@ -861,13 +814,7 @@ function ManagerDashboard() {
 											{success && (
 												<Alert
 													severity="success"
-													sx={{
-														mt: 2,
-														borderRadius: '12px',
-														backgroundColor: '#E7F8E7',
-														color: '#1D1D1F',
-														boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-													}}
+													sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#E7F8E7', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
 													onClose={() => setOpenSuccess(false)}
 												>
 													{success}
@@ -888,11 +835,7 @@ function ManagerDashboard() {
 									plans.map((plan) => (
 										<Accordion
 											key={plan.id}
-											sx={{
-												mb: 2,
-												borderRadius: '16px',
-												boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-											}}
+											sx={{ mb: 2, borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}
 										>
 											<AccordionSummary expandIcon={<ExpandMoreIcon />}>
 												<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
@@ -906,65 +849,56 @@ function ManagerDashboard() {
 																: 'Пользователь не указан'}
 														</Typography>
 													</Box>
-													<StatusChip status={plan.status} />
+													<StatusChip status={plan.status} role={user.role} />
 												</Box>
 											</AccordionSummary>
 											<AccordionDetails>
-												<>
-													<PlanTable>
-														<TableHead>
-															<TableRow>
-																<TableCell>Название</TableCell>
-																<TableCell>Тип</TableCell>
-																<TableCell>Статус</TableCell>
+												<PlanTable>
+													<TableHead>
+														<TableRow>
+															<TableCell>Название</TableCell>
+															<TableCell>Тип</TableCell>
+															<TableCell>Статус</TableCell>
+														</TableRow>
+													</TableHead>
+													<TableBody>
+														{plan.entries.map((entry) => (
+															<TableRow key={entry.id}>
+																<TableCell>{entry.title || 'Не указано'}</TableCell>
+																<TableCell>
+																	{entry.type === 'article'
+																		? 'Статья'
+																		: entry.type === 'monograph'
+																			? 'Монография'
+																			: entry.type === 'conference'
+																				? 'Доклад/конференция'
+																				: entry.type || 'Не указано'}
+																</TableCell>
+																<TableCell>
+																	<StatusChip status={entry.status} role={user.role} />
+																</TableCell>
 															</TableRow>
-														</TableHead>
-														<TableBody>
-															{plan.entries.map((entry) => (
-																<TableRow key={entry.id}>
-																	<TableCell>{entry.title || 'Не указано'}</TableCell>
-																	<TableCell>
-																		{entry.type === 'article'
-																			? 'Статья'
-																			: entry.type === 'monograph'
-																				? 'Монография'
-																				: entry.type === 'conference'
-																					? 'Доклад/конференция'
-																					: entry.type || 'Не указано'}
-																	</TableCell>
-																	<TableCell>
-																		<StatusChip status={entry.status} />
-																	</TableCell>
-																</TableRow>
-															))}
-														</TableBody>
-													</PlanTable>
-													{plan.return_comment && (
-														<Typography
-															sx={{
-																mt: 2,
-																color: '#000000',
-																fontWeight: 600,
-																display: 'flex',
-																alignItems: 'center',
-																gap: 1,
-															}}
-														>
-															<WarningAmberIcon sx={{ color: '#FF3B30' }} />
-															Комментарий при возврате: {plan.return_comment}
-														</Typography>
-													)}
-													{plan.status === 'needs_review' && (
-														<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-															<GreenButton startIcon={<CheckIcon />} onClick={() => handleApprovePlan(plan)}>
-																Утвердить
-															</GreenButton>
-															<AppleButton startIcon={<ReplayIcon />} onClick={() => handleOpenReturnDialog(plan)}>
-																На доработку
-															</AppleButton>
-														</Box>
-													)}
-												</>
+														))}
+													</TableBody>
+												</PlanTable>
+												{plan.return_comment && (
+													<Typography
+														sx={{ mt: 2, color: '#000000', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}
+													>
+														<WarningAmberIcon sx={{ color: '#FF3B30' }} />
+														Комментарий при возврате: {plan.return_comment}
+													</Typography>
+												)}
+												{plan.status === 'needs_review' && (
+													<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+														<GreenButton startIcon={<CheckIcon />} onClick={() => handleApprovePlan(plan)}>
+															Утвердить
+														</GreenButton>
+														<AppleButton startIcon={<ReplayIcon />} onClick={() => handleOpenReturnDialog(plan)}>
+															На доработку
+														</AppleButton>
+													</Box>
+												)}
 											</AccordionDetails>
 										</Accordion>
 									))
@@ -993,7 +927,10 @@ function ManagerDashboard() {
 
 						<Dialog
 							open={openDeleteDialog}
-							onClose={() => { setOpenDeleteDialog(false); setPublicationToDelete(null); }}
+							onClose={() => {
+								setOpenDeleteDialog(false);
+								setPublicationToDelete(null);
+							}}
 							sx={{
 								'& .MuiDialog-paper': {
 									backgroundColor: '#FFFFFF',
@@ -1012,10 +949,15 @@ function ManagerDashboard() {
 								</Typography>
 							</DialogContent>
 							<DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5EA' }}>
-								<CancelButton onClick={() => { setOpenDeleteDialog(false); setPublicationToDelete(null); }}>Отмена</CancelButton>
-								<AppleButton onClick={handleDeletePlanConfirm}>
-									Удалить
-								</AppleButton>
+								<CancelButton
+									onClick={() => {
+										setOpenDeleteDialog(false);
+										setPublicationToDelete(null);
+									}}
+								>
+									Отмена
+								</CancelButton>
+								<AppleButton onClick={handleDeletePlanConfirm}>Удалить</AppleButton>
 							</DialogActions>
 						</Dialog>
 
@@ -1112,13 +1054,7 @@ function ManagerDashboard() {
 										{error && (
 											<Alert
 												severity="error"
-												sx={{
-													mt: 2,
-													borderRadius: '12px',
-													backgroundColor: '#FFF1F0',
-													color: '#1D1D1F',
-													boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-												}}
+												sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#FFF1F0', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
 												onClose={() => setOpenError(false)}
 											>
 												{error}
@@ -1129,13 +1065,7 @@ function ManagerDashboard() {
 										{success && (
 											<Alert
 												severity="success"
-												sx={{
-													mt: 2,
-													borderRadius: '12px',
-													backgroundColor: '#E7F8E7',
-													color: '#1D1D1F',
-													boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-												}}
+												sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#E7F8E7', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
 												onClose={() => setOpenSuccess(false)}
 											>
 												{success}
@@ -1195,13 +1125,7 @@ function ManagerDashboard() {
 									{error && (
 										<Alert
 											severity="error"
-											sx={{
-												mt: 2,
-												borderRadius: '12px',
-												backgroundColor: '#FFF1F0',
-												color: '#1D1D1F',
-												boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-											}}
+											sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#FFF1F0', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
 											onClose={() => setOpenError(false)}
 										>
 											{error}
@@ -1212,13 +1136,7 @@ function ManagerDashboard() {
 									{success && (
 										<Alert
 											severity="success"
-											sx={{
-												mt: 2,
-												borderRadius: '12px',
-												backgroundColor: '#E7F8E7',
-												color: '#1D1D1F',
-												boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-											}}
+											sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#E7F8E7', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
 											onClose={() => setOpenSuccess(false)}
 										>
 											{success}

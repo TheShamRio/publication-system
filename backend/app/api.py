@@ -118,30 +118,76 @@ def delete_user(user_id):
         return jsonify({"error": "Ошибка при удалении пользователя. Попробуйте позже."}), 500
 
 @bp.route('/admin/publications', methods=['GET'])
-@admin_required
+@admin_or_manager_required
 def get_publications():
+    # Получаем параметры запроса
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
     search = request.args.get('search', '', type=str)
     pub_type = request.args.get('type', 'all', type=str)
     status = request.args.get('status', 'all', type=str)
+    sort_status = request.args.get('sort_status', None, type=str)
 
+    # Логируем параметры для отладки
+    logger.debug(f"Параметры запроса: page={page}, per_page={per_page}, search={search}, type={pub_type}, status={status}, sort_status={sort_status}")
+
+    # Базовый запрос
     query = Publication.query
+
+    # Применяем фильтр поиска
     if search:
         search_pattern = f'%{search}%'
         query = query.filter(
             (Publication.title.ilike(search_pattern)) |
             (Publication.authors.ilike(search_pattern)) |
-            (Publication.year.ilike(search_pattern))
+            (db.cast(Publication.year, db.String).ilike(search_pattern))
         )
 
+    # Фильтры по типу и статусу
     if pub_type != 'all':
         query = query.filter_by(type=pub_type)
+    
+    # Поддержка нескольких статусов
+    valid_statuses = ['draft', 'needs_review', 'returned_for_revision', 'published']
     if status != 'all':
-        query = query.filter_by(status=status)
+        status_list = status.split(',')
+        filtered_statuses = [s for s in status_list if s in valid_statuses]
+        if not filtered_statuses:
+            return jsonify({"error": "Указаны недопустимые статусы"}), 400
+        query = query.filter(Publication.status.in_(filtered_statuses))
+    else:
+        filtered_statuses = valid_statuses  # Если 'all', используем все допустимые статусы
 
-    paginated_publications = query.paginate(page=page, per_page=per_page, error_out=False)
+    # Ограничение для менеджеров
+    if current_user.role == 'manager':
+        allowed_statuses = ['needs_review', 'returned_for_revision', 'published']
+        query = query.filter(Publication.status.in_(allowed_statuses))
+        filtered_statuses = allowed_statuses  # Обновляем filtered_statuses для менеджера
 
+    # Сортировка по приоритетному статусу
+    try:
+        if sort_status and sort_status in filtered_statuses:  # Проверяем, что sort_status допустим
+            sort_case = db.case(
+                {sort_status: 0},  # Используем словарь: ключ — значение статуса, значение — приоритет
+                value=Publication.status,  # Указываем колонку для сравнения
+                else_=1
+            ).label('status_priority')
+            query = query.order_by(sort_case, Publication.id.asc())
+        else:
+            query = query.order_by(Publication.id.asc())  # Сортировка по умолчанию
+    except Exception as e:
+        print(e)
+        logger.error(f"Ошибка при применении сортировки: {str(e)}")
+        return jsonify({"error": "Ошибка сортировки данных"}), 500
+
+    # Пагинация
+    try:
+        paginated_publications = query.paginate(page=page, per_page=per_page, error_out=False)
+    except Exception as e:
+        logger.error(f"Ошибка пагинации: {str(e)}")
+        return jsonify({"error": "Ошибка сервера при загрузке публикаций"}), 500
+
+    # Формируем ответ
     publications = [{
         'id': pub.id,
         'title': pub.title,
@@ -163,7 +209,6 @@ def get_publications():
         'pages': paginated_publications.pages,
         'total': paginated_publications.total
     }), 200
-
 @bp.route('/admin/publications/<int:pub_id>', methods=['PUT'])
 @admin_or_manager_required
 def update_publication(pub_id):

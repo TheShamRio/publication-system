@@ -1,12 +1,15 @@
 import React from 'react';
 import { Chip } from '@mui/material';
 
-const StatusChip = ({ status }) => {
+const StatusChip = ({ status, role }) => {
+	// Шаг 1: Добавляем отладочный вывод для проверки пропсов
+	console.log('StatusChip: status=', status, 'role=', role);
+
 	let label = status; // Значение по умолчанию
 	let backgroundColor = '#D1D1D6'; // Серый по умолчанию
 	let textColor = '#1D1D1F'; // Черный текст по умолчанию
 
-	// Определяем метки и цвета для статусов
+	// Шаг 2: Логика для статусов
 	switch (status) {
 		case 'draft':
 		case 'planned':
@@ -16,14 +19,27 @@ const StatusChip = ({ status }) => {
 			break;
 		case 'needs_review':
 		case 'in_progress':
-			label = 'На проверке';
-			backgroundColor = '#FF9500';
-			textColor = '#FFFFFF';
+			if (role === 'manager') {
+				label = 'Требуется проверка'; // Текст для менеджера
+				backgroundColor = '#FF3B30'; // Оранжевый фон
+				textColor = '#FFFFFF'; // Белый текст
+			} else {
+				label = 'На проверке'; // Для user или undefined
+				backgroundColor = '#FF9500'; // Красный фон
+				textColor = '#FFFFFF'; // Белый текст
+			}
 			break;
-		case 'returned':
-			label = 'Требуется доработка';
-			backgroundColor = '#FF3B30';
-			textColor = '#FFFFFF';
+		case 'returned_for_revision':
+			// Шаг 3: Проверка роли для returned_for_revision
+			if (role === 'manager') {
+				label = 'Отправлено на доработку'; // Текст для менеджера
+				backgroundColor = '#FF9500'; // Оранжевый фон
+				textColor = '#FFFFFF'; // Белый текст
+			} else {
+				label = 'Требуется доработка'; // Для user или undefined
+				backgroundColor = '#FF3B30'; // Красный фон
+				textColor = '#FFFFFF'; // Белый текст
+			}
 			break;
 		case 'published':
 		case 'completed':
@@ -33,11 +49,12 @@ const StatusChip = ({ status }) => {
 			textColor = '#FFFFFF';
 			break;
 		default:
-			label = status; // Если статус неизвестен, оставляем как есть
+			label = status;
 			backgroundColor = '#D1D1D6';
 			textColor = '#1D1D1F';
 	}
 
+	// Шаг 4: Рендеринг компонента
 	return (
 		<Chip
 			label={label}
@@ -52,7 +69,6 @@ const StatusChip = ({ status }) => {
 				'& .MuiChip-label': {
 					padding: '0 4px',
 				},
-				// Унифицированный стиль для всех чипов
 				transition: 'all 0.3s ease',
 				'&:hover': {
 					filter: 'brightness(1.1)',

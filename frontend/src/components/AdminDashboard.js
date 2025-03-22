@@ -36,6 +36,7 @@ import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import axios from 'axios';
 import { styled } from '@mui/system';
 
+// Стили компонентов
 const AppleButton = styled(Button)(({ theme }) => ({
 	borderRadius: '12px',
 	textTransform: 'none',
@@ -107,14 +108,17 @@ const CancelButton = styled(Button)(({ theme }) => ({
 
 function AdminDashboard() {
 	const [value, setValue] = useState(0);
-	const [users, setUsers] = useState([]);
-	const [publications, setPublications] = useState([]);
+	const [users, setUsers] = useState([]); // Отфильтрованные пользователи для отображения
+	const [allUsers, setAllUsers] = useState([]); // Все пользователи текущей страницы с сервера
+	const [publications, setPublications] = useState([]); // Отфильтрованные публикации для отображения
+	const [allPublications, setAllPublications] = useState([]); // Все публикации текущей страницы с сервера
 	const [currentPageUsers, setCurrentPageUsers] = useState(1);
 	const [totalPagesUsers, setTotalPagesUsers] = useState(1);
 	const [currentPagePublications, setCurrentPagePublications] = useState(1);
 	const [totalPagesPublications, setTotalPagesPublications] = useState(1);
 	const [loadingInitial, setLoadingInitial] = useState(true);
-	const [searchQuery, setSearchQuery] = useState('');
+	const [searchQueryUsers, setSearchQueryUsers] = useState('');
+	const [searchQueryPublications, setSearchQueryPublications] = useState('');
 	const [filterType, setFilterType] = useState('all');
 	const [filterStatus, setFilterStatus] = useState('all');
 	const [error, setError] = useState('');
@@ -150,67 +154,134 @@ function AdminDashboard() {
 	const [newMiddleName, setNewMiddleName] = useState('');
 	const [showPassword, setShowPassword] = useState(false);
 
+	const ITEMS_PER_PAGE = 10;
+
+	// Функция загрузки пользователей с сервера
+	const fetchUsers = async () => {
+		try {
+			const response = await axios.get('http://localhost:5000/admin_api/admin/users', {
+				withCredentials: true,
+				params: { page: currentPageUsers, per_page: ITEMS_PER_PAGE },
+				headers: { 'X-CSRFToken': csrfToken },
+			});
+			setAllUsers(response.data.users || []);
+			setTotalPagesUsers(response.data.pages || 1);
+		} catch (err) {
+			setError('Ошибка загрузки пользователей. Попробуйте позже.');
+			setOpenError(true);
+		}
+	};
+
+	// Функция загрузки публикаций с сервера
+	const fetchPublications = async () => {
+		try {
+			const response = await axios.get('http://localhost:5000/admin_api/admin/publications', {
+				withCredentials: true,
+				params: {
+					page: currentPagePublications,
+					per_page: ITEMS_PER_PAGE,
+					type: filterType === 'all' ? undefined : filterType,
+					status: filterStatus === 'all' ? undefined : filterStatus,
+				},
+				headers: { 'X-CSRFToken': csrfToken },
+			});
+			setAllPublications(response.data.publications || []);
+			setTotalPagesPublications(response.data.pages || 1);
+		} catch (err) {
+			setError('Ошибка загрузки публикаций. Попробуйте позже.');
+			setOpenError(true);
+		}
+	};
+
+	// Клиентская фильтрация пользователей с учётом null/undefined
 	useEffect(() => {
-		const fetchData = async () => {
-			setLoadingInitial(true);
-			try {
-				const usersResponse = await axios.get('http://localhost:5000/admin_api/admin/users', {
-					withCredentials: true,
-					params: { page: currentPageUsers, per_page: 10, search: searchQuery },
-				});
-				setUsers(usersResponse.data.users || []);
-				setTotalPagesUsers(usersResponse.data.pages || 1);
+		// Фильтруем пользователей по поисковому запросу
+		const filtered = allUsers.filter((user) => {
+			const search = searchQueryUsers.toLowerCase();
+			return (
+				(user.username?.toLowerCase() ?? '').includes(search) || // Проверяем username
+				(user.last_name?.toLowerCase() ?? '').includes(search) || // Проверяем last_name
+				(user.first_name?.toLowerCase() ?? '').includes(search) || // Проверяем first_name
+				(user.middle_name?.toLowerCase() ?? '').includes(search) // Проверяем middle_name
+			);
+		});
+		setUsers(filtered); // Устанавливаем отфильтрованный список
+		// Пересчитываем количество страниц на основе отфильтрованного списка
+		setTotalPagesUsers(Math.ceil(filtered.length / ITEMS_PER_PAGE) || 1);
+	}, [allUsers, searchQueryUsers]);
 
-				const publicationsResponse = await axios.get('http://localhost:5000/admin_api/admin/publications', {
-					withCredentials: true,
-					params: { page: currentPagePublications, per_page: 10, search: searchQuery, type: filterType, status: filterStatus },
-				});
-				setPublications(publicationsResponse.data.publications || []);
-				setTotalPagesPublications(publicationsResponse.data.pages || 1);
-			} catch (err) {
-				setError('Ошибка загрузки данных. Попробуйте позже.');
-				setOpenError(true);
-			} finally {
-				setLoadingInitial(false);
-			}
-		};
+	// Клиентская фильтрация публикаций с учётом null/undefined
+	useEffect(() => {
+		// Фильтруем публикации по поисковому запросу
+		const filtered = allPublications.filter((pub) => {
+			const search = searchQueryPublications.toLowerCase();
+			return (
+				(pub.title?.toLowerCase() ?? '').includes(search) || // Проверяем title
+				(pub.authors?.toLowerCase() ?? '').includes(search) || // Проверяем authors
+				(pub.year?.toString() ?? '').includes(search) // Проверяем year
+			);
+		});
+		setPublications(filtered); // Устанавливаем отфильтрованный список
+		// Пересчитываем количество страниц на основе отфильтрованного списка
+		setTotalPagesPublications(Math.ceil(filtered.length / ITEMS_PER_PAGE) || 1);
+	}, [allPublications, searchQueryPublications]);
 
-		fetchData();
-	}, [currentPageUsers, currentPagePublications, searchQuery, filterType, filterStatus]);
+	// Загрузка данных при смене вкладки, страницы или фильтров
+	useEffect(() => {
+		setLoadingInitial(true);
+		if (value === 0) {
+			fetchUsers().finally(() => setLoadingInitial(false));
+		} else if (value === 1) {
+			fetchPublications().finally(() => setLoadingInitial(false));
+		}
+	}, [value, currentPageUsers, currentPagePublications, filterType, filterStatus]);
 
+	// Обработка смены вкладки
 	const handleTabChange = (event, newValue) => {
 		setValue(newValue);
-		setSearchQuery('');
+		setSearchQueryUsers('');
+		setSearchQueryPublications('');
 		setFilterType('all');
 		setFilterStatus('all');
 		setCurrentPageUsers(1);
 		setCurrentPagePublications(1);
 	};
 
+	// Обработка смены страницы для пользователей
 	const handlePageChangeUsers = (event, newPage) => {
 		setCurrentPageUsers(newPage);
 	};
 
+	// Обработка смены страницы для публикаций
 	const handlePageChangePublications = (event, newPage) => {
 		setCurrentPagePublications(newPage);
 	};
 
-	const handleSearchChange = async (e) => {
-		setSearchQuery(e.target.value);
-		setCurrentPageUsers(1);
-		setCurrentPagePublications(1);
+	// Обработка изменения поискового запроса для пользователей
+	const handleSearchUsersChange = (e) => {
+		setSearchQueryUsers(e.target.value);
+		setCurrentPageUsers(1); // Сбрасываем на первую страницу при новом поиске
 	};
 
+	// Обработка изменения поискового запроса для публикаций
+	const handleSearchPublicationsChange = (e) => {
+		setSearchQueryPublications(e.target.value);
+		setCurrentPagePublications(1); // Сбрасываем на первую страницу при новом поиске
+	};
+
+	// Обработка изменения фильтра типа публикации
 	const handleFilterTypeChange = (e) => {
 		setFilterType(e.target.value);
 		setCurrentPagePublications(1);
 	};
 
+	// Обработка изменения фильтра статуса публикации
 	const handleFilterStatusChange = (e) => {
 		setFilterStatus(e.target.value);
 		setCurrentPagePublications(1);
 	};
 
+	// Обработка нажатия на кнопку удаления
 	const handleDeleteClick = (type, item) => {
 		if (type === 'user') {
 			setUserToDelete(item);
@@ -220,12 +291,14 @@ function AdminDashboard() {
 		setOpenDeleteDialog(true);
 	};
 
+	// Отмена удаления
 	const handleDeleteCancel = () => {
 		setOpenDeleteDialog(false);
 		setUserToDelete(null);
 		setPublicationToDelete(null);
 	};
 
+	// Подтверждение удаления
 	const handleDeleteConfirm = async () => {
 		try {
 			if (userToDelete) {
@@ -233,7 +306,7 @@ function AdminDashboard() {
 					withCredentials: true,
 					headers: { 'X-CSRFToken': csrfToken },
 				});
-				setUsers(users.filter((user) => user.id !== userToDelete.id));
+				setAllUsers(allUsers.filter((user) => user.id !== userToDelete.id));
 				setSuccess('Пользователь успешно удалён.');
 				setOpenSuccess(true);
 			} else if (publicationToDelete) {
@@ -241,7 +314,7 @@ function AdminDashboard() {
 					withCredentials: true,
 					headers: { 'X-CSRFToken': csrfToken },
 				});
-				setPublications(publications.filter((pub) => pub.id !== publicationToDelete.id));
+				setAllPublications(allPublications.filter((pub) => pub.id !== publicationToDelete.id));
 				setSuccess('Публикация успешно удалена.');
 				setOpenSuccess(true);
 			}
@@ -255,6 +328,7 @@ function AdminDashboard() {
 		}
 	};
 
+	// Обработка нажатия на кнопку редактирования
 	const handleEditClick = (type, item) => {
 		if (type === 'user') {
 			setEditUser(item);
@@ -277,6 +351,7 @@ function AdminDashboard() {
 		setOpenEditDialog(true);
 	};
 
+	// Отмена редактирования
 	const handleEditCancel = () => {
 		setOpenEditDialog(false);
 		setEditUser(null);
@@ -300,6 +375,7 @@ function AdminDashboard() {
 		setOpenSuccess(false);
 	};
 
+	// Подтверждение редактирования
 	const handleEditSubmit = async (e) => {
 		e.preventDefault();
 		try {
@@ -318,7 +394,7 @@ function AdminDashboard() {
 					withCredentials: true,
 					headers: { 'X-CSRFToken': csrfToken },
 				});
-				setUsers(users.map((user) => (user.id === editUser.id ? response.data.user : user)));
+				setAllUsers(allUsers.map((user) => (user.id === editUser.id ? response.data.user : user)));
 				setSuccess('Пользователь успешно обновлён.');
 				setOpenSuccess(true);
 				setTimeout(() => handleEditCancel(), 2000);
@@ -337,7 +413,7 @@ function AdminDashboard() {
 					withCredentials: true,
 					headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'multipart/form-data' },
 				});
-				setPublications(publications.map((pub) => (pub.id === editPublication.id ? response.data.publication : pub)));
+				setAllPublications(allPublications.map((pub) => (pub.id === editPublication.id ? response.data.publication : pub)));
 				setSuccess('Публикация успешно обновлена.');
 				setOpenSuccess(true);
 				setTimeout(() => handleEditCancel(), 2000);
@@ -348,6 +424,7 @@ function AdminDashboard() {
 		}
 	};
 
+	// Генерация уникального логина
 	const generateUsername = async () => {
 		if (!newLastName || !newFirstName || !newMiddleName) {
 			setError('Для генерации логина необходимо заполнить ФИО.');
@@ -398,6 +475,7 @@ function AdminDashboard() {
 		return generatedUsername;
 	};
 
+	// Генерация логина и пароля
 	const generateCredentials = async () => {
 		const generatedUsername = await generateUsername();
 		if (!generatedUsername) return;
@@ -419,6 +497,7 @@ function AdminDashboard() {
 		}
 	};
 
+	// Создание нового пользователя
 	const handleCreateUser = async (e) => {
 		e.preventDefault();
 		if (!newUsername || !newPassword || !newLastName || !newFirstName || !newMiddleName) {
@@ -428,13 +507,6 @@ function AdminDashboard() {
 		}
 
 		try {
-			console.log('Sending registration request with data:', {
-				username: newUsername,
-				password: newPassword,
-				last_name: newLastName,
-				first_name: newFirstName,
-				middle_name: newMiddleName,
-			});
 			const response = await axios.post('http://localhost:5000/admin_api/admin/register', {
 				username: newUsername,
 				password: newPassword,
@@ -446,9 +518,7 @@ function AdminDashboard() {
 				headers: { 'X-CSRFToken': csrfToken },
 			});
 
-			console.log('Registration response:', response.data, response.status);
 			if (response.status === 201 && response.data.message && response.data.message.includes('успешно зарегистрирован')) {
-				console.log('Setting success state...');
 				setSuccess('Пользователь успешно создан.');
 				setOpenSuccess(true);
 				setNewUsername('');
@@ -456,28 +526,25 @@ function AdminDashboard() {
 				setNewLastName('');
 				setNewFirstName('');
 				setNewMiddleName('');
-				const usersResponse = await axios.get('http://localhost:5000/admin_api/admin/users', {
-					withCredentials: true,
-					params: { page: currentPageUsers, per_page: 10, search: searchQuery },
-				});
-				setUsers(usersResponse.data.users || []);
-				setTotalPagesUsers(usersResponse.data.pages || 1);
+				await fetchUsers(); // Обновляем список пользователей
 			}
 		} catch (err) {
-			console.error('Registration error:', err.response?.data || err.message, err.response?.status);
 			setError(err.response?.data?.error || 'Ошибка при создании пользователя. Попробуйте позже.');
 			setOpenError(true);
 		}
 	};
 
+	// Переключение видимости пароля в форме создания
 	const handleTogglePasswordVisibility = () => {
 		setShowPassword(!showPassword);
 	};
 
+	// Переключение видимости пароля в форме редактирования
 	const handleToggleEditPasswordVisibility = () => {
 		setShowEditPassword(!showEditPassword);
 	};
 
+	// Копирование данных в буфер обмена
 	const handleCopyToClipboard = () => {
 		const dataToCopy = `Фамилия: ${newLastName}, Имя: ${newFirstName}, Отчество: ${newMiddleName}, Логин: ${newUsername}, Пароль: ${newPassword}`;
 		navigator.clipboard.writeText(dataToCopy)
@@ -491,6 +558,7 @@ function AdminDashboard() {
 			});
 	};
 
+	// Отображение статуса публикации
 	const renderStatus = (status) => {
 		let statusText = '';
 		switch (status) {
@@ -667,13 +735,10 @@ function AdminDashboard() {
 									<AppleTextField
 										fullWidth
 										label="Поиск по логину или ФИО"
-										value={searchQuery}
-										onChange={handleSearchChange}
+										value={searchQueryUsers}
+										onChange={handleSearchUsersChange}
 										margin="normal"
 										variant="outlined"
-										InputProps={{
-											endAdornment: <IconButton sx={{ color: '#0071E3' }}>{/* Можно добавить иконку поиска */}</IconButton>,
-										}}
 									/>
 								</AppleCard>
 								<AppleTable sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
@@ -789,13 +854,10 @@ function AdminDashboard() {
 									<AppleTextField
 										fullWidth
 										label="Поиск по названию, авторам или году"
-										value={searchQuery}
-										onChange={handleSearchChange}
+										value={searchQueryPublications}
+										onChange={handleSearchPublicationsChange}
 										margin="normal"
 										variant="outlined"
-										InputProps={{
-											endAdornment: <IconButton sx={{ color: '#0071E3' }}>{/* Можно добавить иконку поиска */}</IconButton>,
-										}}
 									/>
 									<Box sx={{ mt: 2, display: 'flex', gap: 2 }}>
 										<AppleTextField
@@ -876,12 +938,8 @@ function AdminDashboard() {
 																		? 'Доклад/конференция'
 																		: 'Неизвестный тип'}
 														</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															{renderStatus(pub.status)}
-														</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															{pub.user?.full_name || 'Не указан'}
-														</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>{renderStatus(pub.status)}</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>{pub.user?.full_name || 'Не указан'}</TableCell>
 														<TableCell sx={{ textAlign: 'center' }}>
 															<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
 																<IconButton
@@ -1036,7 +1094,7 @@ function AdminDashboard() {
 											>
 												<MenuItem value="user">Пользователь</MenuItem>
 												<MenuItem value="admin">Администратор</MenuItem>
-												<MenuItem value="manager">Управляющий</MenuItem> {/* Добавляем новую роль */}
+												<MenuItem value="manager">Управляющий</MenuItem>
 											</AppleTextField>
 											<AppleTextField
 												fullWidth

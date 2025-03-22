@@ -1647,7 +1647,7 @@ function Dashboard() {
 															<TableCell sx={{ color: '#1D1D1F' }}>
 																<Typography
 																	sx={{
-																		color: '#0071E3',
+																		color: '#0071E3 второе слово ',
 																		textDecoration: 'underline',
 																		cursor: 'pointer',
 																		'&:hover': { textDecoration: 'none' },
@@ -1671,15 +1671,16 @@ function Dashboard() {
 															<TableCell sx={{ color: '#1D1D1F' }}>
 																<StatusChip
 																	status={
-																		pub.status === 'draft' && pub.returned_for_revision
-																			? 'returned'
+																		pub.status === 'returned_for_revision' && pub.returned_for_revision
+																			? 'returned_for_revision'
 																			: pub.status
 																	}
+																	role={user.role} // Передаем роль пользователя
 																/>
 															</TableCell>
 															<TableCell sx={{ textAlign: 'center' }}>
 																<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-																	{pub.status === 'draft' && (
+																	{(pub.status === 'draft' || pub.status === 'returned_for_revision') && (
 																		<>
 																			<IconButton
 																				aria-label="edit"
@@ -1730,7 +1731,7 @@ function Dashboard() {
 																			)}
 																		</>
 																	)}
-																	{pub.file_url && pub.status !== 'draft' && (
+																	{pub.file_url && pub.status !== 'draft' && pub.status !== 'returned_for_revision' && (
 																		<IconButton
 																			aria-label="download"
 																			onClick={() => handleDownloadClick(pub)}
@@ -1747,7 +1748,7 @@ function Dashboard() {
 																			<DownloadIcon />
 																		</IconButton>
 																	)}
-																	{!pub.file_url && pub.status === 'draft' && (
+																	{!pub.file_url && (pub.status === 'draft' || pub.status === 'returned_for_revision') && (
 																		<IconButton
 																			aria-label="attach"
 																			onClick={() => handleAttachFileClick(pub)}

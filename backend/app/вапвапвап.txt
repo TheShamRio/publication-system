@@ -1,3 +1,358 @@
+import React, { useEffect, useState, useCallback } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import {
+	Container,
+	Typography,
+	Card,
+	Button,
+	CardContent,
+	Box,
+	Pagination,
+} from '@mui/material';
+import { styled } from '@mui/system';
+import { Document, Page, pdfjs } from 'react-pdf';
+import 'react-pdf/dist/Page/AnnotationLayer.css';
+import 'react-pdf/dist/Page/TextLayer.css';
+import axios from 'axios';
+import DownloadIcon from '@mui/icons-material/Download';
+import { useAuth } from '../contexts/AuthContext';
+import CommentSection from './CommentSection';
+
+pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+
+const AppleButton = styled(Button)({
+	borderRadius: '12px',
+	textTransform: 'none',
+	backgroundColor: '#0071E3',
+	color: '#FFFFFF',
+	padding: '8px 16px',
+	fontSize: '14px',
+	fontWeight: 600,
+	boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+	'&:hover': { backgroundColor: '#0066CC', boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)' },
+});
+
+const GreenButton = styled(Button)({
+	borderRadius: '12px',
+	textTransform: 'none',
+	backgroundColor: 'green',
+	color: '#FFFFFF',
+	padding: '8px 16px',
+	fontSize: '14px',
+	fontWeight: 600,
+	boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+	'&:hover': {
+		backgroundColor: '#2EBB4A',
+		boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
+	},
+	'&:disabled': {
+		backgroundColor: '#D1D1D6',
+		color: '#FFFFFF',
+	},
+});
+
+const RedButton = styled(Button)({
+	borderRadius: '12px',
+	textTransform: 'none',
+	backgroundColor: '#FF3B30',
+	color: '#FFFFFF',
+	padding: '8px 16px',
+	fontSize: '14px',
+	fontWeight: 600,
+	boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+	'&:hover': {
+		backgroundColor: '#E63935',
+		boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
+	},
+	'&:disabled': {
+		backgroundColor: '#D1D1D6',
+		color: '#FFFFFF',
+	},
+});
+
+const AppleCard = styled(Card)({
+	borderRadius: '16px',
+	boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+	backgroundColor: '#FFFFFF',
+});
+
+const DocumentViewer = styled(Box)({
+	mb: 4,
+	border: '1px solid #E5E5EA',
+	borderRadius: '12px',
+	overflow: 'hidden',
+	backgroundColor: '#FFFFFF',
+	boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+	width: '100%',
+	height: '850px',
+	display: 'flex',
+	justifyContent: 'center',
+	alignItems: 'flex-start',
+	'&::-webkit-scrollbar': { display: 'none' },
+	'-ms-overflow-style': 'none',
+	'scrollbar-width': 'none',
+});
+
+function Publication() {
+	const { id } = useParams();
+	const [publication, setPublication] = useState(null);
+	const [error, setError] = useState('');
+	const [numPages, setNumPages] = useState(null);
+	const [pageNumber, setPageNumber] = useState(1);
+	const { user, isAuthenticated, csrfToken } = useAuth();
+	const [hasReviewerComment, setHasReviewerComment] = useState(false);
+	const [loadingUser, setLoadingUser] = useState(true);
+
+	const fetchPublication = useCallback(async () => {
+		try {
+			const response = await axios.get(`http://localhost:5000/api/publications/${id}`, { withCredentials: true });
+			setPublication(response.data);
+			const reviewerComment = response.data.comments.some(
+				(comment) =>
+					['admin', 'manager'].includes(comment.user.role) ||
+					comment.replies.some((reply) => ['admin', 'manager'].includes(reply.user.role))
+			);
+			setHasReviewerComment(reviewerComment);
+		} catch (err) {
+			console.error('Ошибка загрузки публикации:', err);
+			setError('Не удалось загрузить публикацию. Попробуйте позже.');
+		}
+	}, [id]);
+
+	useEffect(() => {
+		fetchPublication();
+	}, [fetchPublication]);
+
+	useEffect(() => {
+		if (user !== null) {
+			setLoadingUser(false);
+		}
+	}, [user]);
+
+	const onDocumentLoadSuccess = ({ numPages }) => {
+		setNumPages(numPages);
+	};
+
+	const handleDownload = () => {
+		if (publication && publication.file_url) {
+			const fileUrl = `http://localhost:5000${publication.file_url}`;
+			const link = document.createElement('a');
+			link.href = fileUrl;
+			link.download = publication.file_url.split('/').pop();
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+		}
+	};
+
+	const handlePublish = async () => {
+		try {
+			const response = await axios.post(
+				`http://localhost:5000/api/publications/${id}/publish`,
+				{},
+				{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
+			);
+			console.log('Publication response:', response.data);
+			fetchPublication();
+		} catch (err) {
+			console.error('Ошибка при публикации:', err);
+			setError('Не удалось опубликовать публикацию.');
+		}
+	};
+
+	const handleReject = async () => {
+		try {
+			const response = await axios.post(
+				`http://localhost:5000/api/publications/${id}/return-for-revision`,
+				{},
+				{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
+			);
+			console.log('Return for revision response:', response.data);
+			fetchPublication();
+		} catch (err) {
+			console.error('Ошибка при отправке на доработку:', err);
+			setError('Не удалось отправить на доработку. Убедитесь, что был добавлен комментарий.');
+		}
+	};
+
+	const handleCommentAdded = (newComment) => {
+		setPublication((prev) => {
+			if (newComment.parent_id) {
+				const updatedComments = prev.comments.map((comment) =>
+					comment.id === newComment.parent_id
+						? { ...comment, replies: [...comment.replies, newComment] }
+						: comment
+				);
+				return { ...prev, comments: updatedComments };
+			}
+			return { ...prev, comments: [...prev.comments, newComment] };
+		});
+		if (['admin', 'manager'].includes(newComment.user.role)) {
+			setHasReviewerComment(true);
+		}
+	};
+
+	if (error) return <Typography color="error">{error}</Typography>;
+	if (!publication || loadingUser) return <Typography sx={{ color: '#212121' }}>Загрузка...</Typography>;
+
+	const fileUrl = publication.file_url ? `http://localhost:5000${publication.file_url}` : null;
+
+	// Функция для отображения статуса с учётом локализации и цвета
+	const renderStatus = (status, returnedForRevision, isReviewer) => {
+		let statusText = '';
+		let statusColor = '#757575'; // Цвет по умолчанию (серый)
+
+		if (isReviewer) {
+			// Для admin или manager
+			switch (status) {
+				case 'draft':
+					statusText = 'Черновик';
+					break;
+				case 'needs_review':
+					statusText = 'Нуждается в проверке';
+					statusColor = '#FF3B30'; // Красный
+					break;
+				case 'published':
+					statusText = 'Опубликованные';
+					break;
+				default:
+					statusText = status;
+			}
+		} else {
+			// Для пользователя
+			if (status === 'needs_review' && !returnedForRevision) {
+				statusText = 'На проверке';
+			} else if (status === 'draft' && returnedForRevision) {
+				statusText = 'Требуется доработка';
+				statusColor = '#FF3B30'; // Красный
+			} else if (status === 'draft' && !returnedForRevision) {
+				statusText = 'Черновик';
+			} else if (status === 'published') {
+				statusText = 'Опубликованные';
+			} else {
+				statusText = status;
+			}
+		}
+
+		return <Typography variant="body1" sx={{ color: statusColor, mb: 1 }}>{`Статус: ${statusText}`}</Typography>;
+	};
+
+	const isReviewer = ['admin', 'manager'].includes(user?.role);
+
+	console.log('User:', user);
+	console.log('User role:', user?.role);
+	console.log('Publication status:', publication.status);
+	console.log('Is reviewer and needs_review:', isReviewer && publication.status === 'needs_review');
+
+	return (
+		<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
+			<AppleCard elevation={4}>
+				<CardContent sx={{ pt: 4, pb: 4 }}>
+					<Typography variant="h4" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 600 }}>
+						{publication.title}
+					</Typography>
+					<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
+						Авторы: {publication.authors}
+					</Typography>
+					<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
+						Год: {publication.year}
+					</Typography>
+					<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
+						Тип: {publication.type === 'article' ? 'Статья' : publication.type === 'monograph' ? 'Монография' : publication.type === 'conference' ? 'Доклад/конференция' : publication.type}
+					</Typography>
+					{renderStatus(publication.status, publication.returned_for_revision, isReviewer)}
+					<Typography variant="body1" sx={{ color: '#757575', mb: 2 }}>
+						Опубликовал: {publication.user.full_name}
+					</Typography>
+
+					<Typography variant="h6" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 500 }}>
+						Предпросмотр:
+					</Typography>
+					{fileUrl ? (
+						fileUrl.endsWith('.pdf') ? (
+							<>
+								<DocumentViewer>
+									<Document
+										file={fileUrl}
+										onLoadSuccess={onDocumentLoadSuccess}
+										onLoadError={(err) => setError(`Ошибка загрузки PDF: ${err.message}`)}
+									>
+										<Page
+											pageNumber={pageNumber}
+											scale={1}
+											renderTextLayer={false}
+											renderAnnotationLayer={false}
+										/>
+									</Document>
+								</DocumentViewer>
+								{numPages > 1 && (
+									<Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, mb: 4 }}>
+										<Pagination
+											count={numPages}
+											page={pageNumber}
+											onChange={(event, newPage) => setPageNumber(newPage)}
+											color="primary"
+											sx={{
+												'& .MuiPaginationItem-root': {
+													borderRadius: 20,
+													transition: 'all 0.3s ease',
+													'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
+													'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
+												},
+											}}
+										/>
+									</Box>
+								)}
+							</>
+						) : fileUrl.endsWith('.docx') ? (
+							<Typography sx={{ color: '#6E6E73', mb: 2 }}>
+								Файл загружен в формате DOCX, предпросмотр недоступен.
+							</Typography>
+						) : (
+							<Typography sx={{ color: '#6E6E73', mb: 2 }}>
+								Формат файла не поддерживается для отображения (только PDF и DOCX).
+							</Typography>
+						)
+					) : (
+						<Typography sx={{ color: '#6E6E73', mb: 2 }}>
+							Файл не прикреплен к этой публикации.
+						</Typography>
+					)}
+					{fileUrl && (
+						<Box sx={{ mb: 2 }}>
+							<AppleButton startIcon={<DownloadIcon />} onClick={handleDownload}>
+								Скачать
+							</AppleButton>
+						</Box>
+					)}
+
+					{isReviewer && publication.status === 'needs_review' && (
+						<Box sx={{ mb: 2, display: 'flex', gap: 2 }}>
+							<GreenButton onClick={handlePublish}>Опубликовать</GreenButton>
+							<RedButton onClick={handleReject} disabled={!hasReviewerComment}>
+								Отправить на доработку
+							</RedButton>
+						</Box>
+					)}
+
+					<Typography variant="h5" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 600 }}>
+						Комментарии
+					</Typography>
+					{publication.comments && (
+						<CommentSection
+							comments={publication.comments}
+							publicationId={publication.id}
+							onCommentAdded={handleCommentAdded}
+						/>
+					)}
+				</CardContent>
+			</AppleCard>
+		</Container>
+	);
+}
+
+export default Publication;
+
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
@@ -45,6 +400,7 @@ import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import StatusChip from './StatusChip';
 
+// Стили остаются без изменений
 const AppleTextField = styled(TextField)({
 	'& .MuiOutlinedInput-root': {
 		borderRadius: '12px',
@@ -106,17 +462,22 @@ const CancelButton = styled(Button)({
 	'&:hover': { backgroundColor: '#C7C7CC', boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)' },
 });
 
+// Регулярные выражения для проверки ФИО
+const namePartRegex = /^[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?$/;
+const fullNameRegex = /^[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?\s[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?\s[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?$/;
+
 function ManagerDashboard() {
 	const { user, csrfToken, isAuthenticated } = useAuth();
 	const navigate = useNavigate();
 	const [value, setValue] = useState(0);
-	const [needsReviewPublications, setNeedsReviewPublications] = useState([]);
+	const [publications, setPublications] = useState([]); // Все публикации
 	const [plans, setPlans] = useState([]);
-	const [currentPageNeedsReview, setCurrentPageNeedsReview] = useState(1);
+	const [currentPagePublications, setCurrentPagePublications] = useState(1);
 	const [currentPagePlans, setCurrentPagePlans] = useState(1);
-	const [totalPagesNeedsReview, setTotalPagesNeedsReview] = useState(1);
+	const [totalPagesPublications, setTotalPagesPublications] = useState(1);
 	const [totalPagesPlans, setTotalPagesPlans] = useState(1);
 	const [searchQuery, setSearchQuery] = useState('');
+	const [statusFilter, setStatusFilter] = useState('needs_review'); // Фильтр по статусу
 	const [loadingInitial, setLoadingInitial] = useState(true);
 	const [openEditDialog, setOpenEditDialog] = useState(false);
 	const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
@@ -141,88 +502,76 @@ function ManagerDashboard() {
 	const [openReturnDialog, setOpenReturnDialog] = useState(false);
 	const [selectedPlan, setSelectedPlan] = useState(null);
 	const [returnComment, setReturnComment] = useState('');
+	const [lastNameError, setLastNameError] = useState('');
+	const [firstNameError, setFirstNameError] = useState('');
+	const [middleNameError, setMiddleNameError] = useState('');
 
-	// Эффект для автоматического закрытия уведомлений через 3 секунды
+	// Эффект для автоматического закрытия уведомлений
 	useEffect(() => {
 		let errorTimer, successTimer;
-
 		if (openError) {
-			errorTimer = setTimeout(() => {
-				setOpenError(false);
-			}, 3000);
+			errorTimer = setTimeout(() => setOpenError(false), 3000);
 		}
-
 		if (openSuccess) {
-			successTimer = setTimeout(() => {
-				setOpenSuccess(false);
-			}, 3000);
+			successTimer = setTimeout(() => setOpenSuccess(false), 3000);
 		}
-
-		// Очистка таймеров при размонтировании компонента или при изменении состояний
 		return () => {
 			if (errorTimer) clearTimeout(errorTimer);
 			if (successTimer) clearTimeout(successTimer);
 		};
 	}, [openError, openSuccess]);
 
-	const handleDownload = async (fileUrl, fileName) => {
-		// Проверяем, что fileUrl существует и является строкой
-		if (!fileUrl || typeof fileUrl !== 'string' || fileUrl.trim() === '') {
-			console.error('Некорректный fileUrl:', fileUrl);
-			setError('Некорректный URL файла. Обратитесь к администратору.');
-			setOpenError(true);
-			return;
-		}
-
-		// Убеждаемся, что fileUrl начинается с '/', если это относительный путь
-		const normalizedFileUrl = fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`;
-		const fullUrl = `http://localhost:5000${normalizedFileUrl}`;
-		console.log('Попытка скачать файл с URL:', fullUrl);
-
-		try {
-			const response = await axios.get(fullUrl, {
-				responseType: 'blob',
-				withCredentials: true,
-				headers: {
-					'X-CSRFToken': csrfToken,
-				},
-			});
-
-			const blob = new Blob([response.data]);
-			const url = window.URL.createObjectURL(blob);
-			const link = document.createElement('a');
-			link.href = url;
-			link.download = fileName || normalizedFileUrl.split('/').pop();
-			document.body.appendChild(link);
-			link.click();
-			document.body.removeChild(link);
-			window.URL.revokeObjectURL(url);
-		} catch (err) {
-			console.error('Ошибка при скачивании файла:', err);
-			if (err.response) {
-				setError(`Ошибка сервера: ${err.response.status}. Не удалось скачать файл.`);
-			} else {
-				setError('Не удалось скачать файл. Проверьте подключение или URL.');
-			}
-			setOpenError(true);
-		}
+	// Валидация ФИО
+	const validateNamePart = (value, fieldName) => {
+		if (!value.trim()) return `${fieldName} обязательно для заполнения.`;
+		if (!namePartRegex.test(value))
+			return `${fieldName} должно начинаться с заглавной буквы, содержать только кириллицу и быть длиной не менее 2 символов.`;
+		return '';
 	};
 
-	useEffect(() => {
-		if (!isAuthenticated || user.role !== 'manager') navigate('/login');
-		fetchNeedsReviewPublications(currentPageNeedsReview);
-		fetchPlans(currentPagePlans);
-		setLoadingInitial(false);
-	}, [isAuthenticated, user, navigate, currentPageNeedsReview, currentPagePlans]);
+	const validateFullName = (lastName, firstName, middleName) => {
+		const fullName = `${lastName} ${firstName} ${middleName}`;
+		if (!fullNameRegex.test(fullName))
+			return 'ФИО должно быть в формате "Иванов Иван Иванович" (три слова с заглавной буквы, разделённые пробелами).';
+		return '';
+	};
 
-	const fetchNeedsReviewPublications = async (page) => {
+	// Обработчики изменения полей ФИО
+	const handleLastNameChange = (e) => {
+		const value = e.target.value;
+		setNewLastName(value);
+		setLastNameError(validateNamePart(value, 'Фамилия'));
+	};
+
+	const handleFirstNameChange = (e) => {
+		const value = e.target.value;
+		setNewFirstName(value);
+		setFirstNameError(validateNamePart(value, 'Имя'));
+	};
+
+	const handleMiddleNameChange = (e) => {
+		const value = e.target.value;
+		setNewMiddleName(value);
+		setMiddleNameError(validateNamePart(value, 'Отчество'));
+	};
+
+	// Загрузка публикаций с учётом фильтра по статусу
+	const fetchPublications = async (page) => {
 		try {
-			const response = await axios.get(`http://localhost:5000/admin_api/admin/publications/needs-review?page=${page}&per_page=10&search=${searchQuery}`, {
+			const response = await axios.get(`http://localhost:5000/admin_api/admin/publications`, {
 				withCredentials: true,
 				headers: { 'X-CSRFToken': csrfToken },
+				params: {
+					page,
+					per_page: 10,
+					search: searchQuery,
+					status: ['needs_review', 'returned_for_revision', 'published'].join(','), // Фильтр по допустимым статусам
+					sort_status: statusFilter, // Передаём приоритетный статус для сортировки
+				},
 			});
-			setNeedsReviewPublications(response.data.publications);
-			setTotalPagesNeedsReview(response.data.pages);
+			// Больше не сортируем на клиенте, сервер вернёт уже отсортированные данные
+			setPublications(response.data.publications);
+			setTotalPagesPublications(response.data.pages);
 		} catch (err) {
 			console.error('Ошибка загрузки публикаций:', err);
 			setError('Не удалось загрузить публикации. Попробуйте позже.');
@@ -236,7 +585,6 @@ function ManagerDashboard() {
 				withCredentials: true,
 				headers: { 'X-CSRFToken': csrfToken },
 			});
-			console.log('Данные планов с сервера:', response.data.plans); // Логируем данные для проверки
 			setPlans(response.data.plans);
 			setTotalPagesPlans(response.data.pages);
 		} catch (err) {
@@ -246,23 +594,64 @@ function ManagerDashboard() {
 		}
 	};
 
+	// Загрузка данных при изменении страницы, статуса или поиска
+	useEffect(() => {
+		if (!isAuthenticated || user.role !== 'manager') navigate('/login');
+		setLoadingInitial(true);
+		fetchPublications(currentPagePublications);
+		fetchPlans(currentPagePlans);
+		setLoadingInitial(false);
+	}, [isAuthenticated, user, navigate, currentPagePublications, currentPagePlans, statusFilter, searchQuery]);
+
 	const handleTabChange = (event, newValue) => {
 		setValue(newValue);
 	};
 
-	const handleSearchChange = (event) => {
-		setSearchQuery(event.target.value);
-		fetchNeedsReviewPublications(1);
+	const handleSearchChange = (e) => {
+		setSearchQuery(e.target.value);
+		setCurrentPagePublications(1); // Сбрасываем страницу при новом поиске
 	};
 
-	const handlePageChangeNeedsReview = (event, value) => {
-		setCurrentPageNeedsReview(value);
-		fetchNeedsReviewPublications(value);
+	const handleStatusFilterChange = (e) => {
+		setStatusFilter(e.target.value);
+		setCurrentPagePublications(1); // Сбрасываем страницу при смене статуса
+	};
+
+	const handlePageChangePublications = (event, value) => {
+		setCurrentPagePublications(value);
 	};
 
 	const handlePageChangePlans = (event, value) => {
 		setCurrentPagePlans(value);
-		fetchPlans(value);
+	};
+
+	const handleDownload = async (fileUrl, fileName) => {
+		if (!fileUrl || typeof fileUrl !== 'string' || fileUrl.trim() === '') {
+			setError('Некорректный URL файла. Обратитесь к администратору.');
+			setOpenError(true);
+			return;
+		}
+		const normalizedFileUrl = fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`;
+		const fullUrl = `http://localhost:5000${normalizedFileUrl}`;
+		try {
+			const response = await axios.get(fullUrl, {
+				responseType: 'blob',
+				withCredentials: true,
+				headers: { 'X-CSRFToken': csrfToken },
+			});
+			const blob = new Blob([response.data]);
+			const url = window.URL.createObjectURL(blob);
+			const link = document.createElement('a');
+			link.href = url;
+			link.download = fileName || normalizedFileUrl.split('/').pop();
+			document.body.appendChild(link);
+			link.click();
+			document.body.removeChild(link);
+			window.URL.revokeObjectURL(url);
+		} catch (err) {
+			setError(err.response ? `Ошибка сервера: ${err.response.status}` : 'Не удалось скачать файл.');
+			setOpenError(true);
+		}
 	};
 
 	const handleEditClick = (publication) => {
@@ -296,7 +685,6 @@ function ManagerDashboard() {
 			setOpenError(true);
 			return;
 		}
-
 		const formData = new FormData();
 		formData.append('title', editTitle);
 		formData.append('authors', editAuthors);
@@ -306,16 +694,15 @@ function ManagerDashboard() {
 		if (editFile) formData.append('file', editFile);
 
 		try {
-			const response = await axios.put(`http://localhost:5000/admin_api/admin/publications/${editPublication.id}`, formData, {
+			await axios.put(`http://localhost:5000/admin_api/admin/publications/${editPublication.id}`, formData, {
 				withCredentials: true,
 				headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'multipart/form-data' },
 			});
 			setSuccess('Публикация успешно обновлена!');
 			setOpenSuccess(true);
-			fetchNeedsReviewPublications(currentPageNeedsReview);
+			fetchPublications(currentPagePublications);
 			handleEditCancel();
 		} catch (err) {
-			console.error('Ошибка обновления публикации:', err);
 			setError('Не удалось обновить публикацию. Попробуйте позже.');
 			setOpenError(true);
 		}
@@ -335,11 +722,10 @@ function ManagerDashboard() {
 				});
 				setSuccess('Публикация успешно удалена!');
 				setOpenSuccess(true);
-				fetchNeedsReviewPublications(currentPageNeedsReview);
+				fetchPublications(currentPagePublications);
 				setOpenDeleteDialog(false);
 				setPublicationToDelete(null);
 			} catch (err) {
-				console.error('Ошибка удаления публикации:', err);
 				setError('Не удалось удалить публикацию. Попробуйте позже.');
 				setOpenError(true);
 			}
@@ -356,7 +742,6 @@ function ManagerDashboard() {
 			setOpenSuccess(true);
 			fetchPlans(currentPagePlans);
 		} catch (err) {
-			console.error('Ошибка утверждения плана:', err);
 			setError('Не удалось утвердить план. Попробуйте позже.');
 			setOpenError(true);
 		}
@@ -385,16 +770,9 @@ function ManagerDashboard() {
 			fetchPlans(currentPagePlans);
 			setOpenReturnDialog(false);
 		} catch (err) {
-			console.error('Ошибка возврата плана:', err);
 			setError('Не удалось вернуть план. Попробуйте позже.');
 			setOpenError(true);
 		}
-	};
-
-	const calculateProgress = (plan) => {
-		const completed = plan.entries.filter((entry) => entry.publication_id).length;
-		const total = plan.expectedCount;
-		return total > 0 ? (completed / total) * 100 : 0;
 	};
 
 	return (
@@ -439,10 +817,20 @@ function ManagerDashboard() {
 										onChange={handleSearchChange}
 										margin="normal"
 										variant="outlined"
-										InputProps={{
-											endAdornment: <IconButton sx={{ color: '#0071E3' }}></IconButton>,
-										}}
 									/>
+									<AppleTextField
+										select
+										label="Фильтр по статусу"
+										value={statusFilter}
+										onChange={handleStatusFilterChange}
+										margin="normal"
+										variant="outlined"
+										sx={{ mt: 2, width: '200px' }}
+									>
+										<MenuItem value="needs_review">На проверке</MenuItem>
+										<MenuItem value="returned_for_revision">Отправлено на доработку</MenuItem>
+										<MenuItem value="published">Опубликовано</MenuItem>
+									</AppleTextField>
 								</AppleCard>
 								<AppleTable sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
 									<TableHead>
@@ -461,8 +849,8 @@ function ManagerDashboard() {
 									</TableHead>
 									<Fade in={true} timeout={500}>
 										<TableBody>
-											{needsReviewPublications.length > 0 ? (
-												needsReviewPublications.map((pub) => (
+											{publications.length > 0 ? (
+												publications.map((pub) => (
 													<TableRow
 														key={pub.id}
 														sx={{
@@ -524,7 +912,7 @@ function ManagerDashboard() {
 											) : (
 												<TableRow>
 													<TableCell colSpan={8} sx={{ textAlign: 'center', color: '#6E6E73' }}>
-														Нет публикаций, ожидающих проверки.
+														Нет публикаций с указанными статусами.
 													</TableCell>
 												</TableRow>
 											)}
@@ -533,9 +921,9 @@ function ManagerDashboard() {
 								</AppleTable>
 								<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
 									<Pagination
-										count={totalPagesNeedsReview}
-										page={currentPageNeedsReview}
-										onChange={handlePageChangeNeedsReview}
+										count={totalPagesPublications}
+										page={currentPagePublications}
+										onChange={handlePageChangePublications}
 										color="primary"
 										sx={{
 											'& .MuiPaginationItem-root': {
@@ -551,57 +939,50 @@ function ManagerDashboard() {
 						)}
 
 						{value === 1 && (
-							<Typography
-								variant="h5"
-								gutterBottom
-								sx={{
-									mt: 4,
-									color: '#1D1D1F',
-									fontWeight: 600,
-									textAlign: 'center',
-								}}
-							>
+							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
 								Статистика по кафедре
 							</Typography>
 						)}
 
 						{value === 2 && (
 							<>
-								<Typography
-									variant="h5"
-									gutterBottom
-									sx={{ mt: 4, color: "#1D1D1F", fontWeight: 600, textAlign: "center" }}
-								>
+								<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
 									Регистрация нового пользователя
 								</Typography>
-								<AppleCard sx={{ maxWidth: "none", mx: "auto", mt: 2, p: 4 }}>
-									<form onSubmit={(e) => { e.preventDefault(); }}>
+								<AppleCard sx={{ maxWidth: 'none', mx: 'auto', mt: 2, p: 4 }}>
+									<form onSubmit={(e) => e.preventDefault()}>
 										<AppleTextField
 											fullWidth
 											label="Фамилия"
 											value={newLastName}
-											onChange={(e) => setNewLastName(e.target.value)}
+											onChange={handleLastNameChange}
 											margin="normal"
 											variant="outlined"
 											autoComplete="family-name"
+											error={!!lastNameError}
+											helperText={lastNameError}
 										/>
 										<AppleTextField
 											fullWidth
 											label="Имя"
 											value={newFirstName}
-											onChange={(e) => setNewFirstName(e.target.value)}
+											onChange={handleFirstNameChange}
 											margin="normal"
 											variant="outlined"
 											autoComplete="given-name"
+											error={!!firstNameError}
+											helperText={firstNameError}
 										/>
 										<AppleTextField
 											fullWidth
 											label="Отчество"
 											value={newMiddleName}
-											onChange={(e) => setNewMiddleName(e.target.value)}
+											onChange={handleMiddleNameChange}
 											margin="normal"
 											variant="outlined"
 											autoComplete="additional-name"
+											error={!!middleNameError}
+											helperText={middleNameError}
 										/>
 										<AppleTextField
 											fullWidth
@@ -615,7 +996,7 @@ function ManagerDashboard() {
 										<AppleTextField
 											fullWidth
 											label="Пароль"
-											type={showPassword ? "text" : "password"}
+											type={showPassword ? 'text' : 'password'}
 											value={newPassword}
 											onChange={(e) => setNewPassword(e.target.value)}
 											margin="normal"
@@ -629,18 +1010,27 @@ function ManagerDashboard() {
 												),
 											}}
 										/>
-										<Box sx={{ display: "flex", gap: 2, mt: 2 }}>
+										<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
 											<AppleButton
 												startIcon={<RefreshIcon />}
 												onClick={async () => {
-													// Функция генерации логина из AdminDashboard.js
-													const generateUsername = async () => {
-														if (!newLastName || !newFirstName || !newMiddleName) {
-															setError('Для генерации логина необходимо заполнить ФИО.');
-															setOpenError(true);
-															return null;
-														}
+													const lastNameErr = validateNamePart(newLastName, 'Фамилия');
+													const firstNameErr = validateNamePart(newFirstName, 'Имя');
+													const middleNameErr = validateNamePart(newMiddleName, 'Отчество');
+													const fullNameErr = validateFullName(newLastName, newFirstName, newMiddleName);
 
+													if (lastNameErr || firstNameErr || middleNameErr || fullNameErr) {
+														setLastNameError(lastNameErr);
+														setFirstNameError(firstNameErr);
+														setMiddleNameError(middleNameErr);
+														if (fullNameErr) {
+															setError(fullNameErr);
+															setOpenError(true);
+														}
+														return;
+													}
+
+													const generateUsername = async () => {
 														const transliterate = (text) => {
 															const ruToEn = {
 																'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd',
@@ -653,12 +1043,8 @@ function ManagerDashboard() {
 															};
 															return text.toLowerCase().split('').map(char => ruToEn[char] || char).join('');
 														};
-
-														const capitalizeFirstLetter = (string) => {
-															if (!string) return '';
-															return string.charAt(0).toUpperCase() + string.slice(1);
-														};
-
+														const capitalizeFirstLetter = (string) =>
+															string ? string.charAt(0).toUpperCase() + string.slice(1) : '';
 														const baseUsername = `${capitalizeFirstLetter(transliterate(newLastName))}${capitalizeFirstLetter(transliterate(newFirstName[0]))}${capitalizeFirstLetter(transliterate(newMiddleName[0]))}`;
 														let generatedUsername = baseUsername;
 														let suffix = 1;
@@ -670,13 +1056,11 @@ function ManagerDashboard() {
 																	{ username: generatedUsername },
 																	{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
 																);
-																if (!response.data.exists) {
-																	break;
-																}
+																if (!response.data.exists) break;
 																generatedUsername = `${baseUsername}${suffix}`;
 																suffix++;
 															} catch (err) {
-																setError('Ошибка проверки логина. Попробуйте снова.');
+																setError('Ошибка проверки логина.');
 																setOpenError(true);
 																return null;
 															}
@@ -688,16 +1072,16 @@ function ManagerDashboard() {
 													if (!generatedUsername) return;
 
 													try {
-														const response = await axios.get(
-															'http://localhost:5000/admin_api/admin/generate-password',
-															{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
-														);
+														const response = await axios.get('http://localhost:5000/admin_api/admin/generate-password', {
+															withCredentials: true,
+															headers: { 'X-CSRFToken': csrfToken },
+														});
 														setNewUsername(generatedUsername);
 														setNewPassword(response.data.password);
 														setSuccess('Логин и пароль успешно сгенерированы.');
 														setOpenSuccess(true);
 													} catch (err) {
-														setError('Ошибка генерации пароля. Попробуйте снова.');
+														setError('Ошибка генерации пароля.');
 														setOpenError(true);
 													}
 												}}
@@ -707,10 +1091,8 @@ function ManagerDashboard() {
 											<AppleButton
 												startIcon={<ContentCopyIcon />}
 												onClick={() => {
-													navigator.clipboard.writeText(
-														`Логин: ${newUsername}\nПароль: ${newPassword}`
-													);
-													setSuccess("Данные скопированы в буфер обмена!");
+													navigator.clipboard.writeText(`Логин: ${newUsername}\nПароль: ${newPassword}`);
+													setSuccess('Данные скопированы в буфер обмена!');
 													setOpenSuccess(true);
 												}}
 											>
@@ -719,20 +1101,31 @@ function ManagerDashboard() {
 											<AppleButton
 												type="submit"
 												onClick={async () => {
-													if (
-														!newUsername.trim() ||
-														!newPassword.trim() ||
-														!newLastName.trim() ||
-														!newFirstName.trim() ||
-														!newMiddleName.trim()
-													) {
-														setError("Все поля обязательны.");
+													const lastNameErr = validateNamePart(newLastName, 'Фамилия');
+													const firstNameErr = validateNamePart(newFirstName, 'Имя');
+													const middleNameErr = validateNamePart(newMiddleName, 'Отчество');
+													const fullNameErr = validateFullName(newLastName, newFirstName, newMiddleName);
+
+													if (lastNameErr || firstNameErr || middleNameErr || fullNameErr) {
+														setLastNameError(lastNameErr);
+														setFirstNameError(firstNameErr);
+														setMiddleNameError(middleNameErr);
+														if (fullNameErr) {
+															setError(fullNameErr);
+															setOpenError(true);
+														}
+														return;
+													}
+
+													if (!newUsername.trim() || !newPassword.trim()) {
+														setError('Логин и пароль обязательны.');
 														setOpenError(true);
 														return;
 													}
+
 													try {
 														await axios.post(
-															"http://localhost:5000/admin_api/admin/register",
+															'http://localhost:5000/admin_api/admin/register',
 															{
 																username: newUsername,
 																password: newPassword,
@@ -740,20 +1133,20 @@ function ManagerDashboard() {
 																first_name: newFirstName,
 																middle_name: newMiddleName,
 															},
-															{ withCredentials: true, headers: { "X-CSRFToken": csrfToken } }
+															{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
 														);
-														setSuccess("Пользователь успешно зарегистрирован!");
+														setSuccess('Пользователь успешно зарегистрирован!');
 														setOpenSuccess(true);
-														setNewLastName("");
-														setNewFirstName("");
-														setNewMiddleName("");
-														setNewUsername("");
-														setNewPassword("");
+														setNewLastName('');
+														setNewFirstName('');
+														setNewMiddleName('');
+														setNewUsername('');
+														setNewPassword('');
+														setLastNameError('');
+														setFirstNameError('');
+														setMiddleNameError('');
 													} catch (err) {
-														console.error("Ошибка регистрации:", err);
-														setError(
-															err.response?.data?.error || "Не удалось зарегистрировать пользователя."
-														);
+														setError(err.response?.data?.error || 'Не удалось зарегистрировать пользователя.');
 														setOpenError(true);
 													}
 												}}
@@ -765,13 +1158,7 @@ function ManagerDashboard() {
 											{error && (
 												<Alert
 													severity="error"
-													sx={{
-														mt: 2,
-														borderRadius: '12px',
-														backgroundColor: '#FFF1F0',
-														color: '#1D1D1F',
-														boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-													}}
+													sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#FFF1F0', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
 													onClose={() => setOpenError(false)}
 												>
 													{error}
@@ -782,13 +1169,7 @@ function ManagerDashboard() {
 											{success && (
 												<Alert
 													severity="success"
-													sx={{
-														mt: 2,
-														borderRadius: '12px',
-														backgroundColor: '#E7F8E7',
-														color: '#1D1D1F',
-														boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-													}}
+													sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#E7F8E7', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
 													onClose={() => setOpenSuccess(false)}
 												>
 													{success}
@@ -809,11 +1190,7 @@ function ManagerDashboard() {
 									plans.map((plan) => (
 										<Accordion
 											key={plan.id}
-											sx={{
-												mb: 2,
-												borderRadius: '16px',
-												boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-											}}
+											sx={{ mb: 2, borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}
 										>
 											<AccordionSummary expandIcon={<ExpandMoreIcon />}>
 												<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
@@ -831,61 +1208,52 @@ function ManagerDashboard() {
 												</Box>
 											</AccordionSummary>
 											<AccordionDetails>
-												<>
-													<PlanTable>
-														<TableHead>
-															<TableRow>
-																<TableCell>Название</TableCell>
-																<TableCell>Тип</TableCell>
-																<TableCell>Статус</TableCell>
+												<PlanTable>
+													<TableHead>
+														<TableRow>
+															<TableCell>Название</TableCell>
+															<TableCell>Тип</TableCell>
+															<TableCell>Статус</TableCell>
+														</TableRow>
+													</TableHead>
+													<TableBody>
+														{plan.entries.map((entry) => (
+															<TableRow key={entry.id}>
+																<TableCell>{entry.title || 'Не указано'}</TableCell>
+																<TableCell>
+																	{entry.type === 'article'
+																		? 'Статья'
+																		: entry.type === 'monograph'
+																			? 'Монография'
+																			: entry.type === 'conference'
+																				? 'Доклад/конференция'
+																				: entry.type || 'Не указано'}
+																</TableCell>
+																<TableCell>
+																	<StatusChip status={entry.status} />
+																</TableCell>
 															</TableRow>
-														</TableHead>
-														<TableBody>
-															{plan.entries.map((entry) => (
-																<TableRow key={entry.id}>
-																	<TableCell>{entry.title || 'Не указано'}</TableCell>
-																	<TableCell>
-																		{entry.type === 'article'
-																			? 'Статья'
-																			: entry.type === 'monograph'
-																				? 'Монография'
-																				: entry.type === 'conference'
-																					? 'Доклад/конференция'
-																					: entry.type || 'Не указано'}
-																	</TableCell>
-																	<TableCell>
-																		<StatusChip status={entry.status} />
-																	</TableCell>
-																</TableRow>
-															))}
-														</TableBody>
-													</PlanTable>
-													{plan.return_comment && (
-														<Typography
-															sx={{
-																mt: 2,
-																color: '#000000',
-																fontWeight: 600,
-																display: 'flex',
-																alignItems: 'center',
-																gap: 1,
-															}}
-														>
-															<WarningAmberIcon sx={{ color: '#FF3B30' }} />
-															Комментарий при возврате: {plan.return_comment}
-														</Typography>
-													)}
-													{plan.status === 'needs_review' && (
-														<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-															<GreenButton startIcon={<CheckIcon />} onClick={() => handleApprovePlan(plan)}>
-																Утвердить
-															</GreenButton>
-															<AppleButton startIcon={<ReplayIcon />} onClick={() => handleOpenReturnDialog(plan)}>
-																На доработку
-															</AppleButton>
-														</Box>
-													)}
-												</>
+														))}
+													</TableBody>
+												</PlanTable>
+												{plan.return_comment && (
+													<Typography
+														sx={{ mt: 2, color: '#000000', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}
+													>
+														<WarningAmberIcon sx={{ color: '#FF3B30' }} />
+														Комментарий при возврате: {plan.return_comment}
+													</Typography>
+												)}
+												{plan.status === 'needs_review' && (
+													<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+														<GreenButton startIcon={<CheckIcon />} onClick={() => handleApprovePlan(plan)}>
+															Утвердить
+														</GreenButton>
+														<AppleButton startIcon={<ReplayIcon />} onClick={() => handleOpenReturnDialog(plan)}>
+															На доработку
+														</AppleButton>
+													</Box>
+												)}
 											</AccordionDetails>
 										</Accordion>
 									))
@@ -914,7 +1282,10 @@ function ManagerDashboard() {
 
 						<Dialog
 							open={openDeleteDialog}
-							onClose={() => { setOpenDeleteDialog(false); setPublicationToDelete(null); }}
+							onClose={() => {
+								setOpenDeleteDialog(false);
+								setPublicationToDelete(null);
+							}}
 							sx={{
 								'& .MuiDialog-paper': {
 									backgroundColor: '#FFFFFF',
@@ -933,10 +1304,15 @@ function ManagerDashboard() {
 								</Typography>
 							</DialogContent>
 							<DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5EA' }}>
-								<CancelButton onClick={() => { setOpenDeleteDialog(false); setPublicationToDelete(null); }}>Отмена</CancelButton>
-								<AppleButton onClick={handleDeletePlanConfirm}>
-									Удалить
-								</AppleButton>
+								<CancelButton
+									onClick={() => {
+										setOpenDeleteDialog(false);
+										setPublicationToDelete(null);
+									}}
+								>
+									Отмена
+								</CancelButton>
+								<AppleButton onClick={handleDeletePlanConfirm}>Удалить</AppleButton>
 							</DialogActions>
 						</Dialog>
 
@@ -1033,13 +1409,7 @@ function ManagerDashboard() {
 										{error && (
 											<Alert
 												severity="error"
-												sx={{
-													mt: 2,
-													borderRadius: '12px',
-													backgroundColor: '#FFF1F0',
-													color: '#1D1D1F',
-													boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-												}}
+												sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#FFF1F0', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
 												onClose={() => setOpenError(false)}
 											>
 												{error}
@@ -1050,13 +1420,7 @@ function ManagerDashboard() {
 										{success && (
 											<Alert
 												severity="success"
-												sx={{
-													mt: 2,
-													borderRadius: '12px',
-													backgroundColor: '#E7F8E7',
-													color: '#1D1D1F',
-													boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-												}}
+												sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#E7F8E7', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
 												onClose={() => setOpenSuccess(false)}
 											>
 												{success}
@@ -1116,13 +1480,7 @@ function ManagerDashboard() {
 									{error && (
 										<Alert
 											severity="error"
-											sx={{
-												mt: 2,
-												borderRadius: '12px',
-												backgroundColor: '#FFF1F0',
-												color: '#1D1D1F',
-												boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-											}}
+											sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#FFF1F0', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
 											onClose={() => setOpenError(false)}
 										>
 											{error}
@@ -1133,13 +1491,7 @@ function ManagerDashboard() {
 									{success && (
 										<Alert
 											severity="success"
-											sx={{
-												mt: 2,
-												borderRadius: '12px',
-												backgroundColor: '#E7F8E7',
-												color: '#1D1D1F',
-												boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-											}}
+											sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#E7F8E7', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
 											onClose={() => setOpenSuccess(false)}
 										>
 											{success}
@@ -1156,1217 +1508,6 @@ function ManagerDashboard() {
 }
 
 export default ManagerDashboard;
-
-import React, { useState, useEffect } from 'react';
-import {
-	Container,
-	Typography,
-	Tabs,
-	Tab,
-	Box,
-	Table,
-	TableHead,
-	TableRow,
-	TableCell,
-	TableBody,
-	Button,
-	Collapse,
-	Dialog,
-	DialogTitle,
-	DialogContent,
-	DialogActions,
-	TextField,
-	IconButton,
-	CircularProgress,
-	Alert,
-	Pagination,
-	Fade,
-} from '@mui/material';
-import MenuItem from '@mui/material/MenuItem';
-import { useNavigate } from 'react-router-dom';
-import { useAuth } from '../contexts/AuthContext';
-import EditIcon from '@mui/icons-material/Edit';
-import DeleteIcon from '@mui/icons-material/Delete';
-import DownloadIcon from '@mui/icons-material/Download';
-import RefreshIcon from '@mui/icons-material/Refresh';
-import Visibility from '@mui/icons-material/Visibility';
-import VisibilityOff from '@mui/icons-material/VisibilityOff';
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import axios from 'axios';
-import { styled } from '@mui/system';
-
-const AppleButton = styled(Button)(({ theme }) => ({
-	borderRadius: '12px',
-	textTransform: 'none',
-	backgroundColor: '#0071E3',
-	color: '#FFFFFF',
-	padding: '8px 16px',
-	fontSize: '14px',
-	fontWeight: 600,
-	boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-	'&:hover': {
-		backgroundColor: '#0066CC',
-		boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
-	},
-	'&:disabled': {
-		backgroundColor: '#D1D1D6',
-		color: '#FFFFFF',
-	},
-}));
-
-const AppleTextField = styled(TextField)(({ theme }) => ({
-	'& .MuiOutlinedInput-root': {
-		borderRadius: '12px',
-		backgroundColor: '#F5F5F7',
-		'& fieldset': {
-			borderColor: '#D1D1D6',
-		},
-		'&:hover fieldset': {
-			borderColor: '#0071E3',
-		},
-		'&.Mui-focused fieldset': {
-			borderColor: '#0071E3',
-		},
-	},
-	'& label': {
-		color: '#6E6E73',
-	},
-	'& input': {
-		color: '#1D1D1F',
-	},
-	'& .MuiSelect-select': {
-		backgroundColor: '#F5F5F7',
-	},
-}));
-
-const AppleTable = styled(Table)(({ theme }) => ({
-	borderRadius: '16px',
-	overflow: 'hidden',
-	backgroundColor: '#FFFFFF',
-	boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-}));
-
-const AppleCard = styled(Box)(({ theme }) => ({
-	borderRadius: '16px',
-	boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-	backgroundColor: '#F5F5F7',
-	padding: '16px',
-}));
-
-const CancelButton = styled(Button)(({ theme }) => ({
-	borderRadius: '12px',
-	color: '#0071E3',
-	textTransform: 'none',
-	backgroundColor: 'transparent',
-	'&:hover': {
-		color: '#FFFFFF',
-		backgroundColor: '#0071E3',
-	},
-}));
-
-function AdminDashboard() {
-	const [value, setValue] = useState(0);
-	const [users, setUsers] = useState([]);
-	const [publications, setPublications] = useState([]);
-	const [currentPageUsers, setCurrentPageUsers] = useState(1);
-	const [totalPagesUsers, setTotalPagesUsers] = useState(1);
-	const [currentPagePublications, setCurrentPagePublications] = useState(1);
-	const [totalPagesPublications, setTotalPagesPublications] = useState(1);
-	const [loadingInitial, setLoadingInitial] = useState(true);
-	const [searchQuery, setSearchQuery] = useState('');
-	const [filterType, setFilterType] = useState('all');
-	const [filterStatus, setFilterStatus] = useState('all');
-	const [error, setError] = useState('');
-	const [success, setSuccess] = useState('');
-	const [openError, setOpenError] = useState(false);
-	const [openSuccess, setOpenSuccess] = useState(false);
-	const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
-	const [userToDelete, setUserToDelete] = useState(null);
-	const [publicationToDelete, setPublicationToDelete] = useState(null);
-	const [editUser, setEditUser] = useState(null);
-	const [editPublication, setEditPublication] = useState(null);
-	const [editUsername, setEditUsername] = useState('');
-	const [editRole, setEditRole] = useState('');
-	const [editLastName, setEditLastName] = useState('');
-	const [editFirstName, setEditFirstName] = useState('');
-	const [editMiddleName, setEditMiddleName] = useState('');
-	const [editNewPassword, setEditNewPassword] = useState('');
-	const [showEditPassword, setShowEditPassword] = useState(false);
-	const [editTitle, setEditTitle] = useState('');
-	const [editAuthors, setEditAuthors] = useState('');
-	const [editYear, setEditYear] = useState('');
-	const [editType, setEditType] = useState('');
-	const [editStatus, setEditStatus] = useState('');
-	const [editFile, setEditFile] = useState(null);
-	const [openEditDialog, setOpenEditDialog] = useState(false);
-	const navigate = useNavigate();
-	const { csrfToken } = useAuth();
-
-	const [newUsername, setNewUsername] = useState('');
-	const [newPassword, setNewPassword] = useState('');
-	const [newLastName, setNewLastName] = useState('');
-	const [newFirstName, setNewFirstName] = useState('');
-	const [newMiddleName, setNewMiddleName] = useState('');
-	const [showPassword, setShowPassword] = useState(false);
-
-	useEffect(() => {
-		const fetchData = async () => {
-			setLoadingInitial(true);
-			try {
-				const usersResponse = await axios.get('http://localhost:5000/admin_api/admin/users', {
-					withCredentials: true,
-					params: { page: currentPageUsers, per_page: 10, search: searchQuery },
-				});
-				setUsers(usersResponse.data.users || []);
-				setTotalPagesUsers(usersResponse.data.pages || 1);
-
-				const publicationsResponse = await axios.get('http://localhost:5000/admin_api/admin/publications', {
-					withCredentials: true,
-					params: { page: currentPagePublications, per_page: 10, search: searchQuery, type: filterType, status: filterStatus },
-				});
-				setPublications(publicationsResponse.data.publications || []);
-				setTotalPagesPublications(publicationsResponse.data.pages || 1);
-			} catch (err) {
-				setError('Ошибка загрузки данных. Попробуйте позже.');
-				setOpenError(true);
-			} finally {
-				setLoadingInitial(false);
-			}
-		};
-
-		fetchData();
-	}, [currentPageUsers, currentPagePublications, searchQuery, filterType, filterStatus]);
-
-	const handleTabChange = (event, newValue) => {
-		setValue(newValue);
-		setSearchQuery('');
-		setFilterType('all');
-		setFilterStatus('all');
-		setCurrentPageUsers(1);
-		setCurrentPagePublications(1);
-	};
-
-	const handlePageChangeUsers = (event, newPage) => {
-		setCurrentPageUsers(newPage);
-	};
-
-	const handlePageChangePublications = (event, newPage) => {
-		setCurrentPagePublications(newPage);
-	};
-
-	const handleSearchChange = async (e) => {
-		setSearchQuery(e.target.value);
-		setCurrentPageUsers(1);
-		setCurrentPagePublications(1);
-	};
-
-	const handleFilterTypeChange = (e) => {
-		setFilterType(e.target.value);
-		setCurrentPagePublications(1);
-	};
-
-	const handleFilterStatusChange = (e) => {
-		setFilterStatus(e.target.value);
-		setCurrentPagePublications(1);
-	};
-
-	const handleDeleteClick = (type, item) => {
-		if (type === 'user') {
-			setUserToDelete(item);
-		} else {
-			setPublicationToDelete(item);
-		}
-		setOpenDeleteDialog(true);
-	};
-
-	const handleDeleteCancel = () => {
-		setOpenDeleteDialog(false);
-		setUserToDelete(null);
-		setPublicationToDelete(null);
-	};
-
-	const handleDeleteConfirm = async () => {
-		try {
-			if (userToDelete) {
-				await axios.delete(`http://localhost:5000/admin_api/admin/users/${userToDelete.id}`, {
-					withCredentials: true,
-					headers: { 'X-CSRFToken': csrfToken },
-				});
-				setUsers(users.filter((user) => user.id !== userToDelete.id));
-				setSuccess('Пользователь успешно удалён.');
-				setOpenSuccess(true);
-			} else if (publicationToDelete) {
-				await axios.delete(`http://localhost:5000/admin_api/admin/publications/${publicationToDelete.id}`, {
-					withCredentials: true,
-					headers: { 'X-CSRFToken': csrfToken },
-				});
-				setPublications(publications.filter((pub) => pub.id !== publicationToDelete.id));
-				setSuccess('Публикация успешно удалена.');
-				setOpenSuccess(true);
-			}
-		} catch (err) {
-			setError('Ошибка при удалении. Попробуйте позже.');
-			setOpenError(true);
-		} finally {
-			setOpenDeleteDialog(false);
-			setUserToDelete(null);
-			setPublicationToDelete(null);
-		}
-	};
-
-	const handleEditClick = (type, item) => {
-		if (type === 'user') {
-			setEditUser(item);
-			setEditUsername(item.username);
-			setEditRole(item.role);
-			setEditLastName(item.last_name);
-			setEditFirstName(item.first_name);
-			setEditMiddleName(item.middle_name || '');
-			setEditNewPassword('');
-			setShowEditPassword(false);
-		} else {
-			setEditPublication(item);
-			setEditTitle(item.title);
-			setEditAuthors(item.authors);
-			setEditYear(item.year);
-			setEditType(item.type);
-			setEditStatus(item.status);
-			setEditFile(null);
-		}
-		setOpenEditDialog(true);
-	};
-
-	const handleEditCancel = () => {
-		setOpenEditDialog(false);
-		setEditUser(null);
-		setEditPublication(null);
-		setEditUsername('');
-		setEditRole('');
-		setEditLastName('');
-		setEditFirstName('');
-		setEditMiddleName('');
-		setEditNewPassword('');
-		setShowEditPassword(false);
-		setEditTitle('');
-		setEditAuthors('');
-		setEditYear('');
-		setEditType('');
-		setEditStatus('');
-		setEditFile(null);
-		setError('');
-		setSuccess('');
-		setOpenError(false);
-		setOpenSuccess(false);
-	};
-
-	const handleEditSubmit = async (e) => {
-		e.preventDefault();
-		try {
-			if (editUser) {
-				const updatedUser = {
-					username: editUsername,
-					role: editRole,
-					last_name: editLastName,
-					first_name: editFirstName,
-					middle_name: editMiddleName,
-				};
-				if (editNewPassword) {
-					updatedUser.new_password = editNewPassword;
-				}
-				const response = await axios.put(`http://localhost:5000/admin_api/admin/users/${editUser.id}`, updatedUser, {
-					withCredentials: true,
-					headers: { 'X-CSRFToken': csrfToken },
-				});
-				setUsers(users.map((user) => (user.id === editUser.id ? response.data.user : user)));
-				setSuccess('Пользователь успешно обновлён.');
-				setOpenSuccess(true);
-				setTimeout(() => handleEditCancel(), 2000);
-			} else if (editPublication) {
-				const formData = new FormData();
-				formData.append('title', editTitle);
-				formData.append('authors', editAuthors);
-				formData.append('year', editYear);
-				formData.append('type', editType);
-				formData.append('status', editStatus);
-				if (editFile) {
-					formData.append('file', editFile);
-				}
-
-				const response = await axios.put(`http://localhost:5000/admin_api/admin/publications/${editPublication.id}`, formData, {
-					withCredentials: true,
-					headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'multipart/form-data' },
-				});
-				setPublications(publications.map((pub) => (pub.id === editPublication.id ? response.data.publication : pub)));
-				setSuccess('Публикация успешно обновлена.');
-				setOpenSuccess(true);
-				setTimeout(() => handleEditCancel(), 2000);
-			}
-		} catch (err) {
-			setError(err.response?.data?.error || 'Ошибка при обновлении. Попробуйте позже.');
-			setOpenError(true);
-		}
-	};
-
-	const generateUsername = async () => {
-		if (!newLastName || !newFirstName || !newMiddleName) {
-			setError('Для генерации логина необходимо заполнить ФИО.');
-			setOpenError(true);
-			return null;
-		}
-
-		const transliterate = (text) => {
-			const ruToEn = {
-				'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd',
-				'е': 'e', 'ё': 'e', 'ж': 'zh', 'з': 'z', 'и': 'i',
-				'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n',
-				'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't',
-				'у': 'u', 'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch',
-				'ш': 'sh', 'щ': 'sch', 'ъ': '', 'ы': 'y', 'ь': '',
-				'э': 'e', 'ю': 'yu', 'я': 'ya'
-			};
-			return text.toLowerCase().split('').map(char => ruToEn[char] || char).join('');
-		};
-
-		const capitalizeFirstLetter = (string) => {
-			if (!string) return '';
-			return string.charAt(0).toUpperCase() + string.slice(1);
-		};
-
-		const baseUsername = `${capitalizeFirstLetter(transliterate(newLastName))}${capitalizeFirstLetter(transliterate(newFirstName[0]))}${capitalizeFirstLetter(transliterate(newMiddleName[0]))}`;
-		let generatedUsername = baseUsername;
-		let suffix = 1;
-
-		while (true) {
-			try {
-				const response = await axios.post('http://localhost:5000/admin_api/admin/check-username', { username: generatedUsername }, {
-					withCredentials: true,
-					headers: { 'X-CSRFToken': csrfToken },
-				});
-				if (!response.data.exists) {
-					break;
-				}
-				generatedUsername = `${baseUsername}${suffix}`;
-				suffix++;
-			} catch (err) {
-				setError('Ошибка проверки логина. Попробуйте снова.');
-				setOpenError(true);
-				return null;
-			}
-		}
-
-		return generatedUsername;
-	};
-
-	const generateCredentials = async () => {
-		const generatedUsername = await generateUsername();
-		if (!generatedUsername) return;
-
-		try {
-			const response = await axios.get('http://localhost:5000/admin_api/admin/generate-password', {
-				withCredentials: true,
-				headers: { 'X-CSRFToken': csrfToken },
-			});
-			const generatedPassword = response.data.password;
-
-			setNewUsername(generatedUsername);
-			setNewPassword(generatedPassword);
-			setSuccess('Логин и пароль успешно сгенерированы.');
-			setOpenSuccess(true);
-		} catch (err) {
-			setError('Ошибка генерации пароля. Попробуйте снова.');
-			setOpenError(true);
-		}
-	};
-
-	const handleCreateUser = async (e) => {
-		e.preventDefault();
-		if (!newUsername || !newPassword || !newLastName || !newFirstName || !newMiddleName) {
-			setError('Все поля обязательны для заполнения.');
-			setOpenError(true);
-			return;
-		}
-
-		try {
-			console.log('Sending registration request with data:', {
-				username: newUsername,
-				password: newPassword,
-				last_name: newLastName,
-				first_name: newFirstName,
-				middle_name: newMiddleName,
-			});
-			const response = await axios.post('http://localhost:5000/admin_api/admin/register', {
-				username: newUsername,
-				password: newPassword,
-				last_name: newLastName,
-				first_name: newFirstName,
-				middle_name: newMiddleName,
-			}, {
-				withCredentials: true,
-				headers: { 'X-CSRFToken': csrfToken },
-			});
-
-			console.log('Registration response:', response.data, response.status);
-			if (response.status === 201 && response.data.message && response.data.message.includes('успешно зарегистрирован')) {
-				console.log('Setting success state...');
-				setSuccess('Пользователь успешно создан.');
-				setOpenSuccess(true);
-				setNewUsername('');
-				setNewPassword('');
-				setNewLastName('');
-				setNewFirstName('');
-				setNewMiddleName('');
-				const usersResponse = await axios.get('http://localhost:5000/admin_api/admin/users', {
-					withCredentials: true,
-					params: { page: currentPageUsers, per_page: 10, search: searchQuery },
-				});
-				setUsers(usersResponse.data.users || []);
-				setTotalPagesUsers(usersResponse.data.pages || 1);
-			}
-		} catch (err) {
-			console.error('Registration error:', err.response?.data || err.message, err.response?.status);
-			setError(err.response?.data?.error || 'Ошибка при создании пользователя. Попробуйте позже.');
-			setOpenError(true);
-		}
-	};
-
-	const handleTogglePasswordVisibility = () => {
-		setShowPassword(!showPassword);
-	};
-
-	const handleToggleEditPasswordVisibility = () => {
-		setShowEditPassword(!showEditPassword);
-	};
-
-	const handleCopyToClipboard = () => {
-		const dataToCopy = `Фамилия: ${newLastName}, Имя: ${newFirstName}, Отчество: ${newMiddleName}, Логин: ${newUsername}, Пароль: ${newPassword}`;
-		navigator.clipboard.writeText(dataToCopy)
-			.then(() => {
-				setSuccess('Данные скопированы в буфер обмена.');
-				setOpenSuccess(true);
-			})
-			.catch(() => {
-				setError('Ошибка при копировании данных.');
-				setOpenError(true);
-			});
-	};
-
-	const renderStatus = (status) => {
-		let statusText = '';
-		switch (status) {
-			case 'draft':
-				statusText = 'Черновик';
-				break;
-			case 'needs_review':
-				statusText = 'Нуждается в проверке';
-				break;
-			case 'published':
-				statusText = 'Опубликованные';
-				break;
-			default:
-				statusText = status;
-		}
-		return <Typography variant="body2" sx={{ color: '#1D1D1F' }}>{statusText}</Typography>;
-	};
-
-	return (
-		<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
-			<AppleCard sx={{ p: 4, backgroundColor: '#FFFFFF', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
-				<Typography variant="h4" gutterBottom sx={{ color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
-					Панель администратора
-				</Typography>
-				<Tabs
-					value={value}
-					onChange={handleTabChange}
-					centered
-					sx={{
-						mb: 4,
-						'& .MuiTab-root': { color: '#6E6E73', fontWeight: 600 },
-						'& .MuiTab-root.Mui-selected': { color: '#0071E3' },
-						'& .MuiTabs-indicator': { backgroundColor: '#0071E3' },
-					}}
-				>
-					<Tab label="Пользователи" />
-					<Tab label="Все публикации" />
-				</Tabs>
-
-				{loadingInitial ? (
-					<Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-						<CircularProgress sx={{ color: '#0071E3' }} />
-					</Box>
-				) : (
-					<>
-						{value === 0 && (
-							<>
-								<Typography
-									variant="h5"
-									gutterBottom
-									sx={{
-										mt: 4,
-										color: '#1D1D1F',
-										fontWeight: 600,
-										textAlign: 'center',
-									}}
-								>
-									Создание нового пользователя
-								</Typography>
-								<AppleCard sx={{ mb: 4, p: 3, backgroundColor: '#F5F5F7', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
-									<form onSubmit={handleCreateUser}>
-										<AppleTextField
-											fullWidth
-											label="Фамилия"
-											value={newLastName}
-											onChange={(e) => setNewLastName(e.target.value)}
-											margin="normal"
-											variant="outlined"
-											autoComplete="family-name"
-										/>
-										<AppleTextField
-											fullWidth
-											label="Имя"
-											value={newFirstName}
-											onChange={(e) => setNewFirstName(e.target.value)}
-											margin="normal"
-											variant="outlined"
-											autoComplete="given-name"
-										/>
-										<AppleTextField
-											fullWidth
-											label="Отчество"
-											value={newMiddleName}
-											onChange={(e) => setNewMiddleName(e.target.value)}
-											margin="normal"
-											variant="outlined"
-											autoComplete="additional-name"
-										/>
-										<AppleTextField
-											fullWidth
-											label="Логин"
-											value={newUsername}
-											onChange={(e) => setNewUsername(e.target.value)}
-											margin="normal"
-											variant="outlined"
-											autoComplete="username"
-										/>
-										<AppleTextField
-											fullWidth
-											label="Пароль"
-											type={showPassword ? 'text' : 'password'}
-											value={newPassword}
-											onChange={(e) => setNewPassword(e.target.value)}
-											margin="normal"
-											variant="outlined"
-											autoComplete="new-password"
-											InputProps={{
-												endAdornment: (
-													<IconButton onClick={handleTogglePasswordVisibility}>
-														{showPassword ? <VisibilityOff /> : <Visibility />}
-													</IconButton>
-												),
-											}}
-										/>
-										<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-											<AppleButton startIcon={<RefreshIcon />} onClick={generateCredentials}>
-												Сгенерировать логин и пароль
-											</AppleButton>
-											<AppleButton startIcon={<ContentCopyIcon />} onClick={handleCopyToClipboard}>
-												Скопировать в буфер обмена
-											</AppleButton>
-											<AppleButton type="submit">Создать</AppleButton>
-										</Box>
-										<Collapse in={openError}>
-											{error && (
-												<Alert
-													severity="error"
-													sx={{
-														mt: 2,
-														borderRadius: '12px',
-														backgroundColor: '#FFF1F0',
-														color: '#1D1D1F',
-														boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-													}}
-													onClose={() => setOpenError(false)}
-												>
-													{error}
-												</Alert>
-											)}
-										</Collapse>
-										<Collapse in={openSuccess}>
-											{success && (
-												<Alert
-													severity="success"
-													sx={{
-														mt: 2,
-														borderRadius: '12px',
-														backgroundColor: '#E7F8E7',
-														color: '#1D1D1F',
-														boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-													}}
-													onClose={() => setOpenSuccess(false)}
-												>
-													{success}
-												</Alert>
-											)}
-										</Collapse>
-									</form>
-								</AppleCard>
-
-								<Typography
-									variant="h5"
-									gutterBottom
-									sx={{
-										mt: 4,
-										color: '#1D1D1F',
-										fontWeight: 600,
-										textAlign: 'center',
-									}}
-								>
-									Управление пользователями
-								</Typography>
-								<AppleCard sx={{ mt: 2, mb: 2, p: 2, backgroundColor: '#F5F5F7', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
-									<AppleTextField
-										fullWidth
-										label="Поиск по логину или ФИО"
-										value={searchQuery}
-										onChange={handleSearchChange}
-										margin="normal"
-										variant="outlined"
-										InputProps={{
-											endAdornment: <IconButton sx={{ color: '#0071E3' }}>{/* Можно добавить иконку поиска */}</IconButton>,
-										}}
-									/>
-								</AppleCard>
-								<AppleTable sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
-									<TableHead>
-										<TableRow sx={{ backgroundColor: '#0071E3' }}>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Логин</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Роль</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Фамилия</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Имя</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Отчество</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>
-												Действия
-											</TableCell>
-										</TableRow>
-									</TableHead>
-									<Fade in={true} timeout={500}>
-										<TableBody>
-											{users.length > 0 ? (
-												users.map((user) => (
-													<TableRow
-														key={user.id}
-														sx={{
-															'&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' },
-														}}
-													>
-														<TableCell sx={{ color: '#1D1D1F' }}>{user.id}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{user.username}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{user.role}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{user.last_name}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{user.first_name}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{user.middle_name || '-'}</TableCell>
-														<TableCell sx={{ textAlign: 'center' }}>
-															<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-																<IconButton
-																	aria-label="edit"
-																	onClick={() => handleEditClick('user', user)}
-																	sx={{
-																		color: '#0071E3',
-																		borderRadius: '8px',
-																		'&:hover': {
-																			color: '#FFFFFF',
-																			backgroundColor: '#0071E3',
-																			boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																		},
-																	}}
-																>
-																	<EditIcon />
-																</IconButton>
-																<IconButton
-																	aria-label="delete"
-																	onClick={() => handleDeleteClick('user', user)}
-																	sx={{
-																		color: '#0071E3',
-																		borderRadius: '8px',
-																		'&:hover': {
-																			color: '#FFFFFF',
-																			backgroundColor: '#0071E3',
-																			boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																		},
-																	}}
-																>
-																	<DeleteIcon />
-																</IconButton>
-															</Box>
-														</TableCell>
-													</TableRow>
-												))
-											) : (
-												<TableRow>
-													<TableCell colSpan={7} sx={{ textAlign: 'center', color: '#6E6E73' }}>
-														Нет пользователей.
-													</TableCell>
-												</TableRow>
-											)}
-										</TableBody>
-									</Fade>
-								</AppleTable>
-								<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-									<Pagination
-										count={totalPagesUsers}
-										page={currentPageUsers}
-										onChange={handlePageChangeUsers}
-										color="primary"
-										sx={{
-											'& .MuiPaginationItem-root': {
-												borderRadius: 20,
-												transition: 'all 0.3s ease',
-												'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
-												'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
-											},
-										}}
-									/>
-								</Box>
-							</>
-						)}
-
-						{value === 1 && (
-							<>
-								<Typography
-									variant="h5"
-									gutterBottom
-									sx={{
-										mt: 4,
-										color: '#1D1D1F',
-										fontWeight: 600,
-										textAlign: 'center',
-									}}
-								>
-									Управление всеми публикациями
-								</Typography>
-								<AppleCard sx={{ mt: 2, mb: 2, p: 2, backgroundColor: '#F5F5F7', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
-									<AppleTextField
-										fullWidth
-										label="Поиск по названию, авторам или году"
-										value={searchQuery}
-										onChange={handleSearchChange}
-										margin="normal"
-										variant="outlined"
-										InputProps={{
-											endAdornment: <IconButton sx={{ color: '#0071E3' }}>{/* Можно добавить иконку поиска */}</IconButton>,
-										}}
-									/>
-									<Box sx={{ mt: 2, display: 'flex', gap: 2 }}>
-										<AppleTextField
-											select
-											label="Тип публикации"
-											value={filterType}
-											onChange={handleFilterTypeChange}
-											margin="normal"
-											variant="outlined"
-										>
-											<MenuItem value="all">Все</MenuItem>
-											<MenuItem value="article">Статья</MenuItem>
-											<MenuItem value="monograph">Монография</MenuItem>
-											<MenuItem value="conference">Доклад/конференция</MenuItem>
-										</AppleTextField>
-										<AppleTextField
-											select
-											label="Статус"
-											value={filterStatus}
-											onChange={handleFilterStatusChange}
-											margin="normal"
-											variant="outlined"
-										>
-											<MenuItem value="all">Все</MenuItem>
-											<MenuItem value="draft">Черновик</MenuItem>
-											<MenuItem value="needs_review">Нуждается в проверке</MenuItem>
-											<MenuItem value="published">Опубликованные</MenuItem>
-										</AppleTextField>
-									</Box>
-								</AppleCard>
-								<AppleTable sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
-									<TableHead>
-										<TableRow sx={{ backgroundColor: '#0071E3' }}>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Название</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Авторы</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Тип</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Пользователь</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>
-												Действия
-											</TableCell>
-										</TableRow>
-									</TableHead>
-									<Fade in={true} timeout={500}>
-										<TableBody>
-											{publications.length > 0 ? (
-												publications.map((pub) => (
-													<TableRow
-														key={pub.id}
-														sx={{
-															'&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' },
-														}}
-													>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.id}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															<Typography
-																sx={{
-																	color: '#0071E3',
-																	textDecoration: 'underline',
-																	cursor: 'pointer',
-																	'&:hover': { textDecoration: 'none' },
-																}}
-																onClick={() => navigate(`/publication/${pub.id}`)}
-															>
-																{pub.title}
-															</Typography>
-														</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															{pub.type === 'article'
-																? 'Статья'
-																: pub.type === 'monograph'
-																	? 'Монография'
-																	: pub.type === 'conference'
-																		? 'Доклад/конференция'
-																		: 'Неизвестный тип'}
-														</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															{renderStatus(pub.status)}
-														</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															{pub.user?.full_name || 'Не указан'}
-														</TableCell>
-														<TableCell sx={{ textAlign: 'center' }}>
-															<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-																<IconButton
-																	aria-label="edit"
-																	onClick={() => handleEditClick('publication', pub)}
-																	sx={{
-																		color: '#0071E3',
-																		borderRadius: '8px',
-																		'&:hover': {
-																			color: '#FFFFFF',
-																			backgroundColor: '#0071E3',
-																			boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																		},
-																	}}
-																>
-																	<EditIcon />
-																</IconButton>
-																<IconButton
-																	aria-label="delete"
-																	onClick={() => handleDeleteClick('publication', pub)}
-																	sx={{
-																		color: '#0071E3',
-																		borderRadius: '8px',
-																		'&:hover': {
-																			color: '#FFFFFF',
-																			backgroundColor: '#0071E3',
-																			boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																		},
-																	}}
-																>
-																	<DeleteIcon />
-																</IconButton>
-																{pub.file_url && (
-																	<IconButton
-																		aria-label="download"
-																		onClick={() => {
-																			const link = document.createElement('a');
-																			link.href = `http://localhost:5000${pub.file_url}`;
-																			link.download = pub.file_url.split('/').pop();
-																			document.body.appendChild(link);
-																			link.click();
-																			document.body.removeChild(link);
-																		}}
-																		sx={{
-																			color: '#0071E3',
-																			borderRadius: '8px',
-																			'&:hover': {
-																				color: '#FFFFFF',
-																				backgroundColor: '#0071E3',
-																				boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																			},
-																		}}
-																	>
-																		<DownloadIcon />
-																	</IconButton>
-																)}
-															</Box>
-														</TableCell>
-													</TableRow>
-												))
-											) : (
-												<TableRow>
-													<TableCell colSpan={8} sx={{ textAlign: 'center', color: '#6E6E73' }}>
-														Нет публикаций.
-													</TableCell>
-												</TableRow>
-											)}
-										</TableBody>
-									</Fade>
-								</AppleTable>
-								<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-									<Pagination
-										count={totalPagesPublications}
-										page={currentPagePublications}
-										onChange={handlePageChangePublications}
-										color="primary"
-										sx={{
-											'& .MuiPaginationItem-root': {
-												borderRadius: 20,
-												transition: 'all 0.3s ease',
-												'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
-												'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
-											},
-										}}
-									/>
-								</Box>
-							</>
-						)}
-						<Dialog
-							open={openDeleteDialog}
-							onClose={handleDeleteCancel}
-							sx={{
-								'& .MuiDialog-paper': {
-									backgroundColor: '#FFFFFF',
-									boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-									borderRadius: '16px',
-									fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif",
-								},
-							}}
-						>
-							<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
-								Подтвердите удаление
-							</DialogTitle>
-							<DialogContent sx={{ padding: '24px' }}>
-								<Typography sx={{ color: '#6E6E73' }}>
-									Вы уверены, что хотите удалить{' '}
-									{userToDelete ? `пользователя «${userToDelete.username}»` : `публикацию «${publicationToDelete?.title}»`}?
-								</Typography>
-							</DialogContent>
-							<DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5EA' }}>
-								<CancelButton onClick={handleDeleteCancel}>Отмена</CancelButton>
-								<AppleButton onClick={handleDeleteConfirm}>Удалить</AppleButton>
-							</DialogActions>
-						</Dialog>
-
-						<Dialog
-							open={openEditDialog}
-							onClose={handleEditCancel}
-							sx={{
-								'& .MuiDialog-paper': {
-									backgroundColor: '#FFFFFF',
-									boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-									borderRadius: '16px',
-									fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif",
-								},
-							}}
-						>
-							<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
-								{editUser ? 'Редактировать пользователя' : 'Редактировать публикацию'}
-							</DialogTitle>
-							<DialogContent sx={{ padding: '24px' }}>
-								<form onSubmit={handleEditSubmit}>
-									{editUser ? (
-										<>
-											<AppleTextField
-												fullWidth
-												label="Логин"
-												value={editUsername}
-												onChange={(e) => setEditUsername(e.target.value)}
-												margin="normal"
-												variant="outlined"
-												autoComplete="username"
-											/>
-											<AppleTextField
-												fullWidth
-												select
-												label="Роль"
-												value={editRole}
-												onChange={(e) => setEditRole(e.target.value)}
-												margin="normal"
-												variant="outlined"
-											>
-												<MenuItem value="user">Пользователь</MenuItem>
-												<MenuItem value="admin">Администратор</MenuItem>
-												<MenuItem value="manager">Управляющий</MenuItem> {/* Добавляем новую роль */}
-											</AppleTextField>
-											<AppleTextField
-												fullWidth
-												label="Фамилия"
-												value={editLastName}
-												onChange={(e) => setEditLastName(e.target.value)}
-												margin="normal"
-												variant="outlined"
-												autoComplete="family-name"
-											/>
-											<AppleTextField
-												fullWidth
-												label="Имя"
-												value={editFirstName}
-												onChange={(e) => setEditFirstName(e.target.value)}
-												margin="normal"
-												variant="outlined"
-												autoComplete="given-name"
-											/>
-											<AppleTextField
-												fullWidth
-												label="Отчество"
-												value={editMiddleName}
-												onChange={(e) => setEditMiddleName(e.target.value)}
-												margin="normal"
-												variant="outlined"
-												autoComplete="additional-name"
-											/>
-											<AppleTextField
-												fullWidth
-												label="Новый пароль (если нужно изменить)"
-												type={showEditPassword ? 'text' : 'password'}
-												value={editNewPassword}
-												onChange={(e) => setEditNewPassword(e.target.value)}
-												margin="normal"
-												variant="outlined"
-												autoComplete="new-password"
-												InputProps={{
-													endAdornment: (
-														<IconButton onClick={handleToggleEditPasswordVisibility}>
-															{showEditPassword ? <VisibilityOff /> : <Visibility />}
-														</IconButton>
-													),
-												}}
-											/>
-										</>
-									) : (
-										<>
-											<AppleTextField
-												fullWidth
-												label="Название"
-												value={editTitle}
-												onChange={(e) => setEditTitle(e.target.value)}
-												margin="normal"
-												variant="outlined"
-											/>
-											<AppleTextField
-												fullWidth
-												label="Авторы"
-												value={editAuthors}
-												onChange={(e) => setEditAuthors(e.target.value)}
-												margin="normal"
-												variant="outlined"
-											/>
-											<AppleTextField
-												fullWidth
-												label="Год"
-												type="number"
-												value={editYear}
-												onChange={(e) => setEditYear(e.target.value)}
-												margin="normal"
-												variant="outlined"
-											/>
-											<AppleTextField
-												fullWidth
-												select
-												label="Тип публикации"
-												value={editType}
-												onChange={(e) => setEditType(e.target.value)}
-												margin="normal"
-												variant="outlined"
-											>
-												<MenuItem value="article">Статья</MenuItem>
-												<MenuItem value="monograph">Монография</MenuItem>
-												<MenuItem value="conference">Доклад/конференция</MenuItem>
-											</AppleTextField>
-											<AppleTextField
-												fullWidth
-												select
-												label="Статус"
-												value={editStatus}
-												onChange={(e) => setEditStatus(e.target.value)}
-												margin="normal"
-												variant="outlined"
-												disabled={!editPublication?.file_url && !editFile}
-											>
-												<MenuItem value="draft">Черновик</MenuItem>
-												<MenuItem value="needs_review">Нуждается в проверке</MenuItem>
-												<MenuItem value="published" disabled={!editPublication?.file_url && !editFile}>
-													Опубликовано
-												</MenuItem>
-											</AppleTextField>
-											<Box sx={{ mt: 2 }}>
-												<Typography variant="body2" sx={{ color: '#6E6E73', mb: 1 }}>
-													Текущий файл: {editPublication?.file_url || 'Нет файла'}
-												</Typography>
-												<input
-													type="file"
-													accept=".pdf,.docx"
-													onChange={(e) => setEditFile(e.target.files[0])}
-													style={{ display: 'none' }}
-													id="edit-upload-file"
-												/>
-												<label htmlFor="edit-upload-file">
-													<AppleButton sx={{ border: '1px solid #D1D1D6', backgroundColor: '#F5F5F7', color: '#1D1D1F' }} component="span">
-														Выбрать файл
-													</AppleButton>
-												</label>
-												{editFile && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{editFile.name}</Typography>}
-											</Box>
-										</>
-									)}
-									<Collapse in={openError}>
-										{error && (
-											<Alert
-												severity="error"
-												sx={{
-													mt: 2,
-													borderRadius: '12px',
-													backgroundColor: '#FFF1F0',
-													color: '#1D1D1F',
-													boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-												}}
-												onClose={() => setOpenError(false)}
-											>
-												{error}
-											</Alert>
-										)}
-									</Collapse>
-									<Collapse in={openSuccess}>
-										{success && (
-											<Alert
-												severity="success"
-												sx={{
-													mt: 2,
-													borderRadius: '12px',
-													backgroundColor: '#E7F8E7',
-													color: '#1D1D1F',
-													boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-												}}
-												onClose={() => setOpenSuccess(false)}
-											>
-												{success}
-											</Alert>
-										)}
-									</Collapse>
-									<DialogActions sx={{ padding: '16px 0', borderTop: '1px solid #E5E5EA' }}>
-										<CancelButton onClick={handleEditCancel}>Отмена</CancelButton>
-										<AppleButton type="submit">Сохранить</AppleButton>
-									</DialogActions>
-								</form>
-							</DialogContent>
-						</Dialog>
-					</>
-				)}
-			</AppleCard>
-		</Container>
-	);
-}
-
-export default AdminDashboard;
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Line } from 'react-chartjs-2';

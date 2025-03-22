@@ -199,44 +199,65 @@ function Publication() {
 
 	// Функция для отображения статуса с учётом локализации и цвета
 	const renderStatus = (status, returnedForRevision, isReviewer) => {
+		console.log('renderStatus called with:', { status, returnedForRevision, isReviewer });
+
 		let statusText = '';
 		let statusColor = '#757575'; // Цвет по умолчанию (серый)
+		let backgroundColor = 'transparent'; // Фон по умолчанию
 
-		if (isReviewer) {
-			// Для admin или manager
+		// Проверяем оба возможных условия для "Требует доработки"
+		if (status === 'returned_for_revision' || (status === 'draft' && returnedForRevision)) {
+			statusText = 'Требует доработки';
+			statusColor = '#FF3B30'; // Белый текст
+			backgroundColor = '#FFfff'; // Красный фон с приоритетом
+			console.log('Condition matched: Требует доработки');
+		} else if (isReviewer) {
+			// Логика для менеджера или админа
 			switch (status) {
 				case 'draft':
 					statusText = 'Черновик';
 					break;
 				case 'needs_review':
 					statusText = 'Нуждается в проверке';
-					statusColor = '#FF3B30'; // Красный
+					statusColor = '#FF3B30'; // Красный текст
 					break;
 				case 'published':
 					statusText = 'Опубликованные';
 					break;
 				default:
-					statusText = status;
+					statusText = status || 'Неизвестный статус';
 			}
+			console.log('Reviewer logic applied:', statusText);
 		} else {
-			// Для пользователя
-			if (status === 'needs_review' && !returnedForRevision) {
+			// Логика для обычного пользователя
+			if (status === 'needs_review') {
 				statusText = 'На проверке';
-			} else if (status === 'draft' && returnedForRevision) {
-				statusText = 'Требуется доработка';
-				statusColor = '#FF3B30'; // Красный
-			} else if (status === 'draft' && !returnedForRevision) {
+			} else if (status === 'draft') {
 				statusText = 'Черновик';
 			} else if (status === 'published') {
 				statusText = 'Опубликованные';
 			} else {
-				statusText = status;
+				statusText = status || 'Неизвестный статус';
 			}
+			console.log('User logic applied:', statusText);
 		}
 
-		return <Typography variant="body1" sx={{ color: statusColor, mb: 1 }}>{`Статус: ${statusText}`}</Typography>;
+		return (
+			<Typography
+				variant="body1"
+				sx={{
+					color: statusColor,
+					backgroundColor: backgroundColor,
+					display: 'inline-block',
+					padding: 'px 8px',
+					borderRadius: '4px',
+					mb: 1,
+				}}
+			>
+				{`Статус: ${statusText}`}
+			</Typography>
+		);
 	};
-
 	const isReviewer = ['admin', 'manager'].includes(user?.role);
 
 	console.log('User:', user);

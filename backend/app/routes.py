@@ -110,7 +110,7 @@ def submit_for_review(pub_id):
     if publication.user_id != current_user.id:
         return jsonify({'error': 'У вас нет прав на отправку этой публикации на проверку'}), 403
 
-    if publication.status != 'draft':
+    if publication.status != 'returned_for_revision':
         return jsonify({'error': 'Публикация уже отправлена на проверку или опубликована'}), 400
 
     if not publication.file_url:
@@ -184,7 +184,8 @@ def return_for_revision(pub_id):
     if not has_reviewer_comment:
         return jsonify({"error": "Необходимо добавить комментарий перед возвратом на доработку."}), 400
 
-    publication.status = 'draft'
+    # Исправляем статус на 'returned_for_revision'
+    publication.status = 'returned_for_revision'
     publication.returned_for_revision = True
     publication.published_at = None
 
@@ -204,7 +205,6 @@ def return_for_revision(pub_id):
         db.session.rollback()
         logger.error(f"Ошибка при возврате публикации {pub_id} на доработку: {str(e)}")
         return jsonify({"error": "Ошибка при возврате на доработку. Попробуйте позже."}), 500
-
 @bp.route('/login', methods=['POST'])
 @csrf.exempt
 def login():

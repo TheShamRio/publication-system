@@ -35,27 +35,34 @@ def create_app():
 
     # Настройка CORS
     allowed_origins = ["http://localhost:3000", "http://localhost:3001"]
-    CORS(app, resources={r"/*": {"origins": allowed_origins}}, supports_credentials=True)
+    CORS(
+        app,
+        resources={r"/*": {"origins": allowed_origins}},
+        supports_credentials=True,
+        methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],  # Явно указываем методы
+        allow_headers=["Content-Type", "Authorization", "X-CSRFToken"]  # Разрешённые заголовки
+    )
     # Обработка предварительных запросов
     @app.before_request
     def handle_preflight():
-        if request.method == 'OPTIONS':
+        if request.method == "OPTIONS":
             response = make_response()
-            response.headers['Access-Control-Allow-Origin'] = "http://localhost:3000"
-            response.headers['Access-Control-Allow-Methods'] = 'GET, POST, PUT, DELETE, OPTIONS'
-            response.headers['Access-Control-Allow-Headers'] = 'Content-Type, Authorization, X-CSRFToken'
-            response.headers['Access-Control-Allow-Credentials'] = 'true'
-            response.headers['Access-Control-Max-Age'] = '86400'
+            origin = request.headers.get("Origin")
+            if origin in allowed_origins:
+                response.headers["Access-Control-Allow-Origin"] = origin
+            else:
+                response.headers["Access-Control-Allow-Origin"] = "null"
+            response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+            response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-CSRFToken"
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            response.headers["Access-Control-Max-Age"] = "86400"
             return response, 200
 
     # Регистрация Blueprint'ов
     from .routes import bp as user_bp
     app.register_blueprint(user_bp, url_prefix='/api')
-    logger.debug("Зарегистрирован Blueprint 'api' с префиксом '/api'")
-
     from .api import bp as admin_bp
     app.register_blueprint(admin_bp, url_prefix='/admin_api')
-    logger.debug("Зарегистрирован Blueprint 'admin_api' с префиксом '/admin_api'")
 
     # Обработчик для загрузки файлов
     @app.route('/uploads/<path:filename>')
