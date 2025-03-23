@@ -25,10 +25,10 @@ import {
 	Fade,
 	MenuItem,
 	Button,
+	Drawer,
 	Accordion,
 	AccordionSummary,
 	AccordionDetails,
-	LinearProgress,
 } from '@mui/material';
 import { styled } from '@mui/system';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -38,14 +38,15 @@ import ReplayIcon from '@mui/icons-material/Replay';
 import RefreshIcon from '@mui/icons-material/Refresh';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import Visibility from '@mui/icons-material/Visibility';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
+import HistoryIcon from '@mui/icons-material/History';
+import WarningAmberIcon from '@mui/icons-material/WarningAmber';
+import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import StatusChip from './StatusChip';
 
-// Стили остаются без изменений
+// Стили
 const AppleTextField = styled(TextField)({
 	'& .MuiOutlinedInput-root': {
 		borderRadius: '12px',
@@ -63,13 +64,13 @@ const AppleTable = styled(Table)({
 	borderSpacing: '0 8px',
 });
 
-const PlanTable = styled(Table)(({ theme }) => ({
+const PlanTable = styled(Table)({
 	borderRadius: '16px',
 	overflow: 'hidden',
 	backgroundColor: '#FFFFFF',
 	boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
 	marginBottom: '16px',
-}));
+});
 
 const AppleButton = styled(Button)({
 	borderRadius: '12px',
@@ -115,14 +116,17 @@ function ManagerDashboard() {
 	const { user, csrfToken, isAuthenticated } = useAuth();
 	const navigate = useNavigate();
 	const [value, setValue] = useState(0);
-	const [publications, setPublications] = useState([]); // Все публикации
+	const [publications, setPublications] = useState([]);
 	const [plans, setPlans] = useState([]);
+	const [actionHistory, setActionHistory] = useState([]);
 	const [currentPagePublications, setCurrentPagePublications] = useState(1);
 	const [currentPagePlans, setCurrentPagePlans] = useState(1);
+	const [historyPage, setHistoryPage] = useState(1);
 	const [totalPagesPublications, setTotalPagesPublications] = useState(1);
 	const [totalPagesPlans, setTotalPagesPlans] = useState(1);
+	const [totalHistoryPages, setTotalHistoryPages] = useState(1);
 	const [searchQuery, setSearchQuery] = useState('');
-	const [statusFilter, setStatusFilter] = useState('needs_review'); // Фильтр по статусу
+	const [statusFilter, setStatusFilter] = useState('needs_review');
 	const [loadingInitial, setLoadingInitial] = useState(true);
 	const [openEditDialog, setOpenEditDialog] = useState(false);
 	const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
@@ -150,16 +154,16 @@ function ManagerDashboard() {
 	const [lastNameError, setLastNameError] = useState('');
 	const [firstNameError, setFirstNameError] = useState('');
 	const [middleNameError, setMiddleNameError] = useState('');
+	const [openHistoryDrawer, setOpenHistoryDrawer] = useState(false);
+	const [publicationsTransitionKey, setPublicationsTransitionKey] = useState(0);
+	const [plansTransitionKey, setPlansTransitionKey] = useState(0);
+	const [historyTransitionKey, setHistoryTransitionKey] = useState(0);
 
 	// Эффект для автоматического закрытия уведомлений
 	useEffect(() => {
 		let errorTimer, successTimer;
-		if (openError) {
-			errorTimer = setTimeout(() => setOpenError(false), 3000);
-		}
-		if (openSuccess) {
-			successTimer = setTimeout(() => setOpenSuccess(false), 3000);
-		}
+		if (openError) errorTimer = setTimeout(() => setOpenError(false), 3000);
+		if (openSuccess) successTimer = setTimeout(() => setOpenSuccess(false), 3000);
 		return () => {
 			if (errorTimer) clearTimeout(errorTimer);
 			if (successTimer) clearTimeout(successTimer);
@@ -200,7 +204,7 @@ function ManagerDashboard() {
 		setMiddleNameError(validateNamePart(value, 'Отчество'));
 	};
 
-	// Загрузка публикаций с учётом фильтра по статусу
+	// Загрузка данных
 	const fetchPublications = async (page) => {
 		try {
 			const response = await axios.get(`http://localhost:5000/admin_api/admin/publications`, {
@@ -210,13 +214,13 @@ function ManagerDashboard() {
 					page,
 					per_page: 10,
 					search: searchQuery,
-					status: ['needs_review', 'returned_for_revision', 'published'].join(','), // Фильтр по допустимым статусам
-					sort_status: statusFilter, // Передаём приоритетный статус для сортировки
+					status: ['needs_review', 'returned_for_revision', 'published'].join(','),
+					sort_status: statusFilter,
 				},
 			});
-			// Больше не сортируем на клиенте, сервер вернёт уже отсортированные данные
 			setPublications(response.data.publications);
 			setTotalPagesPublications(response.data.pages);
+			setPublicationsTransitionKey((prev) => prev + 1);
 		} catch (err) {
 			console.error('Ошибка загрузки публикаций:', err);
 			setError('Не удалось загрузить публикации. Попробуйте позже.');
@@ -232,6 +236,7 @@ function ManagerDashboard() {
 			});
 			setPlans(response.data.plans);
 			setTotalPagesPlans(response.data.pages);
+			setPlansTransitionKey((prev) => prev + 1);
 		} catch (err) {
 			console.error('Ошибка загрузки планов:', err);
 			setError('Не удалось загрузить планы. Попробуйте позже.');
@@ -239,35 +244,64 @@ function ManagerDashboard() {
 		}
 	};
 
-	// Загрузка данных при изменении страницы, статуса или поиска
+	const fetchActionHistory = async (page) => {
+		try {
+			const response = await axios.get(`http://localhost:5000/admin_api/admin/manager-action-history`, {
+				withCredentials: true,
+				headers: { 'X-CSRFToken': csrfToken },
+				params: { page, per_page: 10 },
+			});
+			setActionHistory(response.data.history);
+			setTotalHistoryPages(response.data.pages);
+			setHistoryTransitionKey((prev) => prev + 1);
+		} catch (err) {
+			console.error('Ошибка загрузки истории действий:', err);
+			setError('Не удалось загрузить историю действий.');
+			setOpenError(true);
+		}
+	};
+
+	// Инициализация данных только при загрузке компонента
 	useEffect(() => {
 		if (!isAuthenticated || user.role !== 'manager') navigate('/login');
 		setLoadingInitial(true);
-		fetchPublications(currentPagePublications);
-		fetchPlans(currentPagePlans);
-		setLoadingInitial(false);
-	}, [isAuthenticated, user, navigate, currentPagePublications, currentPagePlans, statusFilter, searchQuery]);
+		Promise.all([
+			fetchPublications(currentPagePublications),
+			fetchPlans(currentPagePlans),
+			fetchActionHistory(historyPage),
+		]).finally(() => setLoadingInitial(false));
+	}, [isAuthenticated, user, navigate]);
 
-	const handleTabChange = (event, newValue) => {
-		setValue(newValue);
-	};
+	// Обновление публикаций при изменении страницы, поиска или фильтра
+	useEffect(() => {
+		fetchPublications(currentPagePublications);
+	}, [currentPagePublications, searchQuery, statusFilter]);
+
+	// Обновление планов при изменении страницы
+	useEffect(() => {
+		fetchPlans(currentPagePlans);
+	}, [currentPagePlans]);
+
+	// Обработчики
+	const handleTabChange = (event, newValue) => setValue(newValue);
 
 	const handleSearchChange = (e) => {
 		setSearchQuery(e.target.value);
-		setCurrentPagePublications(1); // Сбрасываем страницу при новом поиске
+		setCurrentPagePublications(1);
 	};
 
 	const handleStatusFilterChange = (e) => {
 		setStatusFilter(e.target.value);
-		setCurrentPagePublications(1); // Сбрасываем страницу при смене статуса
+		setCurrentPagePublications(1);
 	};
 
-	const handlePageChangePublications = (event, value) => {
-		setCurrentPagePublications(value);
-	};
+	const handlePageChangePublications = (event, value) => setCurrentPagePublications(value);
 
-	const handlePageChangePlans = (event, value) => {
-		setCurrentPagePlans(value);
+	const handlePageChangePlans = (event, value) => setCurrentPagePlans(value);
+
+	const handleHistoryPageChange = (event, value) => {
+		setHistoryPage(value);
+		fetchActionHistory(value);
 	};
 
 	const handleDownload = async (fileUrl, fileName) => {
@@ -346,6 +380,7 @@ function ManagerDashboard() {
 			setSuccess('Публикация успешно обновлена!');
 			setOpenSuccess(true);
 			fetchPublications(currentPagePublications);
+			fetchActionHistory(historyPage);
 			handleEditCancel();
 		} catch (err) {
 			setError('Не удалось обновить публикацию. Попробуйте позже.');
@@ -368,6 +403,7 @@ function ManagerDashboard() {
 				setSuccess('Публикация успешно удалена!');
 				setOpenSuccess(true);
 				fetchPublications(currentPagePublications);
+				fetchActionHistory(historyPage);
 				setOpenDeleteDialog(false);
 				setPublicationToDelete(null);
 			} catch (err) {
@@ -420,6 +456,13 @@ function ManagerDashboard() {
 		}
 	};
 
+	const handleOpenHistoryDrawer = () => {
+		setOpenHistoryDrawer(true);
+		fetchActionHistory(historyPage);
+	};
+
+	const handleCloseHistoryDrawer = () => setOpenHistoryDrawer(false);
+
 	return (
 		<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
 			<AppleCard elevation={4} sx={{ p: 4, borderRadius: '16px', backgroundColor: '#FFFFFF' }}>
@@ -463,19 +506,24 @@ function ManagerDashboard() {
 										margin="normal"
 										variant="outlined"
 									/>
-									<AppleTextField
-										select
-										label="Фильтр по статусу"
-										value={statusFilter}
-										onChange={handleStatusFilterChange}
-										margin="normal"
-										variant="outlined"
-										sx={{ mt: 2, width: '200px' }}
-									>
-										<MenuItem value="needs_review">На проверке</MenuItem>
-										<MenuItem value="returned_for_revision">Отправлено на доработку</MenuItem>
-										<MenuItem value="published">Опубликовано</MenuItem>
-									</AppleTextField>
+									<Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 2 }}>
+										<AppleTextField
+											select
+											label="Фильтр по статусу"
+											value={statusFilter}
+											onChange={handleStatusFilterChange}
+											margin="normal"
+											variant="outlined"
+											sx={{ width: '200px' }}
+										>
+											<MenuItem value="needs_review">На проверке</MenuItem>
+											<MenuItem value="returned_for_revision">Отправлено на доработку</MenuItem>
+											<MenuItem value="published">Опубликовано</MenuItem>
+										</AppleTextField>
+										<AppleButton startIcon={<HistoryIcon />} onClick={handleOpenHistoryDrawer} sx={{ height: 'fit-content' }}>
+											Показать историю
+										</AppleButton>
+									</Box>
 								</AppleCard>
 								<AppleTable sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
 									<TableHead>
@@ -492,15 +540,13 @@ function ManagerDashboard() {
 											</TableCell>
 										</TableRow>
 									</TableHead>
-									<Fade in={true} timeout={500}>
+									<Fade in={true} timeout={500} key={publicationsTransitionKey}>
 										<TableBody>
 											{publications.length > 0 ? (
 												publications.map((pub) => (
 													<TableRow
 														key={pub.id}
-														sx={{
-															'&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' },
-														}}
+														sx={{ '&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' } }}
 													>
 														<TableCell sx={{ color: '#1D1D1F' }}>{pub.id}</TableCell>
 														<TableCell sx={{ color: '#1D1D1F' }}>
@@ -540,11 +586,7 @@ function ManagerDashboard() {
 																		sx={{
 																			color: '#0071E3',
 																			borderRadius: '8px',
-																			'&:hover': {
-																				color: '#FFFFFF',
-																				backgroundColor: '#0071E3',
-																				boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																			},
+																			'&:hover': { color: '#FFFFFF', backgroundColor: '#0071E3', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)' },
 																		}}
 																	>
 																		<DownloadIcon />
@@ -580,6 +622,94 @@ function ManagerDashboard() {
 										}}
 									/>
 								</Box>
+								<Drawer
+									anchor="right"
+									open={openHistoryDrawer}
+									onClose={handleCloseHistoryDrawer}
+									sx={{
+										'& .MuiDrawer-paper': {
+											width: 500,
+											backgroundColor: '#FFFFFF',
+											boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+											borderRadius: '16px 0 0 16px',
+											p: 2,
+										},
+									}}
+								>
+									<Box sx={{ p: 2 }}>
+										<Typography variant="h6" sx={{ color: '#1D1D1F', fontWeight: 600 }}>
+											История действий
+										</Typography>
+										{actionHistory.length > 0 ? (
+											<>
+												<AppleTable sx={{ mt: 2 }}>
+													<TableHead>
+														<TableRow sx={{ backgroundColor: '#0071E3' }}>
+															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Название</TableCell>
+															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Действие</TableCell>
+															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Время</TableCell>
+														</TableRow>
+													</TableHead>
+													<Fade in={true} timeout={500} key={historyTransitionKey}>
+														<TableBody>
+															{actionHistory.map((action) => (
+																<TableRow key={action.id}>
+																	<TableCell>
+																		<Typography
+																			sx={{
+																				color: '#0071E3',
+																				textDecoration: 'underline',
+																				cursor: 'pointer',
+																				'&:hover': { textDecoration: 'none' },
+																			}}
+																			onClick={() => {
+																				console.log('Клик по записи истории:', action); // Отладка
+																				if (action.id) {
+																					console.log('Переход на:', `/publication/${action.id}`); // Отладка
+																					handleCloseHistoryDrawer(); // Закрываем Drawer
+																					navigate(`/publication/${action.id}`); // Переходим на страницу
+																				} else {
+																					console.error('ID публикации отсутствует:', action); // Отладка
+																					setError('ID публикации отсутствует в записи истории.');
+																					setOpenError(true);
+																				}
+																			}}
+																		>
+																			{action.title}
+																		</Typography>
+																	</TableCell>
+																	<TableCell>
+																		{action.action_type === 'published' ? 'Опубликовано' : 'Возвращено на доработку'}
+																	</TableCell>
+																	<TableCell>{new Date(action.timestamp).toLocaleString('ru-RU')}</TableCell>
+																</TableRow>
+															))}
+														</TableBody>
+													</Fade>
+												</AppleTable>
+												<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
+													<Pagination
+														count={totalHistoryPages}
+														page={historyPage}
+														onChange={handleHistoryPageChange}
+														color="primary"
+														sx={{
+															'& .MuiPaginationItem-root': {
+																borderRadius: 20,
+																'&:hover': { backgroundColor: 'grey.100' },
+																'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white' },
+															},
+														}}
+													/>
+												</Box>
+											</>
+										) : (
+											<Typography sx={{ mt: 2, color: '#6E6E73' }}>
+												Нет записей в истории действий.
+											</Typography>
+										)}
+									</Box>
+								</Drawer>
 							</>
 						)}
 
@@ -678,13 +808,13 @@ function ManagerDashboard() {
 													const generateUsername = async () => {
 														const transliterate = (text) => {
 															const ruToEn = {
-																'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd',
-																'е': 'e', 'ё': 'e', 'ж': 'zh', 'з': 'z', 'и': 'i',
-																'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n',
-																'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't',
-																'у': 'u', 'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch',
-																'ш': 'sh', 'щ': 'sch', 'ъ': '', 'ы': 'y', 'ь': '',
-																'э': 'e', 'ю': 'yu', 'я': 'ya'
+																а: 'a', б: 'b', в: 'v', г: 'g', д: 'd',
+																е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i',
+																й: 'y', к: 'k', л: 'l', м: 'm', н: 'n',
+																о: 'o', п: 'p', р: 'r', с: 's', т: 't',
+																у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch',
+																ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '',
+																э: 'e', ю: 'yu', я: 'ya'
 															};
 															return text.toLowerCase().split('').map(char => ruToEn[char] || char).join('');
 														};
@@ -861,25 +991,27 @@ function ManagerDashboard() {
 															<TableCell>Статус</TableCell>
 														</TableRow>
 													</TableHead>
-													<TableBody>
-														{plan.entries.map((entry) => (
-															<TableRow key={entry.id}>
-																<TableCell>{entry.title || 'Не указано'}</TableCell>
-																<TableCell>
-																	{entry.type === 'article'
-																		? 'Статья'
-																		: entry.type === 'monograph'
-																			? 'Монография'
-																			: entry.type === 'conference'
-																				? 'Доклад/конференция'
-																				: entry.type || 'Не указано'}
-																</TableCell>
-																<TableCell>
-																	<StatusChip status={entry.status} role={user.role} />
-																</TableCell>
-															</TableRow>
-														))}
-													</TableBody>
+													<Fade in={true} timeout={500} key={plansTransitionKey}>
+														<TableBody>
+															{plan.entries.map((entry) => (
+																<TableRow key={entry.id}>
+																	<TableCell>{entry.title || 'Не указано'}</TableCell>
+																	<TableCell>
+																		{entry.type === 'article'
+																			? 'Статья'
+																			: entry.type === 'monograph'
+																				? 'Монография'
+																				: entry.type === 'conference'
+																					? 'Доклад/конференция'
+																					: entry.type || 'Не указано'}
+																	</TableCell>
+																	<TableCell>
+																		<StatusChip status={entry.status} role={user.role} />
+																	</TableCell>
+																</TableRow>
+															))}
+														</TableBody>
+													</Fade>
 												</PlanTable>
 												{plan.return_comment && (
 													<Typography

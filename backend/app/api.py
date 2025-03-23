@@ -9,6 +9,7 @@ import logging
 from io import BytesIO
 import bibtexparser
 from datetime import datetime
+from sqlalchemy import or_
 
 bp = Blueprint('admin_api', __name__, url_prefix='/admin_api')
 logger = logging.getLogger(__name__)
@@ -241,31 +242,30 @@ def update_publication(pub_id):
     publication.authors = data.get('authors', publication.authors)
     publication.year = int(data.get('year', publication.year))
     publication.type = data.get('type', publication.type)
-    publication.status = data.get('status', publication.status)
+    new_status = data.get('status', publication.status)
 
-    if publication.status == 'published' and not publication.published_at:
+    # Логика для статуса
+    if new_status == 'published' and publication.status != 'published':
         publication.published_at = datetime.utcnow()
+        publication.returned_for_revision = False
+        publication.returned_at = None
+        publication.return_comment = None
+    elif new_status == 'returned_for_revision' and publication.status != 'returned_for_revision':
+        publication.returned_for_revision = True
+        publication.returned_at = datetime.utcnow()  # Устанавливаем время возврата
+        publication.return_comment = data.get('return_comment', '')  # Получаем комментарий из запроса
+    publication.status = new_status
 
     try:
         db.session.commit()
         return jsonify({
             'message': 'Публикация успешно обновлена',
-            'publication': {
-                'id': publication.id,
-                'title': publication.title,
-                'authors': publication.authors,
-                'year': publication.year,
-                'type': publication.type,
-                'status': publication.status,
-                'file_url': publication.file_url,
-                'published_at': publication.published_at.isoformat() if publication.published_at else None
-            }
+            'publication': publication.to_dict()
         }), 200
     except Exception as e:
         db.session.rollback()
         logger.error(f"Ошибка при обновлении публикации {pub_id}: {str(e)}")
         return jsonify({"error": "Ошибка при обновлении публикации. Попробуйте позже."}), 500
-
 @bp.route('/admin/publications/<int:pub_id>', methods=['DELETE'])
 @admin_or_manager_required
 def delete_publication(pub_id):
@@ -505,3 +505,40 @@ def get_needs_review_plans():
         'pages': pagination.pages,
         'total': pagination.total
     })
+
+
+@bp.route('/admin/manager-action-history', methods=['GET'])
+@admin_or_manager_required
+def get_manager_action_history():
+    """
+    Получает историю действий менеджера: публикации со статусами 'published' и 'returned_for_revision'.
+    """
+    # Фильтруем публикации по статусам, которые менеджер мог обработать
+    query = Publication.query.filter(
+        or_(Publication.status == 'published', Publication.status == 'returned_for_revision')
+    ).order_by(Publication.updated_at.desc())  # Сортировка по времени последнего изменения
+
+    # Пагинация
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    paginated_publications = query.paginate(page=page, per_page=per_page, error_out=False)
+
+    # Формируем данные для ответа
+    history = []
+    for pub in paginated_publications.items:
+        action_type = 'published' if pub.status == 'published' else 'returned_for_revision'
+        timestamp = pub.published_at if pub.status == 'published' else pub.returned_at
+        history.append({
+            'id': pub.id,
+            'title': pub.title,
+            'action_type': action_type,
+            'timestamp': timestamp.isoformat() if timestamp else pub.updated_at.isoformat(),  # Фallback на updated_at
+            'comment': pub.return_comment if action_type == 'returned_for_revision' else None  # Комментарий только для возврата
+            
+        })
+
+    return jsonify({
+        'history': history,
+        'pages': paginated_publications.pages,
+        'total': paginated_publications.total
+    }), 200

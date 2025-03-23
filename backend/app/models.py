@@ -61,10 +61,12 @@ class Publication(db.Model):
     updated_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow(), nullable=False)
     returned_for_revision = db.Column(db.Boolean, default=False)
     published_at = db.Column(db.DateTime, nullable=True)
+    # Новые поля
+    returned_at = db.Column(db.DateTime, nullable=True)  # Время возврата на доработку
+    return_comment = db.Column(db.Text, nullable=True)   # Комментарий при возврате
 
     user = db.relationship('User', back_populates='publications', lazy=True)
     plan_entries = db.relationship('PlanEntry', back_populates='publication', lazy=True)
-
     @property
     def type_ru(self):
         return {
@@ -93,6 +95,8 @@ class Publication(db.Model):
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'returned_for_revision': self.returned_for_revision,
             'published_at': self.published_at.isoformat() if self.published_at else None,
+            'returned_at': self.returned_at.isoformat() if self.returned_at else None,  # Добавляем новое поле
+            'return_comment': self.return_comment,  # Добавляем новое поле
             'user': {
                 'full_name': self.user.full_name if self.user else None
             } if self.user else None
