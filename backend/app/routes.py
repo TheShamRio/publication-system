@@ -108,12 +108,15 @@ def submit_for_review(pub_id):
     publication = Publication.query.get_or_404(pub_id)
     
     if publication.user_id != current_user.id:
+        logger.warning(f"Несанкционированная попытка отправить публикацию {pub_id} на проверку пользователем {current_user.id}")
         return jsonify({'error': 'У вас нет прав на отправку этой публикации на проверку'}), 403
 
-    if publication.status != 'returned_for_revision':
+    if publication.status not in ['draft', 'returned_for_revision']:
+        logger.debug(f"Публикация {pub_id} со статусом {publication.status} не может быть отправлена на проверку")
         return jsonify({'error': 'Публикация уже отправлена на проверку или опубликована'}), 400
 
     if not publication.file_url:
+        logger.debug(f"Попытка отправить публикацию {pub_id} без файла")
         return jsonify({'error': 'Нельзя отправить на проверку публикацию без прикреплённого файла'}), 400
 
     publication.status = 'needs_review'
@@ -122,6 +125,7 @@ def submit_for_review(pub_id):
 
     try:
         db.session.commit()
+        logger.debug(f"Публикация {pub_id} успешно отправлена на проверку пользователем {current_user.id}")
         return jsonify({'message': 'Публикация отправлена на проверку'}), 200
     except Exception as e:
         db.session.rollback()

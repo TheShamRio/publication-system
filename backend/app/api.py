@@ -213,14 +213,19 @@ def get_publications():
 @bp.route('/admin/publications/<int:pub_id>', methods=['PUT'])
 @admin_or_manager_required
 def update_publication(pub_id):
+    # Шаг 1: Находим публикацию по ID или возвращаем 404, если не найдена
     publication = Publication.query.get_or_404(pub_id)
+
+    # Шаг 2: Обрабатываем загрузку файла, если он есть в запросе
     if 'file' in request.files:
         file = request.files['file']
         if file and allowed_file(file.filename):
+            # Удаляем старый файл, если он существует
             if publication.file_url:
                 old_file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
                 if os.path.exists(old_file_path):
                     os.remove(old_file_path)
+            # Сохраняем новый файл с уникальным именем
             filename = secure_filename(file.filename)
             file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
             if os.path.exists(file_path):
@@ -237,6 +242,7 @@ def update_publication(pub_id):
                 logger.error(f"Ошибка при сохранении файла: {str(e)}")
                 return jsonify({"error": "Ошибка при сохранении файла. Попробуйте снова."}), 500
 
+    # Шаг 3: Получаем данные из запроса
     data = request.form if 'file' in request.files else request.get_json()
     publication.title = data.get('title', publication.title)
     publication.authors = data.get('authors', publication.authors)
@@ -244,18 +250,28 @@ def update_publication(pub_id):
     publication.type = data.get('type', publication.type)
     new_status = data.get('status', publication.status)
 
-    # Логика для статуса
-    if new_status == 'published' and publication.status != 'published':
+    # Шаг 4: Обновляем статус и связанные поля
+    # Если новый статус — 'published', устанавливаем published_at
+    if new_status == 'published':
         publication.published_at = datetime.utcnow()
         publication.returned_for_revision = False
         publication.returned_at = None
         publication.return_comment = None
-    elif new_status == 'returned_for_revision' and publication.status != 'returned_for_revision':
+    # Если новый статус — 'returned_for_revision', устанавливаем returned_at
+    elif new_status == 'returned_for_revision':
         publication.returned_for_revision = True
-        publication.returned_at = datetime.utcnow()  # Устанавливаем время возврата
-        publication.return_comment = data.get('return_comment', '')  # Получаем комментарий из запроса
+        publication.returned_at = datetime.utcnow()
+        publication.return_comment = data.get('return_comment', '')
+    # Если статус меняется с 'published' или 'returned_for_revision' на другой, сбрасываем временные метки
+    elif new_status not in ['published', 'returned_for_revision'] and publication.status in ['published', 'returned_for_revision']:
+        publication.published_at = None
+        publication.returned_at = None
+        publication.return_comment = None
+        publication.returned_for_revision = False
+
     publication.status = new_status
 
+    # Шаг 5: Сохраняем изменения в базе данных
     try:
         db.session.commit()
         return jsonify({
@@ -507,36 +523,64 @@ def get_needs_review_plans():
     })
 
 
+from sqlalchemy import case, or_, desc, func
+
 @bp.route('/admin/manager-action-history', methods=['GET'])
 @admin_or_manager_required
 def get_manager_action_history():
-    """
-    Получает историю действий менеджера: публикации со статусами 'published' и 'returned_for_revision'.
-    """
-    # Фильтруем публикации по статусам, которые менеджер мог обработать
+    # Шаг 1: Формируем базовый запрос для фильтрации публикаций
+    # Фильтруем записи, у которых статус либо 'published', либо 'returned_for_revision'
     query = Publication.query.filter(
         or_(Publication.status == 'published', Publication.status == 'returned_for_revision')
-    ).order_by(Publication.updated_at.desc())  # Сортировка по времени последнего изменения
+    )
 
-    # Пагинация
+    # Шаг 2: Определяем время действия с помощью case
+    # Используем COALESCE для обработки NULL значений:
+    # - Если статус 'published', берём published_at
+    # - Если статус 'returned_for_revision', берём returned_at
+    # - Если оба поля NULL (крайний случай), используем updated_at
+    action_time = func.coalesce(
+        case(
+            (Publication.status == 'published', Publication.published_at),
+            (Publication.status == 'returned_for_revision', Publication.returned_at),
+            else_=None  # Если ни одно условие не выполнено, возвращаем NULL
+        ),
+        Publication.updated_at  # Fallback на updated_at, если результат case — NULL
+    ).label('action_time')
+
+    # Шаг 3: Применяем сортировку
+    # Сортируем по action_time в порядке убывания (desc), чтобы самые поздние записи были первыми
+    query = query.order_by(desc(action_time))
+
+    # Шаг 4: Отладка — выводим сгенерированный SQL-запрос
+    logger.debug(f"Сгенерированный SQL-запрос: {query.statement.compile(compile_kwargs={'literal_binds': True})}")
+
+    # Шаг 5: Реализуем пагинацию
+    # Получаем параметры пагинации из запроса (по умолчанию page=1, per_page=10)
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
     paginated_publications = query.paginate(page=page, per_page=per_page, error_out=False)
 
-    # Формируем данные для ответа
+    # Шаг 6: Формируем ответ
+    # Проходим по записям и создаём список истории действий
     history = []
     for pub in paginated_publications.items:
+        # Определяем тип действия на основе статуса
         action_type = 'published' if pub.status == 'published' else 'returned_for_revision'
+        # Выбираем соответствующее время действия
         timestamp = pub.published_at if pub.status == 'published' else pub.returned_at
+        # Логируем значения для отладки
+        logger.debug(f"Публикация ID={pub.id}, статус={pub.status}, timestamp={timestamp}, published_at={pub.published_at}, returned_at={pub.returned_at}")
+        # Формируем запись для ответа
         history.append({
             'id': pub.id,
             'title': pub.title,
             'action_type': action_type,
-            'timestamp': timestamp.isoformat() if timestamp else pub.updated_at.isoformat(),  # Фallback на updated_at
-            'comment': pub.return_comment if action_type == 'returned_for_revision' else None  # Комментарий только для возврата
-            
+            'timestamp': timestamp.isoformat() if timestamp else pub.updated_at.isoformat(),
+            'comment': pub.return_comment if action_type == 'returned_for_revision' else None
         })
 
+    # Шаг 7: Возвращаем JSON-ответ
     return jsonify({
         'history': history,
         'pages': paginated_publications.pages,

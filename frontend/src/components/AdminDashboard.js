@@ -29,14 +29,13 @@ import { useAuth } from '../contexts/AuthContext';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DownloadIcon from '@mui/icons-material/Download';
-import RefreshIcon from '@mui/icons-material/Refresh';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import axios from 'axios';
 import { styled } from '@mui/system';
 
-// Стили компонентов
+// Стили компонентов (без изменений)
 const AppleButton = styled(Button)(({ theme }) => ({
 	borderRadius: '12px',
 	textTransform: 'none',
@@ -106,12 +105,15 @@ const CancelButton = styled(Button)(({ theme }) => ({
 	},
 }));
 
+const namePartRegex = /^[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?$/;
+const fullNameRegex = /^[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?\s[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?\s[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?$/;
+
 function AdminDashboard() {
 	const [value, setValue] = useState(0);
-	const [users, setUsers] = useState([]); // Отфильтрованные пользователи для отображения
-	const [allUsers, setAllUsers] = useState([]); // Все пользователи текущей страницы с сервера
-	const [publications, setPublications] = useState([]); // Отфильтрованные публикации для отображения
-	const [allPublications, setAllPublications] = useState([]); // Все публикации текущей страницы с сервера
+	const [users, setUsers] = useState([]);
+	const [allUsers, setAllUsers] = useState([]);
+	const [publications, setPublications] = useState([]);
+	const [allPublications, setAllPublications] = useState([]);
 	const [currentPageUsers, setCurrentPageUsers] = useState(1);
 	const [totalPagesUsers, setTotalPagesUsers] = useState(1);
 	const [currentPagePublications, setCurrentPagePublications] = useState(1);
@@ -146,17 +148,32 @@ function AdminDashboard() {
 	const [openEditDialog, setOpenEditDialog] = useState(false);
 	const navigate = useNavigate();
 	const { csrfToken } = useAuth();
-
-	const [newUsername, setNewUsername] = useState('');
-	const [newPassword, setNewPassword] = useState('');
 	const [newLastName, setNewLastName] = useState('');
 	const [newFirstName, setNewFirstName] = useState('');
 	const [newMiddleName, setNewMiddleName] = useState('');
+	const [newUsername, setNewUsername] = useState('');
+	const [newPassword, setNewPassword] = useState('');
 	const [showPassword, setShowPassword] = useState(false);
+	const [lastNameError, setLastNameError] = useState('');
+	const [firstNameError, setFirstNameError] = useState('');
+	const [middleNameError, setMiddleNameError] = useState('');
+	const [usersTransitionKey, setUsersTransitionKey] = useState(0);
+	const [publicationsTransitionKey, setPublicationsTransitionKey] = useState(0);
 
 	const ITEMS_PER_PAGE = 10;
 
-	// Функция загрузки пользователей с сервера
+	// Таймеры для автозакрытия уведомлений
+	useEffect(() => {
+		let errorTimer, successTimer;
+		if (openError) errorTimer = setTimeout(() => setOpenError(false), 3000);
+		if (openSuccess) successTimer = setTimeout(() => setOpenSuccess(false), 3000);
+		return () => {
+			if (errorTimer) clearTimeout(errorTimer);
+			if (successTimer) clearTimeout(successTimer);
+		};
+	}, [openError, openSuccess]);
+
+	// Функция загрузки пользователей
 	const fetchUsers = async () => {
 		try {
 			const response = await axios.get('http://localhost:5000/admin_api/admin/users', {
@@ -166,13 +183,14 @@ function AdminDashboard() {
 			});
 			setAllUsers(response.data.users || []);
 			setTotalPagesUsers(response.data.pages || 1);
+			setUsersTransitionKey((prev) => prev + 1);
 		} catch (err) {
 			setError('Ошибка загрузки пользователей. Попробуйте позже.');
 			setOpenError(true);
 		}
 	};
 
-	// Функция загрузки публикаций с сервера
+	// Функция загрузки публикаций
 	const fetchPublications = async () => {
 		try {
 			const response = await axios.get('http://localhost:5000/admin_api/admin/publications', {
@@ -187,56 +205,57 @@ function AdminDashboard() {
 			});
 			setAllPublications(response.data.publications || []);
 			setTotalPagesPublications(response.data.pages || 1);
+			setPublicationsTransitionKey((prev) => prev + 1);
 		} catch (err) {
 			setError('Ошибка загрузки публикаций. Попробуйте позже.');
 			setOpenError(true);
 		}
 	};
 
-	// Клиентская фильтрация пользователей с учётом null/undefined
+	// Инициализация данных при монтировании
 	useEffect(() => {
-		// Фильтруем пользователей по поисковому запросу
+		setLoadingInitial(true);
+		Promise.all([fetchUsers(), fetchPublications()]).finally(() => setLoadingInitial(false));
+	}, []);
+
+	// Обновление пользователей при смене страницы
+	useEffect(() => {
+		fetchUsers();
+	}, [currentPageUsers]);
+
+	// Обновление публикаций при смене страницы или фильтров
+	useEffect(() => {
+		fetchPublications();
+	}, [currentPagePublications, filterType, filterStatus]);
+
+	// Локальная фильтрация пользователей
+	useEffect(() => {
 		const filtered = allUsers.filter((user) => {
 			const search = searchQueryUsers.toLowerCase();
 			return (
-				(user.username?.toLowerCase() ?? '').includes(search) || // Проверяем username
-				(user.last_name?.toLowerCase() ?? '').includes(search) || // Проверяем last_name
-				(user.first_name?.toLowerCase() ?? '').includes(search) || // Проверяем first_name
-				(user.middle_name?.toLowerCase() ?? '').includes(search) // Проверяем middle_name
+				(user.username?.toLowerCase() ?? '').includes(search) ||
+				(user.last_name?.toLowerCase() ?? '').includes(search) ||
+				(user.first_name?.toLowerCase() ?? '').includes(search) ||
+				(user.middle_name?.toLowerCase() ?? '').includes(search)
 			);
 		});
-		setUsers(filtered); // Устанавливаем отфильтрованный список
-		// Пересчитываем количество страниц на основе отфильтрованного списка
-		setTotalPagesUsers(Math.ceil(filtered.length / ITEMS_PER_PAGE) || 1);
+		setUsers(filtered);
 	}, [allUsers, searchQueryUsers]);
 
-	// Клиентская фильтрация публикаций с учётом null/undefined
+	// Локальная фильтрация публикаций
 	useEffect(() => {
-		// Фильтруем публикации по поисковому запросу
 		const filtered = allPublications.filter((pub) => {
 			const search = searchQueryPublications.toLowerCase();
 			return (
-				(pub.title?.toLowerCase() ?? '').includes(search) || // Проверяем title
-				(pub.authors?.toLowerCase() ?? '').includes(search) || // Проверяем authors
-				(pub.year?.toString() ?? '').includes(search) // Проверяем year
+				(pub.title?.toLowerCase() ?? '').includes(search) ||
+				(pub.authors?.toLowerCase() ?? '').includes(search) ||
+				(pub.year?.toString() ?? '').includes(search)
 			);
 		});
-		setPublications(filtered); // Устанавливаем отфильтрованный список
-		// Пересчитываем количество страниц на основе отфильтрованного списка
-		setTotalPagesPublications(Math.ceil(filtered.length / ITEMS_PER_PAGE) || 1);
+		setPublications(filtered);
 	}, [allPublications, searchQueryPublications]);
 
-	// Загрузка данных при смене вкладки, страницы или фильтров
-	useEffect(() => {
-		setLoadingInitial(true);
-		if (value === 0) {
-			fetchUsers().finally(() => setLoadingInitial(false));
-		} else if (value === 1) {
-			fetchPublications().finally(() => setLoadingInitial(false));
-		}
-	}, [value, currentPageUsers, currentPagePublications, filterType, filterStatus]);
-
-	// Обработка смены вкладки
+	// Обработчик смены вкладок
 	const handleTabChange = (event, newValue) => {
 		setValue(newValue);
 		setSearchQueryUsers('');
@@ -247,41 +266,36 @@ function AdminDashboard() {
 		setCurrentPagePublications(1);
 	};
 
-	// Обработка смены страницы для пользователей
+	// Обработчики пагинации
 	const handlePageChangeUsers = (event, newPage) => {
 		setCurrentPageUsers(newPage);
 	};
 
-	// Обработка смены страницы для публикаций
 	const handlePageChangePublications = (event, newPage) => {
 		setCurrentPagePublications(newPage);
 	};
 
-	// Обработка изменения поискового запроса для пользователей
+	// Обработчики поиска
 	const handleSearchUsersChange = (e) => {
 		setSearchQueryUsers(e.target.value);
-		setCurrentPageUsers(1); // Сбрасываем на первую страницу при новом поиске
 	};
 
-	// Обработка изменения поискового запроса для публикаций
 	const handleSearchPublicationsChange = (e) => {
 		setSearchQueryPublications(e.target.value);
-		setCurrentPagePublications(1); // Сбрасываем на первую страницу при новом поиске
 	};
 
-	// Обработка изменения фильтра типа публикации
+	// Обработчики фильтров
 	const handleFilterTypeChange = (e) => {
 		setFilterType(e.target.value);
 		setCurrentPagePublications(1);
 	};
 
-	// Обработка изменения фильтра статуса публикации
 	const handleFilterStatusChange = (e) => {
 		setFilterStatus(e.target.value);
 		setCurrentPagePublications(1);
 	};
 
-	// Обработка нажатия на кнопку удаления
+	// Обработчики удаления
 	const handleDeleteClick = (type, item) => {
 		if (type === 'user') {
 			setUserToDelete(item);
@@ -291,14 +305,12 @@ function AdminDashboard() {
 		setOpenDeleteDialog(true);
 	};
 
-	// Отмена удаления
 	const handleDeleteCancel = () => {
 		setOpenDeleteDialog(false);
 		setUserToDelete(null);
 		setPublicationToDelete(null);
 	};
 
-	// Подтверждение удаления
 	const handleDeleteConfirm = async () => {
 		try {
 			if (userToDelete) {
@@ -328,7 +340,7 @@ function AdminDashboard() {
 		}
 	};
 
-	// Обработка нажатия на кнопку редактирования
+	// Обработчики редактирования
 	const handleEditClick = (type, item) => {
 		if (type === 'user') {
 			setEditUser(item);
@@ -351,7 +363,6 @@ function AdminDashboard() {
 		setOpenEditDialog(true);
 	};
 
-	// Отмена редактирования
 	const handleEditCancel = () => {
 		setOpenEditDialog(false);
 		setEditUser(null);
@@ -375,7 +386,6 @@ function AdminDashboard() {
 		setOpenSuccess(false);
 	};
 
-	// Подтверждение редактирования
 	const handleEditSubmit = async (e) => {
 		e.preventDefault();
 		try {
@@ -408,7 +418,6 @@ function AdminDashboard() {
 				if (editFile) {
 					formData.append('file', editFile);
 				}
-
 				const response = await axios.put(`http://localhost:5000/admin_api/admin/publications/${editPublication.id}`, formData, {
 					withCredentials: true,
 					headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'multipart/form-data' },
@@ -424,12 +433,56 @@ function AdminDashboard() {
 		}
 	};
 
-	// Генерация уникального логина
-	const generateUsername = async () => {
-		if (!newLastName || !newFirstName || !newMiddleName) {
-			setError('Для генерации логина необходимо заполнить ФИО.');
-			setOpenError(true);
-			return null;
+	// Валидация имени
+	const validateNamePart = (value, fieldName) => {
+		if (!value.trim()) return `${fieldName} обязательно для заполнения.`;
+		if (!namePartRegex.test(value))
+			return `${fieldName} должно начинаться с заглавной буквы, содержать только кириллицу и быть длиной не менее 2 символов.`;
+		return '';
+	};
+
+	const validateFullName = (lastName, firstName, middleName) => {
+		const fullName = `${lastName} ${firstName} ${middleName}`;
+		if (!fullNameRegex.test(fullName))
+			return 'ФИО должно быть в формате "Иванов Иван Иванович" (три слова с заглавной буквы, разделённые пробелами).';
+		return '';
+	};
+
+	// Обработчики изменения полей создания пользователя
+	const handleLastNameChange = (e) => {
+		const value = e.target.value;
+		setNewLastName(value);
+		setLastNameError(validateNamePart(value, 'Фамилия'));
+	};
+
+	const handleFirstNameChange = (e) => {
+		const value = e.target.value;
+		setNewFirstName(value);
+		setFirstNameError(validateNamePart(value, 'Имя'));
+	};
+
+	const handleMiddleNameChange = (e) => {
+		const value = e.target.value;
+		setNewMiddleName(value);
+		setMiddleNameError(validateNamePart(value, 'Отчество'));
+	};
+
+	// Генерация логина и пароля
+	const handleGenerateCredentials = async () => {
+		const lastNameErr = validateNamePart(newLastName, 'Фамилия');
+		const firstNameErr = validateNamePart(newFirstName, 'Имя');
+		const middleNameErr = validateNamePart(newMiddleName, 'Отчество');
+		const fullNameErr = validateFullName(newLastName, newFirstName, newMiddleName);
+
+		if (lastNameErr || firstNameErr || middleNameErr || fullNameErr) {
+			setLastNameError(lastNameErr);
+			setFirstNameError(firstNameErr);
+			setMiddleNameError(middleNameErr);
+			if (fullNameErr) {
+				setError(fullNameErr);
+				setOpenError(true);
+			}
+			return;
 		}
 
 		const transliterate = (text) => {
@@ -468,27 +521,17 @@ function AdminDashboard() {
 			} catch (err) {
 				setError('Ошибка проверки логина. Попробуйте снова.');
 				setOpenError(true);
-				return null;
+				return;
 			}
 		}
-
-		return generatedUsername;
-	};
-
-	// Генерация логина и пароля
-	const generateCredentials = async () => {
-		const generatedUsername = await generateUsername();
-		if (!generatedUsername) return;
 
 		try {
 			const response = await axios.get('http://localhost:5000/admin_api/admin/generate-password', {
 				withCredentials: true,
 				headers: { 'X-CSRFToken': csrfToken },
 			});
-			const generatedPassword = response.data.password;
-
 			setNewUsername(generatedUsername);
-			setNewPassword(generatedPassword);
+			setNewPassword(response.data.password);
 			setSuccess('Логин и пароль успешно сгенерированы.');
 			setOpenSuccess(true);
 		} catch (err) {
@@ -497,11 +540,26 @@ function AdminDashboard() {
 		}
 	};
 
-	// Создание нового пользователя
-	const handleCreateUser = async (e) => {
-		e.preventDefault();
-		if (!newUsername || !newPassword || !newLastName || !newFirstName || !newMiddleName) {
-			setError('Все поля обязательны для заполнения.');
+	// Создание пользователя
+	const handleCreateUser = async () => {
+		const lastNameErr = validateNamePart(newLastName, 'Фамилия');
+		const firstNameErr = validateNamePart(newFirstName, 'Имя');
+		const middleNameErr = validateNamePart(newMiddleName, 'Отчество');
+		const fullNameErr = validateFullName(newLastName, newFirstName, newMiddleName);
+
+		if (lastNameErr || firstNameErr || middleNameErr || fullNameErr) {
+			setLastNameError(lastNameErr);
+			setFirstNameError(firstNameErr);
+			setMiddleNameError(middleNameErr);
+			if (fullNameErr) {
+				setError(fullNameErr);
+				setOpenError(true);
+			}
+			return;
+		}
+
+		if (!newUsername.trim() || !newPassword.trim()) {
+			setError('Логин и пароль обязательны.');
 			setOpenError(true);
 			return;
 		}
@@ -521,12 +579,15 @@ function AdminDashboard() {
 			if (response.status === 201 && response.data.message && response.data.message.includes('успешно зарегистрирован')) {
 				setSuccess('Пользователь успешно создан.');
 				setOpenSuccess(true);
-				setNewUsername('');
-				setNewPassword('');
 				setNewLastName('');
 				setNewFirstName('');
 				setNewMiddleName('');
-				await fetchUsers(); // Обновляем список пользователей
+				setNewUsername('');
+				setNewPassword('');
+				setLastNameError('');
+				setFirstNameError('');
+				setMiddleNameError('');
+				await fetchUsers();
 			}
 		} catch (err) {
 			setError(err.response?.data?.error || 'Ошибка при создании пользователя. Попробуйте позже.');
@@ -534,19 +595,18 @@ function AdminDashboard() {
 		}
 	};
 
-	// Переключение видимости пароля в форме создания
+	// Переключение видимости пароля
 	const handleTogglePasswordVisibility = () => {
 		setShowPassword(!showPassword);
 	};
 
-	// Переключение видимости пароля в форме редактирования
 	const handleToggleEditPasswordVisibility = () => {
 		setShowEditPassword(!showEditPassword);
 	};
 
-	// Копирование данных в буфер обмена
+	// Копирование в буфер обмена
 	const handleCopyToClipboard = () => {
-		const dataToCopy = `Фамилия: ${newLastName}, Имя: ${newFirstName}, Отчество: ${newMiddleName}, Логин: ${newUsername}, Пароль: ${newPassword}`;
+		const dataToCopy = `Логин: ${newUsername}\nПароль: ${newPassword}`;
 		navigator.clipboard.writeText(dataToCopy)
 			.then(() => {
 				setSuccess('Данные скопированы в буфер обмена.');
@@ -619,33 +679,39 @@ function AdminDashboard() {
 									Создание нового пользователя
 								</Typography>
 								<AppleCard sx={{ mb: 4, p: 3, backgroundColor: '#F5F5F7', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
-									<form onSubmit={handleCreateUser}>
+									<form onSubmit={(e) => e.preventDefault()}>
 										<AppleTextField
 											fullWidth
 											label="Фамилия"
 											value={newLastName}
-											onChange={(e) => setNewLastName(e.target.value)}
+											onChange={handleLastNameChange}
 											margin="normal"
 											variant="outlined"
 											autoComplete="family-name"
+											error={!!lastNameError}
+											helperText={lastNameError}
 										/>
 										<AppleTextField
 											fullWidth
 											label="Имя"
 											value={newFirstName}
-											onChange={(e) => setNewFirstName(e.target.value)}
+											onChange={handleFirstNameChange}
 											margin="normal"
 											variant="outlined"
 											autoComplete="given-name"
+											error={!!firstNameError}
+											helperText={firstNameError}
 										/>
 										<AppleTextField
 											fullWidth
 											label="Отчество"
 											value={newMiddleName}
-											onChange={(e) => setNewMiddleName(e.target.value)}
+											onChange={handleMiddleNameChange}
 											margin="normal"
 											variant="outlined"
 											autoComplete="additional-name"
+											error={!!middleNameError}
+											helperText={middleNameError}
 										/>
 										<AppleTextField
 											fullWidth
@@ -674,13 +740,13 @@ function AdminDashboard() {
 											}}
 										/>
 										<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-											<AppleButton startIcon={<RefreshIcon />} onClick={generateCredentials}>
+											<AppleButton onClick={handleGenerateCredentials}>
 												Сгенерировать логин и пароль
 											</AppleButton>
 											<AppleButton startIcon={<ContentCopyIcon />} onClick={handleCopyToClipboard}>
 												Скопировать в буфер обмена
 											</AppleButton>
-											<AppleButton type="submit">Создать</AppleButton>
+											<AppleButton onClick={handleCreateUser}>Создать</AppleButton>
 										</Box>
 										<Collapse in={openError}>
 											{error && (
@@ -755,7 +821,7 @@ function AdminDashboard() {
 											</TableCell>
 										</TableRow>
 									</TableHead>
-									<Fade in={true} timeout={500}>
+									<Fade in={true} timeout={500} key={usersTransitionKey}>
 										<TableBody>
 											{users.length > 0 ? (
 												users.map((user) => (
@@ -903,7 +969,7 @@ function AdminDashboard() {
 											</TableCell>
 										</TableRow>
 									</TableHead>
-									<Fade in={true} timeout={500}>
+									<Fade in={true} timeout={500} key={publicationsTransitionKey}>
 										<TableBody>
 											{publications.length > 0 ? (
 												publications.map((pub) => (
@@ -1028,6 +1094,7 @@ function AdminDashboard() {
 								</Box>
 							</>
 						)}
+
 						<Dialog
 							open={openDeleteDialog}
 							onClose={handleDeleteCancel}

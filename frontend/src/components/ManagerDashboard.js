@@ -251,6 +251,7 @@ function ManagerDashboard() {
 				headers: { 'X-CSRFToken': csrfToken },
 				params: { page, per_page: 10 },
 			});
+			console.log('Данные с сервера:', response.data.history); // Отладочный вывод
 			setActionHistory(response.data.history);
 			setTotalHistoryPages(response.data.pages);
 			setHistoryTransitionKey((prev) => prev + 1);
