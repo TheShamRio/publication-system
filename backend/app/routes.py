@@ -737,21 +737,18 @@ def get_plans():
 def create_plan():
     logger.debug(f"Получен POST запрос для /plans")
     data = request.get_json()
-    if not all(k in data for k in ('year', 'expectedCount', 'fillType', 'entries')):
+    # Убираем проверку expectedCount
+    if not data.get('year') or not data.get('fillType') or 'entries' not in data:
         return jsonify({'error': 'Missing required fields'}), 400
     
     if not isinstance(data['year'], int) or data['year'] < 1900 or data['year'] > 2100:
         return jsonify({'error': 'Invalid year'}), 400
-    
-    if not isinstance(data['expectedCount'], int) or data['expectedCount'] < 1:
-        return jsonify({'error': 'Expected count must be at least 1'}), 400
     
     if data['fillType'] not in ['manual', 'link']:
         return jsonify({'error': 'Invalid fill type'}), 400
 
     plan = Plan(
         year=data['year'],
-        expectedCount=data['expectedCount'],
         fillType=data['fillType'],
         user_id=current_user.id,
         status='draft'
@@ -789,7 +786,7 @@ def update_plan(plan_id):
         return jsonify({'error': 'Cannot edit plan that is under review'}), 403
 
     data = request.get_json()
-    if not all(k in data for k in ('year', 'expectedCount', 'fillType', 'entries')):
+    if not all(k in data for k in ('year', 'fillType', 'entries')):
         return jsonify({'error': 'Missing required fields'}), 400
     
     if not isinstance(data['year'], int) or data['year'] < 1900 or data['year'] > 2100:

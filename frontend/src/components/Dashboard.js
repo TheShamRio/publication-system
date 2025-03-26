@@ -33,6 +33,9 @@ import {
 	Fade,
 	CircularProgress,
 	Autocomplete,
+	FormControl, // Добавляем для выпадающего списка
+	InputLabel,  // Добавляем для выпадающего списка
+	Select,      // Добавляем для выпадающего списка
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import AddIcon from '@mui/icons-material/Add';
@@ -215,6 +218,7 @@ function Dashboard() {
 	const [filterType, setFilterType] = useState('all');
 	const [filterStatus, setFilterStatus] = useState('all');
 	const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+	const [selectedNewEntryType, setSelectedNewEntryType] = useState('article'); // Новое состояние для выбора типа
 	const [selectedPlanEntry, setSelectedPlanEntry] = useState(null);
 	const [filteredPublishedPublications, setFilteredPublishedPublications] = useState([]);
 	const [linkSearchQuery, setLinkSearchQuery] = useState('');
@@ -315,6 +319,30 @@ function Dashboard() {
 		}
 	};
 
+
+	const groupEntriesByType = (entries) => {
+		const grouped = {};
+
+		entries.forEach((entry) => {
+			const type = entry.type || 'unknown';
+			if (!grouped[type]) {
+				grouped[type] = {
+					type,
+					planCount: 0,
+					factCount: 0,
+					entries: [],
+				};
+			}
+			grouped[type].planCount += 1;
+			if (entry.publication_id) {
+				grouped[type].factCount += 1;
+			}
+			grouped[type].entries.push(entry);
+		});
+
+		return Object.values(grouped);
+	};
+
 	const fetchPlans = async (page = 1) => {
 		try {
 			const response = await axios.get('http://localhost:5000/api/plans', {
@@ -345,6 +373,68 @@ function Dashboard() {
 			setOpenError(true);
 		}
 	};
+
+	const handlePlanEntryTypeChange = (planId, oldType, newType) => {
+		const updatedPlans = plans.map((plan) => {
+			if (plan.id === planId) {
+				const updatedEntries = plan.entries.map((entry) => {
+					if (entry.type === oldType) {
+						return { ...entry, type: newType };
+					}
+					return entry;
+				});
+				return { ...plan, entries: updatedEntries };
+			}
+			return plan;
+		});
+		setPlans(updatedPlans);
+	};
+
+	// Изменение количества записей для типа
+	const handlePlanEntryCountChange = (planId, type, count) => {
+		const updatedPlans = plans.map((plan) => {
+			if (plan.id === planId) {
+				const currentEntries = plan.entries.filter((entry) => entry.type === type);
+				const currentCount = currentEntries.length;
+				let updatedEntries = [...plan.entries.filter((entry) => entry.type !== type)];
+
+				for (let i = 0; i < count; i++) {
+					updatedEntries.push({
+						id: `temp-${type}-${i}`,
+						title: `${type} ${i + 1}`,
+						type,
+						status: 'planned',
+						publication_id: null,
+						isPostApproval: false,
+					});
+				}
+
+				return { ...plan, entries: updatedEntries };
+			}
+			return plan;
+		});
+		setPlans(updatedPlans);
+	};
+
+	// Удаление всех записей определённого типа
+	const handleDeletePlanEntryByType = async (planId, type) => {
+		const updatedPlans = plans.map((plan) => {
+			if (plan.id === planId) {
+				const updatedEntries = plan.entries.filter((entry) => entry.type !== type);
+				return { ...plan, entries: updatedEntries };
+			}
+			return plan;
+		});
+		setPlans(updatedPlans);
+
+		// Отправляем запрос на сервер для обновления
+		const plan = updatedPlans.find((p) => p.id === planId);
+		await handleSavePlan(plan);
+	};
+
+	// Добавление нового типа
+
+
 	const updateAnalytics = (allPublications) => {
 		const types = { article: 0, monograph: 0, conference: 0 };
 		const statuses = { draft: 0, needs_review: 0, published: 0 };
@@ -913,50 +1003,62 @@ function Dashboard() {
 	};
 
 	const handleCreatePlan = async () => {
-		if (!newPlan.year || !newPlan.expectedCount || newPlan.expectedCount < 1) {
-			setError('Пожалуйста, укажите год и количество ожидаемых публикаций (минимум 1).');
+		// Валидация года
+		if (!newPlan.year || newPlan.year < 1900 || newPlan.year > 2100) {
+			setError('Пожалуйста, укажите корректный год (1900–2100).');
 			setOpenError(true);
 			return;
 		}
 
+		// Обновляем CSRF-токен
 		try {
 			await refreshCsrfToken();
-			const planData = {
-				year: newPlan.year,
-				expectedCount: newPlan.expectedCount,
-				fillType: 'manual',
-				entries: Array.from({ length: newPlan.expectedCount }, () => ({
-					title: '',
-					type: 'article',
-					status: 'planned',
-				})),
-			};
-			console.log('Creating plan with:', planData);
-			const response = await axios.post('http://localhost:5000/api/plans', planData, {
-				withCredentials: true,
+		} catch (err) {
+			console.error('Ошибка при обновлении CSRF-токена:', err);
+			setError('Не удалось обновить CSRF-токен. Попробуйте снова.');
+			setOpenError(true);
+			return;
+		}
+
+		// Формируем данные плана
+		const planData = {
+			year: newPlan.year,
+			fillType: 'manual',
+			entries: [],
+		};
+
+		try {
+			// Отправляем запрос на сервер
+			const response = await fetch('http://localhost:5000/api/plans', {
+				method: 'POST',
 				headers: {
-					'X-CSRFToken': csrfToken,
 					'Content-Type': 'application/json',
+					'X-CSRFToken': csrfToken,
 				},
+				credentials: 'include',
+				body: JSON.stringify(planData),
 			});
-			setSuccess('План успешно создан!');
-			setOpenSuccess(true);
-			setError('');
+
+			// Проверяем ответ
+			if (!response.ok) {
+				const errorData = await response.json();
+				throw new Error(errorData.error || 'Ошибка при создании плана');
+			}
+
+			// Обрабатываем успешный ответ
+			const data = await response.json();
+			setPlans([...plans, data.plan]);
 			setOpenCreatePlanDialog(false);
 			setNewPlan({ year: new Date().getFullYear() + 1, expectedCount: 1 });
-			await fetchPlans(planPage);
+			setSuccess('План успешно создан!');
+			setOpenSuccess(true);
 		} catch (err) {
-			console.error('Ошибка создания плана:', err.response?.data || err);
-			if (err.response) {
-				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`);
-			} else {
-				setError('Ошибка сети. Проверьте подключение и сервер.');
-			}
+			// Обрабатываем ошибки
+			console.error('Ошибка при создании плана:', err);
+			setError(err.message || 'Произошла ошибка при создании плана.');
 			setOpenError(true);
-			setSuccess('');
 		}
 	};
-
 	const handleEditPlanClick = (planId) => {
 		setEditingPlanId(planId);
 		setPlans(prevPlans =>
@@ -967,24 +1069,21 @@ function Dashboard() {
 	};
 
 	const handleAddPlanEntry = (planId) => {
-		setPlans(prevPlans =>
-			prevPlans.map(plan =>
-				plan.id === planId
-					? {
-						...plan,
-						entries: [
-							...plan.entries,
-							{
-								title: '',
-								type: 'article',
-								status: 'planned',
-								isPostApproval: true // Новая запись после утверждения
-							},
-						],
-					}
-					: plan
-			)
-		);
+		const updatedPlans = plans.map((plan) => {
+			if (plan.id === planId) {
+				const newEntry = {
+					id: `temp-${selectedNewEntryType}-${plan.entries.length}`,
+					title: `Новая ${selectedNewEntryType === 'article' ? 'статья' : selectedNewEntryType === 'monograph' ? 'монография' : 'доклад/конференция'}`,
+					type: selectedNewEntryType,
+					status: 'planned',
+					publication_id: null,
+					isPostApproval: false,
+				};
+				return { ...plan, entries: [...plan.entries, newEntry] };
+			}
+			return plan;
+		});
+		setPlans(updatedPlans);
 	};
 
 	const handleDeletePlanEntry = (planId, index) => {
@@ -1159,51 +1258,86 @@ function Dashboard() {
 	};
 
 	// Функция привязки публикации
-	const handleLinkPublication = async (planId, entryId, publicationId) => {
+	const handleLinkPublication = async (planId, entryGroup, publicationId) => {
 		try {
-			await refreshCsrfToken();
-			console.log('Отправка запроса привязки:', { planId, entryId, publicationId });
-			const response = await axios.post(
-				`http://localhost:5000/api/plans/${planId}/entries/${entryId}/link`,
-				{ publication_id: publicationId },
-				{
-					withCredentials: true,
-					headers: {
-						'X-CSRFToken': csrfToken,
-						'Content-Type': 'application/json',
-					},
+			// Находим первую запись без publication_id
+			const entryToLink = entryGroup.entries.find((entry) => !entry.publication_id);
+			if (!entryToLink) {
+				setError('Нет доступных записей для привязки');
+				setOpenError(true);
+				return;
+			}
+
+			const response = await fetch(`/api/plans/${planId}/entries/${entryToLink.id}/link`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'X-CSRF-Token': csrfToken,
+				},
+				credentials: 'include',
+				body: JSON.stringify({ publication_id: publicationId }),
+			});
+
+			const data = await response.json();
+			if (!response.ok) {
+				throw new Error(data.error || 'Ошибка при привязке публикации');
+			}
+
+			const updatedPlans = plans.map((plan) => {
+				if (plan.id === planId) {
+					const updatedEntries = plan.entries.map((entry) => {
+						if (entry.id === entryToLink.id) {
+							return { ...entry, publication_id: publicationId };
+						}
+						return entry;
+					});
+					return { ...plan, entries: updatedEntries, fact_count: plan.fact_count + 1 };
 				}
-			);
-			console.log('Ответ сервера:', response.data);
+				return plan;
+			});
+			setPlans(updatedPlans);
+			setLinkDialogOpen(false);
 			setSuccess('Публикация успешно привязана!');
 			setOpenSuccess(true);
-			await Promise.all([fetchPlans(planPage), fetchAllPublications()]);
-			setLinkDialogOpen(false);
 		} catch (err) {
-			console.error('Ошибка привязки:', err.response?.data || err.message);
-			setError(err.response?.data?.error || 'Не удалось привязать публикацию.');
+			setError(err.message);
 			setOpenError(true);
 		}
 	};
 
-
-	// Функция отвязки публикации
 	const handleUnlinkPublication = async (planId, entryId) => {
 		try {
-			await refreshCsrfToken();
-			await axios.post(
-				`http://localhost:5000/api/plans/${planId}/entries/${entryId}/unlink`,
-				{},
-				{
-					withCredentials: true,
-					headers: { 'X-CSRFToken': csrfToken },
+			const response = await fetch(`/api/plans/${planId}/entries/${entryId}/unlink`, {
+				method: 'POST',
+				headers: {
+					'Content-Type': 'application/json',
+					'X-CSRF-Token': csrfToken,
+				},
+				credentials: 'include',
+			});
+
+			const data = await response.json();
+			if (!response.ok) {
+				throw new Error(data.error || 'Ошибка при отвязке публикации');
+			}
+
+			const updatedPlans = plans.map((plan) => {
+				if (plan.id === planId) {
+					const updatedEntries = plan.entries.map((entry) => {
+						if (entry.id === entryId) {
+							return { ...entry, publication_id: null };
+						}
+						return entry;
+					});
+					return { ...plan, entries: updatedEntries, fact_count: plan.fact_count - 1 };
 				}
-			);
+				return plan;
+			});
+			setPlans(updatedPlans);
 			setSuccess('Публикация успешно отвязана!');
 			setOpenSuccess(true);
-			fetchPlans(planPage);
 		} catch (err) {
-			setError(err.response?.data?.error || 'Не удалось отвязать публикацию.');
+			setError(err.message);
 			setOpenError(true);
 		}
 	};
@@ -1918,19 +2052,7 @@ function Dashboard() {
 									</Box>
 
 									{plans.map((plan) => {
-										// Сортировка записей плана
-										const sortedEntries = [...plan.entries].sort((a, b) => {
-											// Сначала сортируем по наличию publication_id (с публикациями выше)
-											if (a.publication_id && !b.publication_id) return -1;
-											if (!a.publication_id && b.publication_id) return 1;
-											// Если оба с publication_id или оба без, сортируем по времени создания (позже добавленные ниже)
-											// Если нет created_at, используем порядок в массиве (предполагаем, что новые добавляются в конец)
-											return (b.created_at || 0) - (a.created_at || 0); // Если created_at нет, используем 0
-										});
-
-										// Разделяем на утвержденные (до утверждения) и дополнительные (после утверждения)
-										const preApprovalEntries = sortedEntries.filter(entry => !entry.isPostApproval);
-										const postApprovalEntries = sortedEntries.filter(entry => entry.isPostApproval);
+										const groupedEntries = groupEntriesByType(plan.entries);
 
 										return (
 											<Accordion
@@ -1944,7 +2066,7 @@ function Dashboard() {
 												<AccordionSummary expandIcon={<ExpandMoreIcon />}>
 													<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
 														<Typography variant="h6" sx={{ color: '#1D1D1F' }}>
-															План на {plan.year} год (Ожидаемое количество: {plan.expectedCount} | Текущее количество: {plan.entries.length})
+															План на {plan.year} год (План: {plan.plan_count} | Факт: {plan.fact_count})
 														</Typography>
 														<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
 															<StatusChip status={plan.status} />
@@ -1990,28 +2112,19 @@ function Dashboard() {
 															<PlanTable>
 																<TableHead>
 																	<TableRow>
-																		<TableCell>Название</TableCell>
 																		<TableCell>Тип</TableCell>
-																		<TableCell>Статус</TableCell>
+																		<TableCell>Количество</TableCell>
 																		<TableCell>Действия</TableCell>
 																	</TableRow>
 																</TableHead>
 																<TableBody>
-																	{plan.entries.map((entry, index) => (
+																	{groupedEntries.map((group, index) => (
 																		<TableRow key={index}>
 																			<TableCell>
 																				<AppleTextField
-																					value={entry.title}
-																					onChange={(e) => handlePlanEntryChange(plan.id, index, 'title', e.target.value)}
-																					fullWidth
-																					variant="outlined"
-																				/>
-																			</TableCell>
-																			<TableCell>
-																				<AppleTextField
 																					select
-																					value={entry.type}
-																					onChange={(e) => handlePlanEntryChange(plan.id, index, 'type', e.target.value)}
+																					value={group.type}
+																					onChange={(e) => handlePlanEntryTypeChange(plan.id, group.type, e.target.value)}
 																					fullWidth
 																					variant="outlined"
 																				>
@@ -2021,11 +2134,17 @@ function Dashboard() {
 																				</AppleTextField>
 																			</TableCell>
 																			<TableCell>
-																				<StatusChip status={entry.status} />
+																				<AppleTextField
+																					type="number"
+																					value={group.planCount}
+																					onChange={(e) => handlePlanEntryCountChange(plan.id, group.type, parseInt(e.target.value) || 1)}
+																					fullWidth
+																					variant="outlined"
+																				/>
 																			</TableCell>
 																			<TableCell>
 																				<IconButton
-																					onClick={() => handleDeletePlanEntry(plan.id, index)}
+																					onClick={() => handleDeletePlanEntryByType(plan.id, group.type)}
 																					sx={{ color: '#FF3B30' }}
 																				>
 																					<DeleteIcon />
@@ -2036,11 +2155,24 @@ function Dashboard() {
 																</TableBody>
 															</PlanTable>
 															<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+																<FormControl sx={{ minWidth: 120 }}>
+																	<InputLabel>Тип</InputLabel>
+																	<Select
+																		sx={{ minWidth: 120, borderRadius: 5 }}
+																		value={selectedNewEntryType}
+																		onChange={(e) => setSelectedNewEntryType(e.target.value)}
+																		label="Тип"
+																	>
+																		<MenuItem value="article">Статья</MenuItem>
+																		<MenuItem value="monograph">Монография</MenuItem>
+																		<MenuItem value="conference">Доклад/конференция</MenuItem>
+																	</Select>
+																</FormControl>
 																<AppleButton
 																	startIcon={<AddIcon />}
 																	onClick={() => handleAddPlanEntry(plan.id)}
 																>
-																	Добавить запись
+																	Добавить тип
 																</AppleButton>
 																<GreenButton
 																	startIcon={<SaveIcon />}
@@ -2052,6 +2184,7 @@ function Dashboard() {
 															</Box>
 														</>
 													) : (
+														// Оставляем остальную часть без изменений
 														<>
 															<Typography sx={{ mb: 1 }}>Прогресс выполнения:</Typography>
 															<Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
@@ -2080,111 +2213,53 @@ function Dashboard() {
 															<PlanTable>
 																<TableHead>
 																	<TableRow>
-																		<TableCell>Название</TableCell>
+																		<TableCell>План/Факт</TableCell>
 																		<TableCell>Тип</TableCell>
-																		<TableCell>Статус</TableCell>
-																		<TableCell>Привязанная публикация</TableCell>
-																		{plan.status === 'approved' && <TableCell>Действия</TableCell>}
+																		<TableCell>Действия</TableCell>
 																	</TableRow>
 																</TableHead>
 																<TableBody>
-																	{/* Утверждённые работы (до утверждения плана) */}
-																	{preApprovalEntries.map((entry) => (
-																		<TableRow key={entry.id}>
-																			<TableCell>{entry.title}</TableCell>
-																			<TableCell>{entry.type}</TableCell>
-																			<TableCell><StatusChip status={entry.status} /></TableCell>
+																	{groupedEntries.map((group) => (
+																		<TableRow key={group.type}>
+																			<TableCell>{`${group.planCount}/${group.factCount}`}</TableCell>
 																			<TableCell>
-																				{entry.publication_id ? (
-																					<Typography
-																						sx={{
-																							color: '#0071E3',
-																							textDecoration: 'underline',
-																							cursor: 'pointer',
-																							'&:hover': { textDecoration: 'none' },
-																						}}
-																						onClick={() => navigate(`/publication/${entry.publication_id}`)}
-																					>
-																						{publishedPublications.find(pub => pub.id === entry.publication_id)?.title || 'Неизвестно'}
-																					</Typography>
-																				) : (
-																					'Не привязана'
-																				)}
+																				{group.type === 'article'
+																					? 'Статья'
+																					: group.type === 'monograph'
+																						? 'Монография'
+																						: group.type === 'conference'
+																							? 'Доклад/конференция'
+																							: 'Неизвестный тип'}
 																			</TableCell>
-																			{plan.status === 'approved' && (
-																				<TableCell>
-																					{entry.publication_id ? (
+																			<TableCell>
+																				{plan.status === 'approved' ? (
+																					group.factCount < group.planCount ? (
 																						<IconButton
-																							onClick={() => handleUnlinkPublication(plan.id, entry.id)}
-																							sx={{ color: '#FF3B30' }}
-																							title="Отвязать публикацию"
-																						>
-																							<UnlinkIcon />
-																						</IconButton>
-																					) : (
-																						<IconButton
-																							onClick={() => handleOpenLinkDialog(plan.id, entry)}
+																							onClick={() => handleOpenLinkDialog(plan.id, group)}
 																							sx={{ color: '#0071E3' }}
 																							title="Привязать публикацию"
 																						>
 																							<LinkIcon />
 																						</IconButton>
-																					)}
-																				</TableCell>
-																			)}
-																		</TableRow>
-																	))}
-																	{/* Дополнительные работы (после утверждения) */}
-																	{postApprovalEntries.length > 0 && (
-																		<TableRow>
-																			<TableCell colSpan={5} sx={{ fontWeight: 600, color: '#6E6E73', padding: '16px 20px' }}>
-																				Дополнительные работы (добавлены после утверждения)
-																			</TableCell>
-																		</TableRow>
-																	)}
-																	{postApprovalEntries.map((entry) => (
-																		<TableRow key={entry.id}>
-																			<TableCell>{entry.title}</TableCell>
-																			<TableCell>{entry.type}</TableCell>
-																			<TableCell><StatusChip status={entry.status} /></TableCell>
-																			<TableCell>
-																				{entry.publication_id ? (
-																					<Typography
-																						sx={{
-																							color: '#0071E3',
-																							textDecoration: 'underline',
-																							cursor: 'pointer',
-																							'&:hover': { textDecoration: 'none' },
-																						}}
-																						onClick={() => navigate(`/publication/${entry.publication_id}`)}
-																					>
-																						{publishedPublications.find(pub => pub.id === entry.publication_id)?.title || 'Неизвестно'}
-																					</Typography>
-																				) : (
-																					'Не привязана'
-																				)}
-																			</TableCell>
-																			{plan.status === 'approved' && (
-																				<TableCell>
-																					{entry.publication_id ? (
+																					) : (
 																						<IconButton
-																							onClick={() => handleUnlinkPublication(plan.id, entry.id)}
+																							onClick={() => handleUnlinkPublication(plan.id, group.entries[0].id)}
 																							sx={{ color: '#FF3B30' }}
 																							title="Отвязать публикацию"
 																						>
 																							<UnlinkIcon />
 																						</IconButton>
-																					) : (
-																						<IconButton
-																							onClick={() => handleOpenLinkDialog(plan.id, entry)}
-																							sx={{ color: '#0071E3' }}
-																							title="Привязать публикацию"
-																						>
-																							<LinkIcon />
-																						</IconButton>
-																					)}
-																				</TableCell>
-																			)}
+																					)
+																				) : (
+																					<IconButton
+																						onClick={() => handleDeletePlanEntryByType(plan.id, group.type)}
+																						sx={{ color: '#FF3B30' }}
+																						title="Удалить тип"
+																					>
+																						<DeleteIcon />
+																					</IconButton>
+																				)}
+																			</TableCell>
 																		</TableRow>
 																	))}
 																</TableBody>
@@ -2195,7 +2270,7 @@ function Dashboard() {
 																	onClick={() => handleEditPlanClick(plan.id)}
 																	sx={{ mt: 2 }}
 																>
-																	Добавить запись
+																	Добавить тип
 																</AppleButton>
 															)}
 															{plan.return_comment && plan.status !== 'approved' && (
@@ -2579,7 +2654,7 @@ function Dashboard() {
 				</DialogActions>
 			</Dialog>
 
-			{/* Диалог создания плана */}
+			// Диалог создания плана
 			<Dialog
 				open={openCreatePlanDialog}
 				onClose={() => setOpenCreatePlanDialog(false)}
@@ -2596,15 +2671,7 @@ function Dashboard() {
 						margin="normal"
 						variant="outlined"
 					/>
-					<AppleTextField
-						label="Ожидаемое количество публикаций"
-						type="number"
-						value={newPlan.expectedCount}
-						onChange={(e) => setNewPlan({ ...newPlan, expectedCount: parseInt(e.target.value) || 1 })}
-						fullWidth
-						margin="normal"
-						variant="outlined"
-					/>
+					{/* Убираем поле "Ожидаемое количество публикаций" */}
 				</DialogContent>
 				<DialogActions>
 					<CancelButton onClick={() => setOpenCreatePlanDialog(false)}>Отмена</CancelButton>
@@ -2641,7 +2708,7 @@ function Dashboard() {
 									<TableCell>{pub.authors}</TableCell>
 									<TableCell>
 										<AppleButton
-											onClick={() => handleLinkPublication(selectedPlanEntry.planId, selectedPlanEntry.id, pub.id)}
+											onClick={() => handleLinkPublication(selectedPlanEntry.planId, selectedPlanEntry, pub.id)}
 										>
 											Привязать
 										</AppleButton>
