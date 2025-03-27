@@ -78,6 +78,21 @@ const AppleButton = styled(Button)(({ theme }) => ({
 	},
 }));
 
+const RedCancelButton = styled(Button)(({ theme }) => ({
+	borderRadius: '12px',
+	textTransform: 'none',
+	backgroundColor: '#FF3B30', // Красный фон
+	color: '#FFFFFF', // Белый текст
+	padding: '8px 16px',
+	fontSize: '14px',
+	fontWeight: 600,
+	boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+	'&:hover': {
+		backgroundColor: '#990F0A', // Более тёмный красный при наведении
+		boxShadow: '0 4px 8px rgba(0, 0, 0, 0.15)', // Увеличенная тень при наведении
+	},
+}));
+
 const GreenButton = styled(Button)(({ theme }) => ({
 	borderRadius: '12px',
 	textTransform: 'none',
@@ -417,22 +432,17 @@ function Dashboard() {
 	};
 
 	// Удаление всех записей определённого типа
-	const handleDeletePlanEntryByType = async (planId, type) => {
+	const handleDeletePlanEntryByType = (planId, type) => {
 		const updatedPlans = plans.map((plan) => {
 			if (plan.id === planId) {
 				const updatedEntries = plan.entries.filter((entry) => entry.type !== type);
-				return { ...plan, entries: updatedEntries };
+				return { ...plan, entries: updatedEntries, isSaved: false }; // Устанавливаем isSaved: false, чтобы указать, что изменения не сохранены
 			}
 			return plan;
 		});
 		setPlans(updatedPlans);
-
-		// Отправляем запрос на сервер для обновления
-		const plan = updatedPlans.find((p) => p.id === planId);
-		await handleSavePlan(plan);
+		// Убираем вызов handleSavePlan, чтобы не сохранять автоматически и не выходить из режима редактирования
 	};
-
-	// Добавление нового типа
 
 
 	const updateAnalytics = (allPublications) => {
@@ -1268,21 +1278,23 @@ function Dashboard() {
 				return;
 			}
 
-			const response = await fetch(`/api/plans/${planId}/entries/${entryToLink.id}/link`, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					'X-CSRF-Token': csrfToken,
-				},
-				credentials: 'include',
-				body: JSON.stringify({ publication_id: publicationId }),
-			});
+			// Обновляем CSRF-токен перед запросом
+			await refreshCsrfToken();
 
-			const data = await response.json();
-			if (!response.ok) {
-				throw new Error(data.error || 'Ошибка при привязке публикации');
-			}
+			// Отправляем запрос с правильными заголовками
+			const response = await axios.post(
+				`http://localhost:5000/api/plans/${planId}/entries/${entryToLink.id}/link`,
+				{ publication_id: publicationId },
+				{
+					withCredentials: true,
+					headers: {
+						'Content-Type': 'application/json',
+						'X-CSRFToken': csrfToken, // Используем токен из состояния
+					},
+				}
+			);
 
+			// Обновляем состояние после успешной привязки
 			const updatedPlans = plans.map((plan) => {
 				if (plan.id === planId) {
 					const updatedEntries = plan.entries.map((entry) => {
@@ -1300,18 +1312,21 @@ function Dashboard() {
 			setSuccess('Публикация успешно привязана!');
 			setOpenSuccess(true);
 		} catch (err) {
-			setError(err.message);
+			console.error('Ошибка привязки публикации:', err);
+			setError(err.response?.data?.error || 'Произошла ошибка при привязке публикации.');
 			setOpenError(true);
 		}
 	};
 
 	const handleUnlinkPublication = async (planId, entryId) => {
 		try {
-			const response = await fetch(`/api/plans/${planId}/entries/${entryId}/unlink`, {
+			// Обновляем CSRF-токен перед запросом
+			await refreshCsrfToken();
+			const response = await fetch(`http://localhost:5000/api/plans/${planId}/entries/${entryId}/unlink`, {
 				method: 'POST',
 				headers: {
 					'Content-Type': 'application/json',
-					'X-CSRF-Token': csrfToken,
+					'X-CSRFToken': csrfToken,
 				},
 				credentials: 'include',
 			});
@@ -2174,6 +2189,9 @@ function Dashboard() {
 																>
 																	Добавить тип
 																</AppleButton>
+																<RedCancelButton onClick={() => setEditingPlanId(null)}>
+																	Отмена
+																</RedCancelButton>
 																<GreenButton
 																	startIcon={<SaveIcon />}
 																	onClick={() => handleSavePlan(plan)}
