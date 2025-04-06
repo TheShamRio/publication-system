@@ -35,7 +35,8 @@ import {
 	Autocomplete,
 	FormControl, // Добавляем для выпадающего списка
 	InputLabel,  // Добавляем для выпадающего списка
-	Select,      // Добавляем для выпадающего списка
+	Select,
+	Chip,     // Добавляем для выпадающего списка
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import AddIcon from '@mui/icons-material/Add';
@@ -183,6 +184,57 @@ const DetailsButton = styled(Button)(({ theme }) => ({
 	},
 }));
 
+const AppleSelect = styled(Select)(({ theme }) => ({
+	// Увеличиваем специфичность, добавляя селектор
+	'& .MuiInputLabel-root.MuiInputLabel-root': {
+		color: '#6E6E73 !important', // Серый цвет метки
+		fontSize: '16px !important',
+		// Позиционирование в нераскрытом состоянии
+		transform: 'translate(14px, 12px) scale(1) !important', // Поднимаем метку к середине поля
+		'&.MuiInputLabel-shrink': {
+			// Позиционирование в раскрытом состоянии
+			transform: 'translate(14px, -12px) scale(0.75) !important', // Поднимаем метку выше поля
+			color: '#0071E3 !important', // Синий цвет при фокусе
+		},
+	},
+	'& .MuiSelect-select': {
+		padding: '10px 14px', // Уменьшенные отступы для компактности
+		color: '#1D1D1F', // Тёмный текст
+		fontSize: '14px', // Соответствует шрифту кнопок
+		fontWeight: 400,
+		display: 'flex',
+		alignItems: 'center', // Центрирование содержимого по вертикали
+		height: '40px !important', // Фиксируем высоту поля
+		boxSizing: 'border-box', // Учитываем padding в высоте
+	},
+	'& .MuiOutlinedInput-root': {
+		borderRadius: '12px',
+		backgroundColor: '#F5F5F7', // Светло-серый фон
+		'& fieldset': {
+			borderColor: '#D1D1D6', // Серая рамка в покое
+		},
+		'&:hover fieldset': {
+			borderColor: '#0071E3', // Синяя рамка при наведении
+		},
+		'&.Mui-focused fieldset': {
+			borderColor: '#0071E3', // Синяя рамка при фокусе
+		},
+	},
+	'& .MuiMenuItem-root': {
+		borderRadius: '8px', // Закругленные углы для элементов списка
+		margin: '4px 8px', // Отступы внутри выпадающего списка
+		'&:hover': {
+			backgroundColor: '#E5E5EA', // Светло-серая подсветка при наведении
+		},
+		'&.Mui-selected': {
+			backgroundColor: '#D1D1D6', // Более тёмный серый для выбранного элемента
+			'&:hover': {
+				backgroundColor: '#C7C7CC', // Чуть темнее при наведении на выбранный
+			},
+		},
+	},
+}));
+
 function Dashboard() {
 	const { user, csrfToken, setCsrfToken, setUser } = useAuth();
 	const [loadingUser, setLoadingUser] = useState(true);
@@ -233,7 +285,7 @@ function Dashboard() {
 	const [filterType, setFilterType] = useState('all');
 	const [filterStatus, setFilterStatus] = useState('all');
 	const [linkDialogOpen, setLinkDialogOpen] = useState(false);
-	const [selectedNewEntryType, setSelectedNewEntryType] = useState('article'); // Новое состояние для выбора типа
+	const [selectedNewEntryType, setSelectedNewEntryType] = useState([]);
 	const [selectedPlanEntry, setSelectedPlanEntry] = useState(null);
 	const [filteredPublishedPublications, setFilteredPublishedPublications] = useState([]);
 	const [linkSearchQuery, setLinkSearchQuery] = useState('');
@@ -251,7 +303,19 @@ function Dashboard() {
 	const plansPerPage = 10;
 	const navigate = useNavigate();
 	const chartRef = useRef(null);
+	const [unlinkDialogOpen, setUnlinkDialogOpen] = useState(false);
+	const [selectedGroup, setSelectedGroup] = useState(null);
 
+	// Добавляем состояния для управления диалогом удаления типа
+	const [openDeleteTypeDialog, setOpenDeleteTypeDialog] = useState(false);
+	const [typeToDelete, setTypeToDelete] = useState(null);
+	const [planIdForTypeDelete, setPlanIdForTypeDelete] = useState(null);
+
+	// Временное состояние для редактируемого плана
+	const [tempPlan, setTempPlan] = useState(null);
+
+	// Состояние для управления раскрытием аккордеонов
+	const [expandedPlanId, setExpandedPlanId] = useState(null);
 
 	const validPublicationTypes = ['article', 'monograph', 'conference'];
 	const validPlanStatuses = ['planned', 'in_progress', 'completed'];
@@ -390,58 +454,99 @@ function Dashboard() {
 	};
 
 	const handlePlanEntryTypeChange = (planId, oldType, newType) => {
-		const updatedPlans = plans.map((plan) => {
-			if (plan.id === planId) {
-				const updatedEntries = plan.entries.map((entry) => {
-					if (entry.type === oldType) {
-						return { ...entry, type: newType };
-					}
-					return entry;
-				});
-				return { ...plan, entries: updatedEntries };
-			}
-			return plan;
+		setTempPlan((prevTempPlan) => {
+			if (prevTempPlan.id !== planId) return prevTempPlan;
+			const updatedGroupedEntries = prevTempPlan.groupedEntries.map((group) => {
+				if (group.type === oldType) {
+					const updatedEntries = group.entries.map((entry) => ({
+						...entry,
+						type: newType,
+					}));
+					return { ...group, type: newType, entries: updatedEntries };
+				}
+				return group;
+			});
+			return { ...prevTempPlan, groupedEntries: updatedGroupedEntries };
 		});
-		setPlans(updatedPlans);
 	};
 
 	// Изменение количества записей для типа
 	const handlePlanEntryCountChange = (planId, type, count) => {
-		const updatedPlans = plans.map((plan) => {
-			if (plan.id === planId) {
-				const currentEntries = plan.entries.filter((entry) => entry.type === type);
-				const currentCount = currentEntries.length;
-				let updatedEntries = [...plan.entries.filter((entry) => entry.type !== type)];
+		setTempPlan((prevTempPlan) => {
+			if (prevTempPlan.id !== planId) return prevTempPlan;
+			const updatedGroupedEntries = prevTempPlan.groupedEntries.map((group) => {
+				if (group.type === type) {
+					const currentEntries = group.entries;
+					const currentCount = currentEntries.length;
+					let updatedEntries = [...currentEntries];
 
-				for (let i = 0; i < count; i++) {
-					updatedEntries.push({
-						id: `temp-${type}-${i}`,
-						title: `${type} ${i + 1}`,
-						type,
-						status: 'planned',
-						publication_id: null,
-						isPostApproval: false,
-					});
+					if (count > currentCount) {
+						for (let i = currentCount; i < count; i++) {
+							updatedEntries.push({
+								id: `temp-${type}-${i}`,
+								title: `${type} ${i + 1}`,
+								type,
+								status: 'planned',
+								publication_id: null,
+								isPostApproval: false,
+							});
+						}
+					} else if (count < currentCount) {
+						updatedEntries = updatedEntries.slice(0, count);
+					}
+
+					return { ...group, entries: updatedEntries, planCount: count };
 				}
-
-				return { ...plan, entries: updatedEntries };
-			}
-			return plan;
+				return group;
+			});
+			return { ...prevTempPlan, groupedEntries: updatedGroupedEntries };
 		});
-		setPlans(updatedPlans);
 	};
 
 	// Удаление всех записей определённого типа
 	const handleDeletePlanEntryByType = (planId, type) => {
-		const updatedPlans = plans.map((plan) => {
-			if (plan.id === planId) {
-				const updatedEntries = plan.entries.filter((entry) => entry.type !== type);
-				return { ...plan, entries: updatedEntries, isSaved: false }; // Устанавливаем isSaved: false, чтобы указать, что изменения не сохранены
-			}
-			return plan;
+		setPlanIdForTypeDelete(planId);
+		setTypeToDelete(type);
+		setOpenDeleteTypeDialog(true);
+	};
+
+	const handleDeleteTypeConfirm = () => {
+		if (!planIdForTypeDelete || !typeToDelete) return;
+
+		setTempPlan((prevTempPlan) => {
+			if (prevTempPlan.id !== planIdForTypeDelete) return prevTempPlan;
+			const updatedGroupedEntries = prevTempPlan.groupedEntries.map((group) => {
+				if (group.type === typeToDelete) {
+					return { ...group, isDeleted: true };
+				}
+				return group;
+			});
+			return { ...prevTempPlan, groupedEntries: updatedGroupedEntries };
 		});
-		setPlans(updatedPlans);
-		// Убираем вызов handleSavePlan, чтобы не сохранять автоматически и не выходить из режима редактирования
+
+		setOpenDeleteTypeDialog(false);
+		setPlanIdForTypeDelete(null);
+		setTypeToDelete(null);
+	};
+
+	const handleRestoreType = (planId, type) => {
+		setTempPlan((prevTempPlan) => {
+			if (prevTempPlan.id !== planId) return prevTempPlan;
+			const updatedGroupedEntries = prevTempPlan.groupedEntries.map((group) => {
+				if (group.type === type) {
+					return { ...group, isDeleted: false };
+				}
+				return group;
+			});
+			return { ...prevTempPlan, groupedEntries: updatedGroupedEntries };
+		});
+	};
+
+	// Функция отмены удаления типа
+	const handleDeleteTypeCancel = () => {
+		setOpenDeleteTypeDialog(false);
+		setPlanIdForTypeDelete(null);
+		setTypeToDelete(null);
 	};
 
 
@@ -1071,29 +1176,56 @@ function Dashboard() {
 	};
 	const handleEditPlanClick = (planId) => {
 		setEditingPlanId(planId);
-		setPlans(prevPlans =>
-			prevPlans.map(plan =>
+		setExpandedPlanId(planId);
+		const planToEdit = plans.find((plan) => plan.id === planId);
+		const tempEntries = groupEntriesByType(planToEdit.entries).map((group) => ({
+			...group,
+			isDeleted: false,
+		}));
+		setTempPlan({ ...planToEdit, groupedEntries: tempEntries });
+		setPlans((prevPlans) =>
+			prevPlans.map((plan) =>
 				plan.id === planId ? { ...plan, isSaved: false } : plan
 			)
 		);
 	};
 
 	const handleAddPlanEntry = (planId) => {
-		const updatedPlans = plans.map((plan) => {
-			if (plan.id === planId) {
-				const newEntry = {
-					id: `temp-${selectedNewEntryType}-${plan.entries.length}`,
-					title: `Новая ${selectedNewEntryType === 'article' ? 'статья' : selectedNewEntryType === 'monograph' ? 'монография' : 'доклад/конференция'}`,
-					type: selectedNewEntryType,
-					status: 'planned',
-					publication_id: null,
-					isPostApproval: false,
-				};
-				return { ...plan, entries: [...plan.entries, newEntry] };
-			}
-			return plan;
+		setTempPlan((prevTempPlan) => {
+			if (prevTempPlan.id !== planId) return prevTempPlan;
+
+			const newGroupedEntries = [...prevTempPlan.groupedEntries];
+			selectedNewEntryType.forEach((type) => {
+				const existingGroup = newGroupedEntries.find(
+					(group) => group.type === type && !group.isDeleted
+				);
+				if (!existingGroup) {
+					const newEntry = {
+						id: `temp-${type}-${newGroupedEntries.length}`,
+						title: `Новая ${type === 'article'
+							? 'статья'
+							: type === 'monograph'
+								? 'монография'
+								: 'доклад/конференция'
+							}`,
+						type,
+						status: 'planned',
+						publication_id: null,
+						isPostApproval: false,
+					};
+					newGroupedEntries.push({
+						type,
+						planCount: 1,
+						factCount: 0,
+						entries: [newEntry],
+						isDeleted: false,
+					});
+				}
+			});
+
+			return { ...prevTempPlan, groupedEntries: newGroupedEntries };
 		});
-		setPlans(updatedPlans);
+		setSelectedNewEntryType([]); // Reset selection after adding
 	};
 
 	const handleDeletePlanEntry = (planId, index) => {
@@ -1114,16 +1246,20 @@ function Dashboard() {
 			await refreshCsrfToken();
 			const planData = {
 				year: plan.year,
-				expectedCount: plan.expectedCount,
+				expectedCount: tempPlan.groupedEntries.reduce((sum, group) => sum + (group.isDeleted ? 0 : group.planCount), 0),
 				fillType: 'manual',
-				entries: plan.entries.map(entry => ({
-					id: entry.id || undefined, // Сохраняем id для существующих записей
-					title: entry.title || '',
-					type: entry.type || 'article',
-					status: entry.status || 'planned',
-					publication_id: entry.publication_id || null,
-					isPostApproval: entry.isPostApproval || false, // Сохраняем флаг
-				})),
+				entries: tempPlan.groupedEntries
+					.filter((group) => !group.isDeleted)
+					.flatMap((group) =>
+						group.entries.map((entry) => ({
+							id: entry.id || undefined,
+							title: entry.title || '',
+							type: entry.type || 'article',
+							status: entry.status || 'planned',
+							publication_id: entry.publication_id || null,
+							isPostApproval: entry.isPostApproval || false,
+						}))
+					),
 			};
 			console.log('Saving plan with:', planData);
 			const response = await axios.put(`http://localhost:5000/api/plans/${plan.id}`, planData, {
@@ -1137,11 +1273,7 @@ function Dashboard() {
 			setOpenSuccess(true);
 			setError('');
 			setEditingPlanId(null);
-			setPlans(prevPlans =>
-				prevPlans.map(p =>
-					p.id === plan.id ? { ...p, entries: response.data.plan.entries, isSaved: true } : p
-				)
-			);
+			setTempPlan(null);
 			await fetchPlans(planPage);
 		} catch (err) {
 			console.error('Ошибка сохранения плана:', err.response?.data || err);
@@ -1232,22 +1364,24 @@ function Dashboard() {
 			)
 		);
 
-		// Фильтруем публикации, исключая уже привязанные
-		const availablePublications = publishedPublications.filter(
-			pub => !linkedPublicationIds.has(pub.id)
+		// Фильтруем публикации:
+		// 1. Оставляем только те, которые соответствуют типу записи плана
+		// 2. Исключаем уже привязанные
+		// 3. Применяем поиск по названию или авторам
+		const filtered = publishedPublications.filter(
+			pub =>
+				pub.type === selectedPlanEntry.type && // Фильтрация по типу записи плана
+				!linkedPublicationIds.has(pub.id) && // Исключаем уже привязанные
+				(pub.title.toLowerCase().includes(query.toLowerCase()) || // Поиск по названию
+					pub.authors.toLowerCase().includes(query.toLowerCase())) // Поиск по авторам
 		);
 
-		// Применяем поиск по отфильтрованным данным
-		const filtered = availablePublications.filter(
-			(pub) =>
-				pub.title.toLowerCase().includes(query.toLowerCase()) ||
-				pub.authors.toLowerCase().includes(query.toLowerCase())
-		);
 		setFilteredPublishedPublications(filtered);
 	};
 
+	// Функция для открытия диалога привязки публикации
 	const handleOpenLinkDialog = (planId, entry) => {
-		// Собираем все publication_id из записей всех планов
+		// Собираем все publication_id из записей всех планов, чтобы исключить уже привязанные публикации
 		const linkedPublicationIds = new Set(
 			plans.flatMap(plan =>
 				plan.entries
@@ -1256,15 +1390,25 @@ function Dashboard() {
 			)
 		);
 
-		// Фильтруем только те публикации, которые ещё не привязаны
+		// Фильтруем публикации:
+		// 1. Оставляем только те, которые соответствуют типу записи плана (entry.type)
+		// 2. Исключаем уже привязанные публикации
 		const availablePublications = publishedPublications.filter(
-			pub => !linkedPublicationIds.has(pub.id)
+			pub =>
+				pub.type === entry.type && // Фильтрация по типу записи плана
+				!linkedPublicationIds.has(pub.id) // Исключаем уже привязанные
 		);
 
+		// Устанавливаем выбранную запись плана и открываем диалог
 		setSelectedPlanEntry({ planId, ...entry });
 		setLinkDialogOpen(true);
-		setLinkSearchQuery('');
-		setFilteredPublishedPublications(availablePublications);
+		setLinkSearchQuery(''); // Сбрасываем поиск
+		setFilteredPublishedPublications(availablePublications); // Устанавливаем отфильтрованные публикации
+	};
+
+	const handleOpenUnlinkDialog = (planId, group) => {
+		setSelectedGroup({ ...group, planId });
+		setUnlinkDialogOpen(true);
 	};
 
 	// Функция привязки публикации
@@ -1289,12 +1433,12 @@ function Dashboard() {
 					withCredentials: true,
 					headers: {
 						'Content-Type': 'application/json',
-						'X-CSRFToken': csrfToken, // Используем токен из состояния
+						'X-CSRFToken': csrfToken,
 					},
 				}
 			);
 
-			// Обновляем состояние после успешной привязки
+			// Обновляем состояние планов
 			const updatedPlans = plans.map((plan) => {
 				if (plan.id === planId) {
 					const updatedEntries = plan.entries.map((entry) => {
@@ -1308,7 +1452,35 @@ function Dashboard() {
 				return plan;
 			});
 			setPlans(updatedPlans);
-			setLinkDialogOpen(false);
+
+			// Обновляем список доступных публикаций для привязки
+			const linkedPublicationIds = new Set(
+				updatedPlans.flatMap(plan =>
+					plan.entries
+						.filter(entry => entry.publication_id)
+						.map(entry => entry.publication_id)
+				)
+			);
+
+			const updatedFilteredPublications = publishedPublications.filter(
+				pub =>
+					pub.type === entryGroup.type &&
+					!linkedPublicationIds.has(pub.id) &&
+					(pub.title.toLowerCase().includes(linkSearchQuery.toLowerCase()) ||
+						pub.authors.toLowerCase().includes(linkSearchQuery.toLowerCase()))
+			);
+			setFilteredPublishedPublications(updatedFilteredPublications);
+
+			// Обновляем selectedPlanEntry
+			const updatedEntryGroup = {
+				...entryGroup,
+				entries: entryGroup.entries.map(entry =>
+					entry.id === entryToLink.id ? { ...entry, publication_id: publicationId } : entry
+				),
+				factCount: entryGroup.factCount + 1,
+			};
+			setSelectedPlanEntry({ ...updatedEntryGroup, planId });
+
 			setSuccess('Публикация успешно привязана!');
 			setOpenSuccess(true);
 		} catch (err) {
@@ -1320,22 +1492,20 @@ function Dashboard() {
 
 	const handleUnlinkPublication = async (planId, entryId) => {
 		try {
-			// Обновляем CSRF-токен перед запросом
 			await refreshCsrfToken();
-			const response = await fetch(`http://localhost:5000/api/plans/${planId}/entries/${entryId}/unlink`, {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					'X-CSRFToken': csrfToken,
-				},
-				credentials: 'include',
-			});
+			const response = await axios.post(
+				`http://localhost:5000/api/plans/${planId}/entries/${entryId}/unlink`,
+				{},
+				{
+					withCredentials: true,
+					headers: {
+						'Content-Type': 'application/json',
+						'X-CSRFToken': csrfToken,
+					},
+				}
+			);
 
-			const data = await response.json();
-			if (!response.ok) {
-				throw new Error(data.error || 'Ошибка при отвязке публикации');
-			}
-
+			// Обновляем состояние планов
 			const updatedPlans = plans.map((plan) => {
 				if (plan.id === planId) {
 					const updatedEntries = plan.entries.map((entry) => {
@@ -1344,15 +1514,46 @@ function Dashboard() {
 						}
 						return entry;
 					});
-					return { ...plan, entries: updatedEntries, fact_count: plan.fact_count - 1 };
+					const updatedFactCount = updatedEntries.filter((entry) => entry.publication_id).length;
+					return { ...plan, entries: updatedEntries, fact_count: updatedFactCount };
 				}
 				return plan;
 			});
 			setPlans(updatedPlans);
+
+			// Обновляем selectedGroup
+			const updatedGroup = {
+				...selectedGroup,
+				entries: selectedGroup.entries.map(entry =>
+					entry.id === entryId ? { ...entry, publication_id: null } : entry
+				),
+				factCount: selectedGroup.entries.filter(entry => entry.publication_id && entry.id !== entryId).length,
+			};
+			setSelectedGroup(updatedGroup);
+
+			// Обновляем filteredPublishedPublications для диалога привязки
+			const linkedPublicationIds = new Set(
+				updatedPlans.flatMap(plan =>
+					plan.entries
+						.filter(entry => entry.publication_id)
+						.map(entry => entry.publication_id)
+				)
+			);
+
+			const updatedFilteredPublications = publishedPublications.filter(
+				pub =>
+					pub.type === selectedPlanEntry?.type &&
+					!linkedPublicationIds.has(pub.id) &&
+					(pub.title.toLowerCase().includes(linkSearchQuery.toLowerCase()) ||
+						pub.authors.toLowerCase().includes(linkSearchQuery.toLowerCase()))
+			);
+			setFilteredPublishedPublications(updatedFilteredPublications);
+
 			setSuccess('Публикация успешно отвязана!');
 			setOpenSuccess(true);
 		} catch (err) {
-			setError(err.message);
+			console.error('Ошибка отвязки публикации:', err);
+			setError(err.response?.data?.error || 'Произошла ошибка при отвязке публикации.');
 			setOpenError(true);
 		}
 	};
@@ -2058,10 +2259,7 @@ function Dashboard() {
 										>
 											Ваши планы
 										</Typography>
-										<AppleButton
-											startIcon={<AddIcon />}
-											onClick={() => setOpenCreatePlanDialog(true)}
-										>
+										<AppleButton startIcon={<AddIcon />} onClick={() => setOpenCreatePlanDialog(true)}>
 											Создать план
 										</AppleButton>
 									</Box>
@@ -2072,6 +2270,10 @@ function Dashboard() {
 										return (
 											<Accordion
 												key={plan.id}
+												expanded={expandedPlanId === plan.id}
+												onChange={(event, isExpanded) => {
+													setExpandedPlanId(isExpanded ? plan.id : null);
+												}}
 												sx={{
 													mb: 2,
 													borderRadius: '16px',
@@ -2124,85 +2326,163 @@ function Dashboard() {
 												<AccordionDetails>
 													{editingPlanId === plan.id ? (
 														<>
-															<PlanTable>
-																<TableHead>
-																	<TableRow>
-																		<TableCell>Тип</TableCell>
-																		<TableCell>Количество</TableCell>
-																		<TableCell>Действия</TableCell>
-																	</TableRow>
-																</TableHead>
-																<TableBody>
-																	{groupedEntries.map((group, index) => (
-																		<TableRow key={index}>
-																			<TableCell>
-																				<AppleTextField
-																					select
-																					value={group.type}
-																					onChange={(e) => handlePlanEntryTypeChange(plan.id, group.type, e.target.value)}
-																					fullWidth
-																					variant="outlined"
-																				>
-																					<MenuItem value="article">Статья</MenuItem>
-																					<MenuItem value="monograph">Монография</MenuItem>
-																					<MenuItem value="conference">Доклад/конференция</MenuItem>
-																				</AppleTextField>
-																			</TableCell>
-																			<TableCell>
-																				<AppleTextField
-																					type="number"
-																					value={group.planCount}
-																					onChange={(e) => handlePlanEntryCountChange(plan.id, group.type, parseInt(e.target.value) || 1)}
-																					fullWidth
-																					variant="outlined"
-																				/>
-																			</TableCell>
-																			<TableCell>
-																				<IconButton
-																					onClick={() => handleDeletePlanEntryByType(plan.id, group.type)}
-																					sx={{ color: '#FF3B30' }}
-																				>
-																					<DeleteIcon />
-																				</IconButton>
-																			</TableCell>
+															{tempPlan?.groupedEntries?.length === 0 ? (
+																<Typography sx={{ color: '#1D1D1F', mt: 2, fontStyle: 'italic' }}>
+																	Ваш план пуст, выберите планируемые типы публикаций.
+																</Typography>
+															) : (
+																<PlanTable>
+																	<TableHead>
+																		<TableRow>
+																			<TableCell>Тип</TableCell>
+																			<TableCell>Количество</TableCell>
+																			<TableCell>Действия</TableCell>
 																		</TableRow>
-																	))}
-																</TableBody>
-															</PlanTable>
+																	</TableHead>
+																	<TableBody>
+																		{tempPlan?.groupedEntries?.map((group, index) => (
+																			<TableRow key={index} sx={{ backgroundColor: group.isDeleted ? '#E5E5EA' : 'inherit' }}>
+																				<TableCell>
+																					{group.type === 'article'
+																						? 'Статья'
+																						: group.type === 'monograph'
+																							? 'Монография'
+																							: group.type === 'conference'
+																								? 'Доклад/конференция'
+																								: 'Неизвестный тип'}
+																				</TableCell>
+																				<TableCell>
+																					<AppleTextField
+																						sx={{ width: '70px' }}
+																						type="number"
+																						value={group.planCount}
+																						onChange={(e) => handlePlanEntryCountChange(plan.id, group.type, parseInt(e.target.value) || 1)}
+																						fullWidth
+																						variant="outlined"
+																						disabled={group.isDeleted}
+																					/>
+																				</TableCell>
+																				<TableCell>
+																					{group.isDeleted ? (
+																						<IconButton
+																							onClick={() => handleRestoreType(plan.id, group.type)}
+																							sx={{ color: '#34C759' }}
+																							title="Восстановить тип"
+																							disabled={plan.status === 'pending'}
+																						>
+																							<AddIcon />
+																						</IconButton>
+																					) : (
+																						<IconButton
+																							onClick={() => handleDeletePlanEntryByType(plan.id, group.type)}
+																							sx={{ color: '#FF3B30' }}
+																							title="Удалить тип"
+																							disabled={plan.status === 'pending'}
+																						>
+																							<DeleteIcon />
+																						</IconButton>
+																					)}
+																				</TableCell>
+																			</TableRow>
+																		))}
+																	</TableBody>
+																</PlanTable>
+															)}
 															<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-																<FormControl sx={{ minWidth: 120 }}>
-																	<InputLabel>Тип</InputLabel>
-																	<Select
-																		sx={{ minWidth: 120, borderRadius: 5 }}
+																<FormControl sx={{ minWidth: 200 }}>
+																	<InputLabel>Типы публикаций</InputLabel>
+																	<AppleSelect
+																		className="debug-apple-select"
+																		multiple
 																		value={selectedNewEntryType}
 																		onChange={(e) => setSelectedNewEntryType(e.target.value)}
-																		label="Тип"
+																		onOpen={() => console.log('Выпадающий список открывается')} // Для отладки
+																		onClose={() => console.log('Выпадающий список закрывается')} // Для отладки
+																		renderValue={(selected) =>
+																			selected.length === 0 ? (
+																				<Typography sx={{ color: '#6E6E73' }}>Выберите типы</Typography>
+																			) : (
+																				<Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+																					{selected.map((value) => (
+																						<Chip
+																							key={value}
+																							label={
+																								value === 'article'
+																									? 'Статья'
+																									: value === 'monograph'
+																										? 'Монография'
+																										: 'Доклад/конференция'
+																							}
+																							onMouseDown={(event) => {
+																								event.stopPropagation(); // Останавливаем всплытие на этапе mouseDown для чипа
+																							}}
+																							onDelete={(event) => {
+																								event.stopPropagation(); // Останавливаем всплытие для крестика
+																								setSelectedNewEntryType(selectedNewEntryType.filter((item) => item !== value));
+																							}}
+																							deleteIcon={
+																								<IconButton
+																									onMouseDown={(event) => {
+																										event.stopPropagation(); // Останавливаем всплытие на этапе mouseDown для крестика
+																									}}
+																								>
+																									<DeleteIcon />
+																								</IconButton>
+																							}
+																							onClick={(event) => {
+																								event.stopPropagation(); // Останавливаем всплытие для клика по чипу
+																							}}
+																						/>
+																					))}
+																				</Box>
+																			)
+																		}
+																		MenuProps={{
+																			PaperProps: {
+																				sx: {
+																					borderRadius: '12px',
+																					boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+																					backgroundColor: '#FFFFFF',
+																				},
+																			},
+																		}}
 																	>
 																		<MenuItem value="article">Статья</MenuItem>
 																		<MenuItem value="monograph">Монография</MenuItem>
 																		<MenuItem value="conference">Доклад/конференция</MenuItem>
-																	</Select>
+																	</AppleSelect>
 																</FormControl>
 																<AppleButton
 																	startIcon={<AddIcon />}
 																	onClick={() => handleAddPlanEntry(plan.id)}
+																	disabled={selectedNewEntryType.length === 0}
 																>
 																	Добавить тип
 																</AppleButton>
-																<RedCancelButton onClick={() => setEditingPlanId(null)}>
+																<RedCancelButton
+																	onClick={() => {
+																		setEditingPlanId(null);
+																		setTempPlan(null);
+																		setExpandedPlanId(null);
+																	}}
+																>
 																	Отмена
 																</RedCancelButton>
 																<GreenButton
 																	startIcon={<SaveIcon />}
 																	onClick={() => handleSavePlan(plan)}
-																	disabled={!areAllTitlesFilled(plan)}
+																	disabled={
+																		!areAllTitlesFilled({
+																			...plan,
+																			entries: tempPlan.groupedEntries.flatMap((group) => (group.isDeleted ? [] : group.entries)),
+																		})
+																	}
 																>
 																	Сохранить
 																</GreenButton>
 															</Box>
 														</>
 													) : (
-														// Оставляем остальную часть без изменений
 														<>
 															<Typography sx={{ mb: 1 }}>Прогресс выполнения:</Typography>
 															<Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
@@ -2228,61 +2508,61 @@ function Dashboard() {
 																	{Math.round(calculateProgress(plan))}%
 																</Typography>
 															</Box>
-															<PlanTable>
-																<TableHead>
-																	<TableRow>
-																		<TableCell>План/Факт</TableCell>
-																		<TableCell>Тип</TableCell>
-																		<TableCell>Действия</TableCell>
-																	</TableRow>
-																</TableHead>
-																<TableBody>
-																	{groupedEntries.map((group) => (
-																		<TableRow key={group.type}>
-																			<TableCell>{`${group.planCount}/${group.factCount}`}</TableCell>
-																			<TableCell>
-																				{group.type === 'article'
-																					? 'Статья'
-																					: group.type === 'monograph'
-																						? 'Монография'
-																						: group.type === 'conference'
-																							? 'Доклад/конференция'
-																							: 'Неизвестный тип'}
-																			</TableCell>
-																			<TableCell>
-																				{plan.status === 'approved' ? (
-																					group.factCount < group.planCount ? (
-																						<IconButton
-																							onClick={() => handleOpenLinkDialog(plan.id, group)}
-																							sx={{ color: '#0071E3' }}
-																							title="Привязать публикацию"
-																						>
-																							<LinkIcon />
-																						</IconButton>
-																					) : (
-																						<IconButton
-																							onClick={() => handleUnlinkPublication(plan.id, group.entries[0].id)}
-																							sx={{ color: '#FF3B30' }}
-																							title="Отвязать публикацию"
-																						>
-																							<UnlinkIcon />
-																						</IconButton>
-																					)
-																				) : (
-																					<IconButton
-																						onClick={() => handleDeletePlanEntryByType(plan.id, group.type)}
-																						sx={{ color: '#FF3B30' }}
-																						title="Удалить тип"
-																					>
-																						<DeleteIcon />
-																					</IconButton>
-																				)}
-																			</TableCell>
+															{groupedEntries.length === 0 ? (
+																<Typography sx={{ color: '#1D1D1F', mt: 2, fontStyle: 'italic' }}>
+																	Ваш план пуст, выберите планируемые типы публикаций.
+																</Typography>
+															) : (
+																<PlanTable>
+																	<TableHead>
+																		<TableRow>
+																			<TableCell>План/Факт</TableCell>
+																			<TableCell>Тип</TableCell>
+																			<TableCell>Действия</TableCell>
 																		</TableRow>
-																	))}
-																</TableBody>
-															</PlanTable>
-															{plan.status === 'approved' && (
+																	</TableHead>
+																	<TableBody>
+																		{groupedEntries.map((group) => (
+																			<TableRow key={group.type}>
+																				<TableCell>{`${group.planCount}/${group.factCount}`}</TableCell>
+																				<TableCell>
+																					{group.type === 'article'
+																						? 'Статья'
+																						: group.type === 'monograph'
+																							? 'Монография'
+																							: group.type === 'conference'
+																								? 'Доклад/конференция'
+																								: 'Неизвестный тип'}
+																				</TableCell>
+																				<TableCell>
+																					<IconButton
+																						onClick={() => handleOpenLinkDialog(plan.id, group)}
+																						sx={{ color: '#0071E3' }}
+																						title="Привязать публикацию"
+																						disabled={plan.status !== 'approved' || group.factCount >= group.planCount}
+																					>
+																						<LinkIcon />
+																					</IconButton>
+																					<IconButton
+																						onClick={() => handleOpenUnlinkDialog(plan.id, group)}
+																						sx={{
+																							color: group.factCount > 0 ? '#FF3B30' : '#D1D1D6',
+																							'&:hover': {
+																								color: group.factCount > 0 ? '#FF2D1A' : '#D1D1D6',
+																							},
+																						}}
+																						title="Отвязать публикацию"
+																						disabled={plan.status !== 'approved' || group.factCount === 0}
+																					>
+																						<UnlinkIcon />
+																					</IconButton>
+																				</TableCell>
+																			</TableRow>
+																		))}
+																	</TableBody>
+																</PlanTable>
+															)}
+															{plan.status === 'approved' && groupedEntries.length !== 0 && (
 																<AppleButton
 																	startIcon={<AddIcon />}
 																	onClick={() => handleEditPlanClick(plan.id)}
@@ -2672,7 +2952,132 @@ function Dashboard() {
 				</DialogActions>
 			</Dialog>
 
-			// Диалог создания плана
+
+			<Dialog
+				open={openDeleteTypeDialog}
+				onClose={handleDeleteTypeCancel}
+				maxWidth="sm"
+				fullWidth
+				PaperProps={{
+					sx: {
+						borderRadius: '16px',
+						boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+						backgroundColor: '#FFFFFF',
+					},
+				}}
+			>
+				<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600 }}>
+					Подтверждение удаления типа
+				</DialogTitle>
+				<DialogContent>
+					<Typography sx={{ color: '#1D1D1F' }}>
+						Вы уверены, что хотите удалить все записи типа "
+						{typeToDelete === 'article'
+							? 'Статья'
+							: typeToDelete === 'monograph'
+								? 'Монография'
+								: typeToDelete === 'conference'
+									? 'Доклад/конференция'
+									: 'Неизвестный тип'}
+						" из плана?
+					</Typography>
+				</DialogContent>
+				<DialogActions sx={{ p: 2 }}>
+					<CancelButton onClick={handleDeleteTypeCancel}>Отмена</CancelButton>
+					<AppleButton
+						onClick={handleDeleteTypeConfirm}
+						sx={{ backgroundColor: '#FF3B30', '&:hover': { backgroundColor: '#FF2D1A' } }}
+					>
+						Удалить
+					</AppleButton>
+				</DialogActions>
+			</Dialog>
+
+			<Dialog
+				open={unlinkDialogOpen}
+				onClose={() => setUnlinkDialogOpen(false)}
+				sx={{ '& .MuiDialog-paper': { borderRadius: '16px', p: 2, minWidth: '500px' } }}
+			>
+				<DialogTitle>Отвязать публикацию</DialogTitle>
+				<DialogContent>
+					<Table>
+						<TableHead>
+							<TableRow>
+								<TableCell>Название</TableCell>
+								<TableCell>Авторы</TableCell>
+								<TableCell>Действия</TableCell>
+							</TableRow>
+						</TableHead>
+						<TableBody>
+							{selectedGroup?.entries.filter((entry) => entry.publication_id).length > 0 ? (
+								selectedGroup.entries
+									.filter((entry) => entry.publication_id)
+									.map((entry) => {
+										const publication = publishedPublications.find((pub) => pub.id === entry.publication_id);
+										return publication ? (
+											<TableRow key={entry.id}>
+												<TableCell>{publication.title}</TableCell>
+												<TableCell>{publication.authors}</TableCell>
+												<TableCell>
+													<RedCancelButton
+														onClick={() => handleUnlinkPublication(selectedGroup.planId, entry.id)}
+													>
+														Отвязать
+													</RedCancelButton>
+												</TableCell>
+											</TableRow>
+										) : null;
+									})
+							) : (
+								<TableRow>
+									<TableCell colSpan={3} sx={{ textAlign: 'center', color: '#6E6E73' }}>
+										Нет привязанных публикаций для отвязки.
+									</TableCell>
+								</TableRow>
+							)}
+						</TableBody>
+					</Table>
+					<Collapse in={openSuccess}>
+						{success && (
+							<Alert
+								severity="success"
+								sx={{
+									mt: 2,
+									borderRadius: '12px',
+									backgroundColor: '#E7F8E7',
+									color: '#1D1D1F',
+									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+								}}
+								onClose={() => setOpenSuccess(false)}
+							>
+								{success}
+							</Alert>
+						)}
+					</Collapse>
+					<Collapse in={openError}>
+						{error && (
+							<Alert
+								severity="error"
+								sx={{
+									mt: 2,
+									borderRadius: '12px',
+									backgroundColor: '#FFF1F0',
+									color: '#1D1D1F',
+									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+								}}
+								onClose={() => setOpenError(false)}
+							>
+								{error}
+							</Alert>
+						)}
+					</Collapse>
+				</DialogContent>
+				<DialogActions>
+					<CancelButton onClick={() => setUnlinkDialogOpen(false)}>Закрыть</CancelButton>
+				</DialogActions>
+			</Dialog>
+
+
 			<Dialog
 				open={openCreatePlanDialog}
 				onClose={() => setOpenCreatePlanDialog(false)}
@@ -2720,24 +3125,66 @@ function Dashboard() {
 							</TableRow>
 						</TableHead>
 						<TableBody>
-							{filteredPublishedPublications.map((pub) => (
-								<TableRow key={pub.id}>
-									<TableCell>{pub.title}</TableCell>
-									<TableCell>{pub.authors}</TableCell>
-									<TableCell>
-										<AppleButton
-											onClick={() => handleLinkPublication(selectedPlanEntry.planId, selectedPlanEntry, pub.id)}
-										>
-											Привязать
-										</AppleButton>
+							{filteredPublishedPublications.length > 0 ? (
+								filteredPublishedPublications.map((pub) => (
+									<TableRow key={pub.id}>
+										<TableCell>{pub.title}</TableCell>
+										<TableCell>{pub.authors}</TableCell>
+										<TableCell>
+											<AppleButton
+												onClick={() => handleLinkPublication(selectedPlanEntry.planId, selectedPlanEntry, pub.id)}
+											>
+												Привязать
+											</AppleButton>
+										</TableCell>
+									</TableRow>
+								))
+							) : (
+								<TableRow>
+									<TableCell colSpan={3} sx={{ textAlign: 'center', color: '#6E6E73' }}>
+										Нет доступных публикаций для привязки.
 									</TableCell>
 								</TableRow>
-							))}
+							)}
 						</TableBody>
 					</Table>
+					<Collapse in={openSuccess}>
+						{success && (
+							<Alert
+								severity="success"
+								sx={{
+									mt: 2,
+									borderRadius: '12px',
+									backgroundColor: '#E7F8E7',
+									color: '#1D1D1F',
+									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+								}}
+								onClose={() => setOpenSuccess(false)}
+							>
+								{success}
+							</Alert>
+						)}
+					</Collapse>
+					<Collapse in={openError}>
+						{error && (
+							<Alert
+								severity="error"
+								sx={{
+									mt: 2,
+									borderRadius: '12px',
+									backgroundColor: '#FFF1F0',
+									color: '#1D1D1F',
+									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+								}}
+								onClose={() => setOpenError(false)}
+							>
+								{error}
+							</Alert>
+						)}
+					</Collapse>
 				</DialogContent>
 				<DialogActions>
-					<CancelButton onClick={() => setLinkDialogOpen(false)}>Отмена</CancelButton>
+					<CancelButton onClick={() => setLinkDialogOpen(false)}>Закрыть</CancelButton>
 				</DialogActions>
 			</Dialog>
 		</Container>
