@@ -1,3 +1,4 @@
+// Файл: D:\publication-system\frontend\src\components\StatusChip.js
 import React from 'react';
 import { Chip } from '@mui/material';
 
@@ -30,7 +31,7 @@ const StatusChip = ({ status, role }) => {
 			}
 			break;
 		case 'returned_for_revision':
-			// Шаг 3: Проверка роли для returned_for_revision
+		case 'returned': // Добавляем обработку статуса "returned" для планов
 			if (role === 'manager') {
 				label = 'Отправлено на доработку'; // Текст для менеджера
 				backgroundColor = '#FF9500'; // Оранжевый фон
@@ -54,7 +55,7 @@ const StatusChip = ({ status, role }) => {
 			textColor = '#1D1D1F';
 	}
 
-	// Шаг 4: Рендеринг компонента
+	// Шаг 3: Рендеринг компонента
 	return (
 		<Chip
 			label={label}

@@ -122,9 +122,10 @@ function ManagerDashboard() {
 	const [currentPagePublications, setCurrentPagePublications] = useState(1);
 	const [currentPagePlans, setCurrentPagePlans] = useState(1);
 	const [historyPage, setHistoryPage] = useState(1);
+	const [totalHistoryPages, setTotalHistoryPages] = useState(1);
+	const [dateFilterRange, setDateFilterRange] = useState({ start: '', end: '' }); // Диапазон дат для фильтрации
 	const [totalPagesPublications, setTotalPagesPublications] = useState(1);
 	const [totalPagesPlans, setTotalPagesPlans] = useState(1);
-	const [totalHistoryPages, setTotalHistoryPages] = useState(1);
 	const [searchQuery, setSearchQuery] = useState('');
 	const [statusFilter, setStatusFilter] = useState('needs_review');
 	const [loadingInitial, setLoadingInitial] = useState(true);
@@ -158,6 +159,8 @@ function ManagerDashboard() {
 	const [publicationsTransitionKey, setPublicationsTransitionKey] = useState(0);
 	const [plansTransitionKey, setPlansTransitionKey] = useState(0);
 	const [historyTransitionKey, setHistoryTransitionKey] = useState(0);
+	const [dateFilter, setDateFilter] = useState(''); // Для фильтра по одной дате
+	const [dateRange, setDateRange] = useState({ start: '', end: '' }); // Для диапазона дат
 
 	// Эффект для автоматического закрытия уведомлений
 	useEffect(() => {
@@ -244,12 +247,18 @@ function ManagerDashboard() {
 		}
 	};
 
-	const fetchActionHistory = async (page) => {
+	// Обновленная функция загрузки истории с учетом диапазона дат
+	const fetchActionHistory = async (page, startDate = '', endDate = '') => {
 		try {
 			const response = await axios.get(`http://localhost:5000/admin_api/admin/manager-action-history`, {
 				withCredentials: true,
 				headers: { 'X-CSRFToken': csrfToken },
-				params: { page, per_page: 10 },
+				params: {
+					page,
+					per_page: 10,
+					start_date: startDate || undefined, // Передаем только если задано
+					end_date: endDate || undefined,
+				},
 			});
 			console.log('Данные с сервера:', response.data.history); // Отладочный вывод
 			setActionHistory(response.data.history);
@@ -269,7 +278,7 @@ function ManagerDashboard() {
 		Promise.all([
 			fetchPublications(currentPagePublications),
 			fetchPlans(currentPagePlans),
-			fetchActionHistory(historyPage),
+			fetchActionHistory(historyPage, dateFilterRange.start, dateFilterRange.end),
 		]).finally(() => setLoadingInitial(false));
 	}, [isAuthenticated, user, navigate]);
 
@@ -282,6 +291,10 @@ function ManagerDashboard() {
 	useEffect(() => {
 		fetchPlans(currentPagePlans);
 	}, [currentPagePlans]);
+
+	useEffect(() => {
+		fetchActionHistory(historyPage, dateFilterRange.start, dateFilterRange.end);
+	}, [historyPage, dateFilterRange.start, dateFilterRange.end]);
 
 	// Обработчики
 	const handleTabChange = (event, newValue) => setValue(newValue);
@@ -464,6 +477,9 @@ function ManagerDashboard() {
 
 	const handleCloseHistoryDrawer = () => setOpenHistoryDrawer(false);
 
+	// Функция фильтрации записей по дате
+
+
 	return (
 		<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
 			<AppleCard elevation={4} sx={{ p: 4, borderRadius: '16px', backgroundColor: '#FFFFFF' }}>
@@ -521,7 +537,7 @@ function ManagerDashboard() {
 											<MenuItem value="returned_for_revision">Отправлено на доработку</MenuItem>
 											<MenuItem value="published">Опубликовано</MenuItem>
 										</AppleTextField>
-										<AppleButton startIcon={<HistoryIcon />} onClick={handleOpenHistoryDrawer} sx={{ height: 'fit-content' }}>
+										<AppleButton startIcon={<HistoryIcon />} onClick={handleOpenHistoryDrawer} sx={{ height: 'fit-content', marginTop: '6px' }}>
 											Показать историю
 										</AppleButton>
 									</Box>
@@ -623,39 +639,118 @@ function ManagerDashboard() {
 										}}
 									/>
 								</Box>
+								// Обновляем Drawer с таблицей истории
 								<Drawer
 									anchor="right"
 									open={openHistoryDrawer}
 									onClose={handleCloseHistoryDrawer}
 									sx={{
 										'& .MuiDrawer-paper': {
-											width: 500,
+											width: 600, // Увеличиваем ширину для длинных названий
 											backgroundColor: '#FFFFFF',
 											boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
 											borderRadius: '16px 0 0 16px',
-											p: 2,
+											
 										},
 									}}
 								>
-									<Box sx={{ p: 2 }}>
-										<Typography variant="h6" sx={{ color: '#1D1D1F', fontWeight: 600 }}>
+									<Box sx={{ p: 2, pr: 4 }}>
+										<Typography
+											variant="h6"
+											sx={{
+												color: '#1D1D1F',
+												fontWeight: 600,
+												mb: 5, // Добавляем отступ снизу (16px)
+											}}
+										>
 											История действий
 										</Typography>
+										<Box sx={{ display: 'flex', gap: 2, mt: 2, mb: 2 }}>
+											<AppleTextField
+												label="Дата начала"
+												type="date"
+												value={dateFilterRange.start}
+												onChange={(e) => {
+													setDateFilterRange((prev) => ({ ...prev, start: e.target.value }));
+													setHistoryPage(1);
+												}}
+												InputLabelProps={{ shrink: true }}
+												sx={{ width: '200px' }}
+											/>
+											<AppleTextField
+												label="Дата окончания"
+												type="date"
+												value={dateFilterRange.end}
+												onChange={(e) => {
+													setDateFilterRange((prev) => ({ ...prev, end: e.target.value }));
+													setHistoryPage(1);
+												}}
+												InputLabelProps={{ shrink: true }}
+												sx={{ width: '200px' }}
+											/>
+										</Box>
 										{actionHistory.length > 0 ? (
 											<>
-												<AppleTable sx={{ mt: 2 }}>
+												<AppleTable
+													sx={{
+														mt: 2,
+														
+														overflowX: 'auto',
+														minWidth: '100%',
+														backgroundColor: '#F5F5F7', // Затемнённый фон таблицы
+														boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)', // Тень
+														borderRadius: '8px', // Скругление всей таблицы
+													}}
+												>
 													<TableHead>
-														<TableRow sx={{ backgroundColor: '#0071E3' }}>
-															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Название</TableCell>
-															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Действие</TableCell>
-															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Время</TableCell>
+														<TableRow
+															sx={{
+																backgroundColor: '#0071E3',
+																borderRadius: '8px 8px 0 0', // Скругление верхних углов
+															}}
+														>
+															<TableCell
+																sx={{
+																	fontWeight: 600,
+																	color: '#FFFFFF',
+																	minWidth: '200px',
+																	borderTopLeftRadius: '8px', // Скругление левого верхнего угла
+																}}
+															>
+																Название
+															</TableCell>
+															<TableCell
+																sx={{
+																	fontWeight: 600,
+																	color: '#FFFFFF',
+																	minWidth: '120px',
+																}}
+															>
+																Действие
+															</TableCell>
+															<TableCell
+																sx={{
+																	fontWeight: 600,
+																	color: '#FFFFFF',
+																	minWidth: '140px',
+																	borderTopRightRadius: '8px', // Скругление правого верхнего угла
+																}}
+															>
+																Время
+															</TableCell>
 														</TableRow>
 													</TableHead>
 													<Fade in={true} timeout={500} key={historyTransitionKey}>
 														<TableBody>
 															{actionHistory.map((action) => (
 																<TableRow key={action.id}>
-																	<TableCell>
+																	<TableCell
+																		sx={{
+																			minWidth: '200px',
+																			whiteSpace: 'normal',
+																			wordWrap: 'break-word',
+																		}}
+																	>
 																		<Typography
 																			sx={{
 																				color: '#0071E3',
@@ -664,13 +759,10 @@ function ManagerDashboard() {
 																				'&:hover': { textDecoration: 'none' },
 																			}}
 																			onClick={() => {
-																				console.log('Клик по записи истории:', action); // Отладка
 																				if (action.id) {
-																					console.log('Переход на:', `/publication/${action.id}`); // Отладка
-																					handleCloseHistoryDrawer(); // Закрываем Drawer
-																					navigate(`/publication/${action.id}`); // Переходим на страницу
+																					handleCloseHistoryDrawer();
+																					navigate(`/publication/${action.id}`);
 																				} else {
-																					console.error('ID публикации отсутствует:', action); // Отладка
 																					setError('ID публикации отсутствует в записи истории.');
 																					setOpenError(true);
 																				}
@@ -679,10 +771,12 @@ function ManagerDashboard() {
 																			{action.title}
 																		</Typography>
 																	</TableCell>
-																	<TableCell>
+																	<TableCell sx={{ minWidth: '120px' }}>
 																		{action.action_type === 'published' ? 'Опубликовано' : 'Возвращено на доработку'}
 																	</TableCell>
-																	<TableCell>{new Date(action.timestamp).toLocaleString('ru-RU')}</TableCell>
+																	<TableCell sx={{ minWidth: '140px' }}>
+																		{new Date(action.timestamp).toLocaleString('ru-RU')}
+																	</TableCell>
 																</TableRow>
 															))}
 														</TableBody>
@@ -963,78 +1057,94 @@ function ManagerDashboard() {
 									Работа с планами
 								</Typography>
 								{plans.length > 0 ? (
-									plans.map((plan) => (
-										<Accordion
-											key={plan.id}
-											sx={{ mb: 2, borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}
-										>
-											<AccordionSummary expandIcon={<ExpandMoreIcon />}>
-												<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-													<Box>
-														<Typography variant="h6" sx={{ color: '#1D1D1F' }}>
-															План на {plan.year} год (Ожидаемое количество: {plan.expectedCount} | Текущее количество: {plan.entries.length})
-														</Typography>
-														<Typography variant="body2" sx={{ color: '#6E6E73', mt: 0.5 }}>
-															{plan.user && plan.user.full_name
-																? `${plan.user.full_name} (${plan.user.username || 'логин отсутствует'})`
-																: 'Пользователь не указан'}
-														</Typography>
+									plans.map((plan) => {
+										const entriesByType = plan.entries.reduce((acc, entry) => {
+											const type = entry.type || 'unknown';
+											if (!acc[type]) {
+												acc[type] = { count: 0, type };
+											}
+											acc[type].count += 1;
+											return acc;
+										}, {});
+										const groupedEntries = Object.values(entriesByType);
+
+										return (
+											<Accordion
+												key={plan.id}
+												sx={{ mb: 2, borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}
+											>
+												<AccordionSummary expandIcon={<ExpandMoreIcon />}>
+													<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+														<Box>
+															<Typography variant="h6" sx={{ color: '#1D1D1F' }}>
+																План на {plan.year} год
+															</Typography>
+															<Typography variant="body2" sx={{ color: '#6E6E73', mt: 0.5 }}>
+																{plan.user && plan.user.full_name
+																	? `${plan.user.full_name} (${plan.user.username || 'логин отсутствует'})`
+																	: 'Пользователь не указан'}
+															</Typography>
+														</Box>
+														<StatusChip status={plan.status} role={user.role} />
 													</Box>
-													<StatusChip status={plan.status} role={user.role} />
-												</Box>
-											</AccordionSummary>
-											<AccordionDetails>
-												<PlanTable>
-													<TableHead>
-														<TableRow>
-															<TableCell>Название</TableCell>
-															<TableCell>Тип</TableCell>
-															<TableCell>Статус</TableCell>
-														</TableRow>
-													</TableHead>
-													<Fade in={true} timeout={500} key={plansTransitionKey}>
-														<TableBody>
-															{plan.entries.map((entry) => (
-																<TableRow key={entry.id}>
-																	<TableCell>{entry.title || 'Не указано'}</TableCell>
-																	<TableCell>
-																		{entry.type === 'article'
-																			? 'Статья'
-																			: entry.type === 'monograph'
-																				? 'Монография'
-																				: entry.type === 'conference'
-																					? 'Доклад/конференция'
-																					: entry.type || 'Не указано'}
-																	</TableCell>
-																	<TableCell>
-																		<StatusChip status={entry.status} role={user.role} />
-																	</TableCell>
-																</TableRow>
-															))}
-														</TableBody>
-													</Fade>
-												</PlanTable>
-												{plan.return_comment && (
-													<Typography
-														sx={{ mt: 2, color: '#000000', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}
-													>
-														<WarningAmberIcon sx={{ color: '#FF3B30' }} />
-														Комментарий при возврате: {plan.return_comment}
-													</Typography>
-												)}
-												{plan.status === 'needs_review' && (
-													<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-														<GreenButton startIcon={<CheckIcon />} onClick={() => handleApprovePlan(plan)}>
-															Утвердить
-														</GreenButton>
-														<AppleButton startIcon={<ReplayIcon />} onClick={() => handleOpenReturnDialog(plan)}>
-															На доработку
-														</AppleButton>
-													</Box>
-												)}
-											</AccordionDetails>
-										</Accordion>
-									))
+												</AccordionSummary>
+												<AccordionDetails>
+													<PlanTable>
+														<TableHead>
+															<TableRow>
+																<TableCell>Планируемое количество</TableCell>
+																<TableCell>Тип</TableCell>
+															</TableRow>
+														</TableHead>
+														<Fade in={true} timeout={500} key={plansTransitionKey}>
+															<TableBody>
+																{groupedEntries.length > 0 ? (
+																	groupedEntries.map((group, index) => (
+																		<TableRow key={index}>
+																			<TableCell sx={{ padding: '16px' }}>{group.count}</TableCell>
+																			<TableCell>
+																				{group.type === 'article'
+																					? 'Статья'
+																					: group.type === 'monograph'
+																						? 'Монография'
+																						: group.type === 'conference'
+																							? 'Доклад/конференция'
+																							: 'Не указано'}
+																			</TableCell>
+																		</TableRow>
+																	))
+																) : (
+																	<TableRow>
+																		<TableCell colSpan={2} sx={{ textAlign: 'center', color: '#6E6E73' }}>
+																			Нет записей в плане.
+																		</TableCell>
+																	</TableRow>
+																)}
+															</TableBody>
+														</Fade>
+													</PlanTable>
+													{plan.return_comment && (
+														<Typography
+															sx={{ mt: 2, color: '#000000', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}
+														>
+															<WarningAmberIcon sx={{ color: '#FF3B30' }} />
+															Комментарий при возврате: {plan.return_comment}
+														</Typography>
+													)}
+													{plan.status === 'needs_review' && (
+														<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+															<GreenButton startIcon={<CheckIcon />} onClick={() => handleApprovePlan(plan)}>
+																Утвердить
+															</GreenButton>
+															<AppleButton startIcon={<ReplayIcon />} onClick={() => handleOpenReturnDialog(plan)}>
+																На доработку
+															</AppleButton>
+														</Box>
+													)}
+												</AccordionDetails>
+											</Accordion>
+										);
+									})
 								) : (
 									<Typography sx={{ textAlign: 'center', color: '#6E6E73', mt: 2 }}>
 										Нет планов для проверки.

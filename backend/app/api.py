@@ -528,50 +528,59 @@ from sqlalchemy import case, or_, desc, func
 @bp.route('/admin/manager-action-history', methods=['GET'])
 @admin_or_manager_required
 def get_manager_action_history():
-    # Шаг 1: Формируем базовый запрос для фильтрации публикаций
-    # Фильтруем записи, у которых статус либо 'published', либо 'returned_for_revision'
+    # Получаем параметры пагинации и фильтрации по датам
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    start_date = request.args.get('start_date', type=str)
+    end_date = request.args.get('end_date', type=str)
+
+    # Базовый запрос с фильтром по статусам
     query = Publication.query.filter(
         or_(Publication.status == 'published', Publication.status == 'returned_for_revision')
     )
 
-    # Шаг 2: Определяем время действия с помощью case
-    # Используем COALESCE для обработки NULL значений:
-    # - Если статус 'published', берём published_at
-    # - Если статус 'returned_for_revision', берём returned_at
-    # - Если оба поля NULL (крайний случай), используем updated_at
+    # Определяем время действия
     action_time = func.coalesce(
         case(
             (Publication.status == 'published', Publication.published_at),
             (Publication.status == 'returned_for_revision', Publication.returned_at),
-            else_=None  # Если ни одно условие не выполнено, возвращаем NULL
+            else_=None
         ),
-        Publication.updated_at  # Fallback на updated_at, если результат case — NULL
+        Publication.updated_at
     ).label('action_time')
 
-    # Шаг 3: Применяем сортировку
-    # Сортируем по action_time в порядке убывания (desc), чтобы самые поздние записи были первыми
+    # Добавляем фильтрацию по диапазону дат, если параметры переданы
+    if start_date:
+        try:
+            start_datetime = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
+            query = query.filter(action_time >= start_datetime)
+        except ValueError as e:
+            logger.error(f"Некорректный формат start_date: {start_date}, ошибка: {str(e)}")
+            return jsonify({"error": "Некорректный формат даты начала"}), 400
+
+    if end_date:
+        try:
+            end_datetime = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
+            query = query.filter(action_time <= end_datetime)
+        except ValueError as e:
+            logger.error(f"Некорректный формат end_date: {end_date}, ошибка: {str(e)}")
+            return jsonify({"error": "Некорректный формат даты окончания"}), 400
+
+    # Применяем сортировку по времени действия
     query = query.order_by(desc(action_time))
 
-    # Шаг 4: Отладка — выводим сгенерированный SQL-запрос
+    # Логируем запрос для отладки
     logger.debug(f"Сгенерированный SQL-запрос: {query.statement.compile(compile_kwargs={'literal_binds': True})}")
 
-    # Шаг 5: Реализуем пагинацию
-    # Получаем параметры пагинации из запроса (по умолчанию page=1, per_page=10)
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 10, type=int)
+    # Пагинация
     paginated_publications = query.paginate(page=page, per_page=per_page, error_out=False)
 
-    # Шаг 6: Формируем ответ
-    # Проходим по записям и создаём список истории действий
+    # Формируем историю действий
     history = []
     for pub in paginated_publications.items:
-        # Определяем тип действия на основе статуса
         action_type = 'published' if pub.status == 'published' else 'returned_for_revision'
-        # Выбираем соответствующее время действия
         timestamp = pub.published_at if pub.status == 'published' else pub.returned_at
-        # Логируем значения для отладки
-        logger.debug(f"Публикация ID={pub.id}, статус={pub.status}, timestamp={timestamp}, published_at={pub.published_at}, returned_at={pub.returned_at}")
-        # Формируем запись для ответа
+        logger.debug(f"Публикация ID={pub.id}, статус={pub.status}, timestamp={timestamp}")
         history.append({
             'id': pub.id,
             'title': pub.title,
@@ -580,7 +589,7 @@ def get_manager_action_history():
             'comment': pub.return_comment if action_type == 'returned_for_revision' else None
         })
 
-    # Шаг 7: Возвращаем JSON-ответ
+    # Возвращаем результат
     return jsonify({
         'history': history,
         'pages': paginated_publications.pages,

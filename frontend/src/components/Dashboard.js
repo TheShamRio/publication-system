@@ -1560,9 +1560,9 @@ function Dashboard() {
 
 	// Функция вычисления прогресса выполнения плана
 	const calculateProgress = (plan) => {
-		const completed = plan.entries.filter((entry) => entry.publication_id).length;
-		const total = plan.expectedCount;
-		return total > 0 ? (completed / total) * 100 : 0;
+		const completed = plan.fact_count || 0; // Используем fact_count
+		const total = plan.plan_count || 0; // Используем plan_count
+		return total > 0 ? (completed / total) * 100 : 0; // Защищаемся от NaN
 	};
 
 	const handlePlanEntryChange = (planId, index, field, value) => {
