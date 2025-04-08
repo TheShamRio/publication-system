@@ -128,9 +128,11 @@ def get_publications():
     pub_type = request.args.get('type', 'all', type=str)
     status = request.args.get('status', 'all', type=str)
     sort_status = request.args.get('sort_status', None, type=str)
+    sort_by = request.args.get('sort_by', 'updated_at', type=str)  # По умолчанию updated_at
+    sort_order = request.args.get('sort_order', 'desc', type=str)  # По умолчанию desc
 
     # Логируем параметры для отладки
-    logger.debug(f"Параметры запроса: page={page}, per_page={per_page}, search={search}, type={pub_type}, status={status}, sort_status={sort_status}")
+    logger.debug(f"Параметры запроса: page={page}, per_page={per_page}, search={search}, type={pub_type}, status={status}, sort_status={sort_status}, sort_by={sort_by}, sort_order={sort_order}")
 
     # Базовый запрос
     query = Publication.query
@@ -148,7 +150,6 @@ def get_publications():
     if pub_type != 'all':
         query = query.filter_by(type=pub_type)
     
-    # Поддержка нескольких статусов
     valid_statuses = ['draft', 'needs_review', 'returned_for_revision', 'published']
     if status != 'all':
         status_list = status.split(',')
@@ -157,29 +158,36 @@ def get_publications():
             return jsonify({"error": "Указаны недопустимые статусы"}), 400
         query = query.filter(Publication.status.in_(filtered_statuses))
     else:
-        filtered_statuses = valid_statuses  # Если 'all', используем все допустимые статусы
+        filtered_statuses = valid_statuses
 
     # Ограничение для менеджеров
     if current_user.role == 'manager':
         allowed_statuses = ['needs_review', 'returned_for_revision', 'published']
         query = query.filter(Publication.status.in_(allowed_statuses))
-        filtered_statuses = allowed_statuses  # Обновляем filtered_statuses для менеджера
+        filtered_statuses = allowed_statuses
 
-    # Сортировка по приоритетному статусу
-    try:
-        if sort_status and sort_status in filtered_statuses:  # Проверяем, что sort_status допустим
-            sort_case = db.case(
-                {sort_status: 0},  # Используем словарь: ключ — значение статуса, значение — приоритет
-                value=Publication.status,  # Указываем колонку для сравнения
-                else_=1
-            ).label('status_priority')
-            query = query.order_by(sort_case, Publication.id.asc())
-        else:
-            query = query.order_by(Publication.id.asc())  # Сортировка по умолчанию
-    except Exception as e:
-        print(e)
-        logger.error(f"Ошибка при применении сортировки: {str(e)}")
-        return jsonify({"error": "Ошибка сортировки данных"}), 500
+    # Определяем поле для сортировки
+    valid_sort_fields = ['id', 'title', 'year', 'updated_at', 'published_at']
+    if sort_by not in valid_sort_fields:
+        sort_by = 'updated_at'  # По умолчанию
+    sort_column = getattr(Publication, sort_by)
+
+    # Определяем направление сортировки
+    if sort_order == 'desc':
+        sort_column = sort_column.desc()
+    else:
+        sort_column = sort_column.asc()
+
+    # Применяем сортировку
+    if sort_status and sort_status in filtered_statuses:
+        sort_case = db.case(
+            {sort_status: 0},
+            value=Publication.status,
+            else_=1
+        ).label('status_priority')
+        query = query.order_by(sort_case, sort_column)
+    else:
+        query = query.order_by(sort_column)
 
     # Пагинация
     try:
@@ -202,7 +210,8 @@ def get_publications():
             'full_name': pub.user.full_name if pub.user else None
         },
         'returned_for_revision': pub.returned_for_revision,
-        'published_at': pub.published_at.isoformat() if pub.published_at else None
+        'published_at': pub.published_at.isoformat() if pub.published_at else None,
+        'updated_at': pub.updated_at.isoformat() if pub.updated_at else None  # Добавляем updated_at в ответ
     } for pub in paginated_publications.items]
 
     return jsonify({

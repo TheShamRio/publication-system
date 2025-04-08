@@ -639,7 +639,6 @@ function ManagerDashboard() {
 										}}
 									/>
 								</Box>
-								// Обновляем Drawer с таблицей истории
 								<Drawer
 									anchor="right"
 									open={openHistoryDrawer}
@@ -650,7 +649,7 @@ function ManagerDashboard() {
 											backgroundColor: '#FFFFFF',
 											boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
 											borderRadius: '16px 0 0 16px',
-											
+
 										},
 									}}
 								>
@@ -694,7 +693,7 @@ function ManagerDashboard() {
 												<AppleTable
 													sx={{
 														mt: 2,
-														
+
 														overflowX: 'auto',
 														minWidth: '100%',
 														backgroundColor: '#F5F5F7', // Затемнённый фон таблицы
