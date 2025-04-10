@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Line } from 'react-chartjs-2';
+import { Snackbar, Slide } from '@mui/material';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler } from 'chart.js';
 import {
 	Container,
@@ -170,6 +171,11 @@ const CancelButton = styled(Button)(({ theme }) => ({
 	},
 }));
 
+const TransitionDown = (props) => {
+	return <Slide {...props} direction="down" />;
+};
+
+
 const DetailsButton = styled(Button)(({ theme }) => ({
 	borderRadius: '12px',
 	border: '1px solid #D1D1D6',
@@ -305,6 +311,12 @@ function Dashboard() {
 	const chartRef = useRef(null);
 	const [unlinkDialogOpen, setUnlinkDialogOpen] = useState(false);
 	const [selectedGroup, setSelectedGroup] = useState(null);
+	const [createPlanError, setCreatePlanError] = useState('');
+	const [createPlanSuccess, setCreatePlanSuccess] = useState('');
+	const [planDialogError, setPlanDialogError] = useState('');
+	const [planDialogSuccess, setPlanDialogSuccess] = useState('');
+	const [openPlanSnackbar, setOpenPlanSnackbar] = useState(false); // Управление видимостью Snackbar
+
 
 	// Добавляем состояния для управления диалогом удаления типа
 	const [openDeleteTypeDialog, setOpenDeleteTypeDialog] = useState(false);
@@ -332,6 +344,15 @@ function Dashboard() {
 	const handleTabChange = (event, newValue) => {
 		setValue(newValue);
 		if (newValue !== 2) setShowDetailedAnalytics(false);
+	};
+
+	const handleClosePlanSnackbar = () => {
+		setOpenPlanSnackbar(false);
+		setPlanDialogError('');
+		setPlanDialogSuccess('');
+		if (planDialogSuccess) {
+			setOpenCreatePlanDialog(false); // Закрываем диалог только после успеха
+		}
 	};
 
 	const fetchAllPublications = async () => {
@@ -1118,24 +1139,21 @@ function Dashboard() {
 	};
 
 	const handleCreatePlan = async () => {
-		// Валидация года
 		if (!newPlan.year || newPlan.year < 1900 || newPlan.year > 2100) {
-			setError('Пожалуйста, укажите корректный год (1900–2100).');
-			setOpenError(true);
+			setPlanDialogError('Пожалуйста, укажите корректный год (1900–2100).');
+			setOpenPlanSnackbar(true);
 			return;
 		}
 
-		// Обновляем CSRF-токен
 		try {
 			await refreshCsrfToken();
 		} catch (err) {
 			console.error('Ошибка при обновлении CSRF-токена:', err);
-			setError('Не удалось обновить CSRF-токен. Попробуйте снова.');
-			setOpenError(true);
+			setPlanDialogError('Не удалось обновить CSRF-токен. Попробуйте снова.');
+			setOpenPlanSnackbar(true);
 			return;
 		}
 
-		// Формируем данные плана
 		const planData = {
 			year: newPlan.year,
 			fillType: 'manual',
@@ -1143,35 +1161,28 @@ function Dashboard() {
 		};
 
 		try {
-			// Отправляем запрос на сервер
-			const response = await fetch('http://localhost:5000/api/plans', {
-				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-					'X-CSRFToken': csrfToken,
-				},
-				credentials: 'include',
-				body: JSON.stringify(planData),
-			});
+			const response = await axios.post(
+				'http://localhost:5000/api/plans',
+				planData,
+				{
+					withCredentials: true,
+					headers: {
+						'Content-Type': 'application/json',
+						'X-CSRFToken': csrfToken,
+					},
+				}
+			);
 
-			// Проверяем ответ
-			if (!response.ok) {
-				const errorData = await response.json();
-				throw new Error(errorData.error || 'Ошибка при создании плана');
-			}
-
-			// Обрабатываем успешный ответ
-			const data = await response.json();
-			setPlans([...plans, data.plan]);
-			setOpenCreatePlanDialog(false);
+			setPlans([...plans, response.data.plan]);
 			setNewPlan({ year: new Date().getFullYear() + 1, expectedCount: 1 });
-			setSuccess('План успешно создан!');
-			setOpenSuccess(true);
+			setPlanDialogSuccess('План успешно создан!');
+			setOpenPlanSnackbar(true);
+			// Диалог не закрываем сразу, ждём закрытия Snackbar
 		} catch (err) {
-			// Обрабатываем ошибки
 			console.error('Ошибка при создании плана:', err);
-			setError(err.message || 'Произошла ошибка при создании плана.');
-			setOpenError(true);
+			const errorMessage = err.response?.data?.error || 'Произошла ошибка при создании плана.';
+			setPlanDialogError(errorMessage);
+			setOpenPlanSnackbar(true);
 		}
 	};
 	const handleEditPlanClick = (planId) => {
@@ -1189,6 +1200,7 @@ function Dashboard() {
 			)
 		);
 	};
+
 
 	const handleAddPlanEntry = (planId) => {
 		setTempPlan((prevTempPlan) => {
@@ -1997,7 +2009,7 @@ function Dashboard() {
 															<TableCell sx={{ color: '#1D1D1F' }}>
 																<Typography
 																	sx={{
-																		color: '#0071E3 второе слово ',
+																		color: '#0071E3',
 																		textDecoration: 'underline',
 																		cursor: 'pointer',
 																		'&:hover': { textDecoration: 'none' },
@@ -2631,6 +2643,27 @@ function Dashboard() {
 				</CardContent>
 			</AppleCard>
 
+			<Snackbar
+				open={openPlanSnackbar}
+				autoHideDuration={2500}
+				onClose={handleClosePlanSnackbar}
+				anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+				TransitionComponent={TransitionDown}
+			>
+				<Alert
+					severity={planDialogError ? 'error' : 'success'}
+					sx={{
+						borderRadius: '12px',
+						backgroundColor: planDialogError ? '#FFF1F0' : '#E7F8E7',
+						color: '#1D1D1F',
+						boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+						minWidth: '300px',
+					}}
+					onClose={handleClosePlanSnackbar}
+				>
+					{planDialogError || planDialogSuccess}
+				</Alert>
+			</Snackbar>
 			{/* Диалог редактирования пользователя */}
 			<Dialog
 				open={openEditUserDialog}
@@ -3094,11 +3127,46 @@ function Dashboard() {
 						margin="normal"
 						variant="outlined"
 					/>
-					{/* Убираем поле "Ожидаемое количество публикаций" */}
+					{/* Уведомления внутри диалога */}
+					<Collapse in={!!createPlanSuccess}>
+						{createPlanSuccess && (
+							<Alert
+								severity="success"
+								sx={{
+									mt: 2,
+									borderRadius: '12px',
+									backgroundColor: '#E7F8E7',
+									color: '#1D1D1F',
+									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+								}}
+							>
+								{createPlanSuccess}
+							</Alert>
+						)}
+					</Collapse>
+					<Collapse in={!!createPlanError}>
+						{createPlanError && (
+							<Alert
+								severity="error"
+								sx={{
+									mt: 2,
+									borderRadius: '12px',
+									backgroundColor: '#FFF1F0',
+									color: '#1D1D1F',
+									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+								}}
+								onClose={() => setCreatePlanError('')} // Позволяет закрыть ошибку вручную
+							>
+								{createPlanError}
+							</Alert>
+						)}
+					</Collapse>
 				</DialogContent>
 				<DialogActions>
 					<CancelButton onClick={() => setOpenCreatePlanDialog(false)}>Отмена</CancelButton>
-					<AppleButton onClick={handleCreatePlan}>Создать</AppleButton>
+					<AppleButton onClick={handleCreatePlan} disabled={!!createPlanSuccess}>
+						Создать
+					</AppleButton>
 				</DialogActions>
 			</Dialog>
 			<Dialog

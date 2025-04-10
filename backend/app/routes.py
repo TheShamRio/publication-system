@@ -737,7 +737,6 @@ def get_plans():
 def create_plan():
     logger.debug(f"Получен POST запрос для /plans")
     data = request.get_json()
-    # Убираем проверку expectedCount
     if not data.get('year') or not data.get('fillType') or 'entries' not in data:
         return jsonify({'error': 'Missing required fields'}), 400
     
@@ -746,6 +745,17 @@ def create_plan():
     
     if data['fillType'] not in ['manual', 'link']:
         return jsonify({'error': 'Invalid fill type'}), 400
+
+    # Проверка на существующий утверждённый план
+    existing_approved_plan = Plan.query.filter_by(
+        user_id=current_user.id,
+        year=data['year'],
+        status='approved'
+    ).first()
+    if existing_approved_plan:
+        return jsonify({
+            'error': f'У вас уже есть утверждённый план на {data["year"]} год. Создание нового плана невозможно.'
+        }), 403
 
     plan = Plan(
         year=data['year'],
