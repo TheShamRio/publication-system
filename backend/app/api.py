@@ -3,13 +3,14 @@ from werkzeug.utils import secure_filename
 from flask_login import login_required, current_user
 from flask import current_app
 from app.extensions import db
-from app.models import Publication, User, Plan, PlanEntry
+from app.models import Publication, User, Plan, PlanEntry, PlanActionHistory
 import os
 import logging
 from io import BytesIO
 import bibtexparser
 from datetime import datetime
 from sqlalchemy import or_
+
 
 bp = Blueprint('admin_api', __name__, url_prefix='/admin_api')
 logger = logging.getLogger(__name__)
@@ -474,37 +475,43 @@ def delete_plan(plan_id):
 @bp.route('/admin/plans/<int:plan_id>/approve', methods=['POST'])
 @admin_or_manager_required
 def approve_plan(plan_id):
-    logger.debug(f"Получен POST запрос для /admin_api/admin/plans/{plan_id}/approve")
     plan = Plan.query.get_or_404(plan_id)
-    if plan.status != 'needs_review':
-        return jsonify({'error': 'План не находится на проверке'}), 400
-
     plan.status = 'approved'
-    plan.approved_at = datetime.utcnow()  # Устанавливаем время утверждения
-    plan.returned_at = None  # Сбрасываем время возврата
-    plan.return_comment = None  # Сбрасываем комментарий
-    db.session.commit()
-    return jsonify({'message': 'План утверждён', 'plan': plan.to_dict()}), 200
+    plan.approved_at = datetime.utcnow()
+    # Не сбрасываем returned_at и return_comment
 
+    # Добавляем запись в историю
+    action = PlanActionHistory(
+        plan_id=plan.id,
+        action_type='approved',
+        timestamp=plan.approved_at,
+        user_id=current_user.id  # Кто утвердил
+    )
+    db.session.add(action)
+    db.session.commit()
+    return jsonify({"message": "План утверждён"}), 200
 @bp.route('/admin/plans/<int:plan_id>/return-for-revision', methods=['POST'])
 @admin_or_manager_required
 def return_plan_for_revision(plan_id):
-    logger.debug(f"Получен POST запрос для /admin_api/admin/plans/{plan_id}/return-for-revision")
     plan = Plan.query.get_or_404(plan_id)
-    if plan.status != 'needs_review':
-        return jsonify({'error': 'План не находится на проверке'}), 400
-
     data = request.get_json()
-    comment = data.get('comment', '').strip()
-    if not comment:
-        return jsonify({'error': 'Комментарий обязателен'}), 400
-
+    comment = data.get('comment', '')
     plan.status = 'returned'
     plan.return_comment = comment
-    plan.returned_at = datetime.utcnow()  # Устанавливаем время возврата
-    plan.approved_at = None  # Сбрасываем время утверждения
+    plan.returned_at = datetime.utcnow()
+    # Не сбрасываем approved_at
+
+    # Добавляем запись в историю
+    action = PlanActionHistory(
+        plan_id=plan.id,
+        action_type='returned',
+        timestamp=plan.returned_at,
+        comment=comment,
+        user_id=current_user.id  # Кто вернул
+    )
+    db.session.add(action)
     db.session.commit()
-    return jsonify({'message': 'План возвращён на доработку', 'plan': plan.to_dict()}), 200
+    return jsonify({"message": "План возвращён на доработку"}), 200
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'pdf', 'docx'}
 
@@ -525,22 +532,16 @@ def get_plan_action_history():
     start_date = request.args.get('start_date', type=str)
     end_date = request.args.get('end_date', type=str)
 
-    query = Plan.query.filter(
-        or_(Plan.status == 'approved', Plan.status == 'returned')
+    # Базовый запрос к истории действий
+    query = PlanActionHistory.query.join(Plan).filter(
+        PlanActionHistory.action_type.in_(['approved', 'returned'])
     )
 
-    action_time = func.coalesce(
-        case(
-            (Plan.status == 'approved', Plan.approved_at),
-            (Plan.status == 'returned', Plan.returned_at),
-            else_=None
-        )
-    ).label('action_time')
-
+    # Фильтрация по датам
     if start_date:
         try:
             start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
-            query = query.filter(action_time >= start_datetime)
+            query = query.filter(PlanActionHistory.timestamp >= start_datetime)
         except ValueError as e:
             logger.error(f"Некорректный формат start_date: {start_date}, ошибка: {str(e)}")
             return jsonify({"error": "Некорректный формат даты начала"}), 400
@@ -548,38 +549,39 @@ def get_plan_action_history():
     if end_date:
         try:
             end_datetime = datetime.strptime(end_date, '%Y-%m-%d')
-            query = query.filter(action_time <= end_datetime)
+            query = query.filter(PlanActionHistory.timestamp <= end_datetime)
         except ValueError as e:
             logger.error(f"Некорректный формат end_date: {end_date}, ошибка: {str(e)}")
             return jsonify({"error": "Некорректный формат даты окончания"}), 400
 
-    query = query.order_by(desc(action_time))
+    # Сортировка по убыванию (новые действия первыми)
+    query = query.order_by(desc(PlanActionHistory.timestamp))
 
-    paginated_plans = query.paginate(page=page, per_page=per_page, error_out=False)
+    # Пагинация
+    paginated_actions = query.paginate(page=page, per_page=per_page, error_out=False)
     
-    logger.debug(f"Найдено планов: {paginated_plans.total}")
-    for plan in paginated_plans.items:
-        logger.debug(f"План ID={plan.id}, статус={plan.status}, approved_at={plan.approved_at}, returned_at={plan.returned_at}")
+    logger.debug(f"Найдено действий: {paginated_actions.total}")
+    for action in paginated_actions.items:
+        logger.debug(f"Действие ID={action.id}, план ID={action.plan_id}, тип={action.action_type}, время={action.timestamp}")
 
+    # Формируем историю
     history = []
-    for plan in paginated_plans.items:
-        action_type = 'approved' if plan.status == 'approved' else 'returned'
-        timestamp = plan.approved_at if plan.status == 'approved' else plan.returned_at
-        user_full_name = plan.user.full_name if plan.user else "Не указан"
+    for action in paginated_actions.items:
         history.append({
-            'id': plan.id,
-            'year': plan.year,
-            'action_type': action_type,
-            'timestamp': timestamp.isoformat(),
-            'comment': plan.return_comment if action_type == 'returned' else None,
-            'user_full_name': user_full_name
+            'id': action.plan_id,  # ID плана
+            'year': action.plan.year,
+            'action_type': action.action_type,
+            'timestamp': action.timestamp.isoformat(),
+            'comment': action.comment,
+            'user_full_name': action.plan.user.full_name if action.plan.user else "Не указан"
         })
 
     return jsonify({
         'history': history,
-        'pages': paginated_plans.pages,
-        'total': paginated_plans.total
+        'pages': paginated_actions.pages,
+        'total': paginated_actions.total
     }), 200
+
 
 @bp.route('admin/plans/needs-review', methods=['GET'])
 @login_required

@@ -1098,11 +1098,15 @@ function ManagerDashboard() {
 
 						{value === 3 && (
 							<Box sx={{ mt: 4 }}>
-								<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
-									Работа с планами
-								</Typography>
-								<Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
-									<AppleButton startIcon={<HistoryIcon />} onClick={handleOpenPlanHistoryDrawer}>
+								<Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 2, position: 'relative' }}>
+									<Typography variant="h5" sx={{ color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
+										Работа с планами
+									</Typography>
+									<AppleButton
+										startIcon={<HistoryIcon />}
+										onClick={handleOpenPlanHistoryDrawer}
+										sx={{ position: 'absolute', right: 16 }} // Отступ справа 16px
+									>
 										Показать историю
 									</AppleButton>
 								</Box>
@@ -1215,8 +1219,7 @@ function ManagerDashboard() {
 										}}
 									/>
 								</Box>
-
-								{/* Добавляем Drawer для истории действий с планами */}
+								{/* Drawer для истории действий с планами остаётся без изменений */}
 								<Drawer
 									anchor="right"
 									open={openPlanHistoryDrawer}
@@ -1288,7 +1291,7 @@ function ManagerDashboard() {
 														<TableBody>
 															{planActionHistory.map((action) => (
 																<TableRow key={action.id}>
-																	<TableCell sx={{ minWidth: '150px', whiteSpace: 'nowrap' }}> {/* Изменяем здесь */}
+																	<TableCell sx={{ minWidth: '150px', whiteSpace: 'nowrap' }}>
 																		<Typography
 																			sx={{
 																				color: '#0071E3',
@@ -1299,8 +1302,7 @@ function ManagerDashboard() {
 																			onClick={() => {
 																				if (action.id) {
 																					handleClosePlanHistoryDrawer();
-																					// Если есть страница для просмотра плана, раскомментируйте:
-																					// navigate(`/plan/${action.id}`);
+																					// navigate(`/plan/${action.id}`); // Раскомментируйте, если есть страница плана
 																				} else {
 																					setError('ID плана отсутствует в записи истории.');
 																					setOpenError(true);
