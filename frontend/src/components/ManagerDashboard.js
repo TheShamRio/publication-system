@@ -161,6 +161,11 @@ function ManagerDashboard() {
 	const [historyTransitionKey, setHistoryTransitionKey] = useState(0);
 	const [dateFilter, setDateFilter] = useState(''); // Для фильтра по одной дате
 	const [dateRange, setDateRange] = useState({ start: '', end: '' }); // Для диапазона дат
+	const [planActionHistory, setPlanActionHistory] = useState([]);
+	const [planHistoryPage, setPlanHistoryPage] = useState(1);
+	const [totalPlanHistoryPages, setTotalPlanHistoryPages] = useState(1);
+	const [openPlanHistoryDrawer, setOpenPlanHistoryDrawer] = useState(false);
+	const [planHistoryTransitionKey, setPlanHistoryTransitionKey] = useState(0);
 
 	// Эффект для автоматического закрытия уведомлений
 	useEffect(() => {
@@ -205,6 +210,28 @@ function ManagerDashboard() {
 		const value = e.target.value;
 		setNewMiddleName(value);
 		setMiddleNameError(validateNamePart(value, 'Отчество'));
+	};
+
+	const fetchPlanActionHistory = async (page, startDate = '', endDate = '') => {
+		try {
+			const response = await axios.get(`http://localhost:5000/admin_api/admin/plan-action-history`, {
+				withCredentials: true,
+				headers: { 'X-CSRFToken': csrfToken },
+				params: {
+					page,
+					per_page: 10,
+					start_date: startDate || undefined,
+					end_date: endDate || undefined,
+				},
+			});
+			setPlanActionHistory(response.data.history);
+			setTotalPlanHistoryPages(response.data.pages);
+			setPlanHistoryTransitionKey((prev) => prev + 1);
+		} catch (err) {
+			console.error('Ошибка загрузки истории действий с планами:', err);
+			setError('Не удалось загрузить историю действий с планами.');
+			setOpenError(true);
+		}
 	};
 
 	// Загрузка данных
@@ -279,8 +306,13 @@ function ManagerDashboard() {
 			fetchPublications(currentPagePublications),
 			fetchPlans(currentPagePlans),
 			fetchActionHistory(historyPage, dateFilterRange.start, dateFilterRange.end),
+			fetchPlanActionHistory(planHistoryPage, dateFilterRange.start, dateFilterRange.end),
 		]).finally(() => setLoadingInitial(false));
 	}, [isAuthenticated, user, navigate]);
+
+	useEffect(() => {
+		fetchPlanActionHistory(planHistoryPage, dateFilterRange.start, dateFilterRange.end);
+	}, [planHistoryPage, dateFilterRange.start, dateFilterRange.end]);
 
 	// Обновление публикаций при изменении страницы, поиска или фильтра
 	useEffect(() => {
@@ -302,6 +334,18 @@ function ManagerDashboard() {
 	const handleSearchChange = (e) => {
 		setSearchQuery(e.target.value);
 		setCurrentPagePublications(1);
+	};
+
+	const handleOpenPlanHistoryDrawer = () => {
+		setOpenPlanHistoryDrawer(true);
+		fetchPlanActionHistory(planHistoryPage);
+	};
+
+	const handleClosePlanHistoryDrawer = () => setOpenPlanHistoryDrawer(false);
+
+	const handlePlanHistoryPageChange = (event, value) => {
+		setPlanHistoryPage(value);
+		fetchPlanActionHistory(value);
 	};
 
 	const handleStatusFilterChange = (e) => {
@@ -436,6 +480,7 @@ function ManagerDashboard() {
 			setSuccess('План утверждён!');
 			setOpenSuccess(true);
 			fetchPlans(currentPagePlans);
+			fetchPlanActionHistory(planHistoryPage); // Добавляем обновление истории
 		} catch (err) {
 			setError('Не удалось утвердить план. Попробуйте позже.');
 			setOpenError(true);
@@ -463,6 +508,7 @@ function ManagerDashboard() {
 			setSuccess('План возвращён на доработку!');
 			setOpenSuccess(true);
 			fetchPlans(currentPagePlans);
+			fetchPlanActionHistory(planHistoryPage); // Добавляем обновление истории
 			setOpenReturnDialog(false);
 		} catch (err) {
 			setError('Не удалось вернуть план. Попробуйте позже.');
@@ -1055,6 +1101,11 @@ function ManagerDashboard() {
 								<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
 									Работа с планами
 								</Typography>
+								<Box sx={{ display: 'flex', justifyContent: 'center', mb: 2 }}>
+									<AppleButton startIcon={<HistoryIcon />} onClick={handleOpenPlanHistoryDrawer}>
+										Показать историю
+									</AppleButton>
+								</Box>
 								{plans.length > 0 ? (
 									plans.map((plan) => {
 										const entriesByType = plan.entries.reduce((acc, entry) => {
@@ -1075,7 +1126,7 @@ function ManagerDashboard() {
 												<AccordionSummary expandIcon={<ExpandMoreIcon />}>
 													<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
 														<Box>
-															<Typography variant="h6" sx={{ color: '#1D1D1F' }}>
+															<Typography variant="h6" sx={{ color: '#1D1D1F', whiteSpace: 'nowrap' }}>
 																План на {plan.year} год
 															</Typography>
 															<Typography variant="body2" sx={{ color: '#6E6E73', mt: 0.5 }}>
@@ -1164,6 +1215,138 @@ function ManagerDashboard() {
 										}}
 									/>
 								</Box>
+
+								{/* Добавляем Drawer для истории действий с планами */}
+								<Drawer
+									anchor="right"
+									open={openPlanHistoryDrawer}
+									onClose={handleClosePlanHistoryDrawer}
+									sx={{
+										'& .MuiDrawer-paper': {
+											width: 600,
+											backgroundColor: '#FFFFFF',
+											boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+											borderRadius: '16px 0 0 16px',
+										},
+									}}
+								>
+									<Box sx={{ p: 2, pr: 4 }}>
+										<Typography variant="h6" sx={{ color: '#1D1D1F', fontWeight: 600, mb: 5 }}>
+											История действий с планами
+										</Typography>
+										<Box sx={{ display: 'flex', gap: 2, mt: 2, mb: 2 }}>
+											<AppleTextField
+												label="Дата начала"
+												type="date"
+												value={dateFilterRange.start}
+												onChange={(e) => {
+													setDateFilterRange((prev) => ({ ...prev, start: e.target.value }));
+													setPlanHistoryPage(1);
+												}}
+												InputLabelProps={{ shrink: true }}
+												sx={{ width: '200px' }}
+											/>
+											<AppleTextField
+												label="Дата окончания"
+												type="date"
+												value={dateFilterRange.end}
+												onChange={(e) => {
+													setDateFilterRange((prev) => ({ ...prev, end: e.target.value }));
+													setPlanHistoryPage(1);
+												}}
+												InputLabelProps={{ shrink: true }}
+												sx={{ width: '200px' }}
+											/>
+										</Box>
+										{planActionHistory.length > 0 ? (
+											<>
+												<AppleTable
+													sx={{
+														mt: 2,
+														backgroundColor: '#F5F5F7',
+														boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+														borderRadius: '8px',
+													}}
+												>
+													<TableHead>
+														<TableRow sx={{ backgroundColor: '#0071E3', borderRadius: '8px 8px 0 0' }}>
+															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '150px', borderTopLeftRadius: '8px' }}>
+																План
+															</TableCell>
+															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '150px' }}>
+																Пользователь
+															</TableCell>
+															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '120px' }}>
+																Действие
+															</TableCell>
+															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '140px', borderTopRightRadius: '8px' }}>
+																Время
+															</TableCell>
+														</TableRow>
+													</TableHead>
+													<Fade in={true} timeout={500} key={planHistoryTransitionKey}>
+														<TableBody>
+															{planActionHistory.map((action) => (
+																<TableRow key={action.id}>
+																	<TableCell sx={{ minWidth: '150px', whiteSpace: 'nowrap' }}> {/* Изменяем здесь */}
+																		<Typography
+																			sx={{
+																				color: '#0071E3',
+																				textDecoration: 'underline',
+																				cursor: 'pointer',
+																				'&:hover': { textDecoration: 'none' },
+																			}}
+																			onClick={() => {
+																				if (action.id) {
+																					handleClosePlanHistoryDrawer();
+																					// Если есть страница для просмотра плана, раскомментируйте:
+																					// navigate(`/plan/${action.id}`);
+																				} else {
+																					setError('ID плана отсутствует в записи истории.');
+																					setOpenError(true);
+																				}
+																			}}
+																		>
+																			План на {action.year} год
+																		</Typography>
+																	</TableCell>
+																	<TableCell sx={{ minWidth: '150px', whiteSpace: 'normal', wordWrap: 'break-word' }}>
+																		{action.user_full_name}
+																	</TableCell>
+																	<TableCell sx={{ minWidth: '120px' }}>
+																		{action.action_type === 'approved' ? 'Утверждён' : 'Возвращён на доработку'}
+																	</TableCell>
+																	<TableCell sx={{ minWidth: '140px' }}>
+																		{new Date(action.timestamp).toLocaleString('ru-RU')}
+																	</TableCell>
+																</TableRow>
+															))}
+														</TableBody>
+													</Fade>
+												</AppleTable>
+												<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
+													<Pagination
+														count={totalPlanHistoryPages}
+														page={planHistoryPage}
+														onChange={handlePlanHistoryPageChange}
+														color="primary"
+														sx={{
+															'& .MuiPaginationItem-root': {
+																borderRadius: 20,
+																'&:hover': { backgroundColor: 'grey.100' },
+																'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white' },
+															},
+														}}
+													/>
+												</Box>
+											</>
+										) : (
+											<Typography sx={{ mt: 2, color: '#6E6E73' }}>
+												Нет записей в истории действий с планами.
+											</Typography>
+										)}
+									</Box>
+								</Drawer>
 							</Box>
 						)}
 

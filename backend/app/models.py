@@ -130,19 +130,19 @@ class Achievement(db.Model):
 class Plan(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     year = db.Column(db.Integer, nullable=False)
-    fillType = db.Column(db.String(10), nullable=False, default='manual')  # 'manual' или 'link'
+    fillType = db.Column(db.String(10), nullable=False, default='manual')
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    status = db.Column(db.String(20), nullable=False, default='draft')  # 'draft', 'needs_review', 'approved', 'returned'
+    status = db.Column(db.String(20), nullable=False, default='draft')
     return_comment = db.Column(db.Text, nullable=True)
+    approved_at = db.Column(db.DateTime, nullable=True)  # Новое поле
+    returned_at = db.Column(db.DateTime, nullable=True)  # Новое поле
 
     user = db.relationship('User', backref='plans', lazy=True)
     entries = db.relationship('PlanEntry', back_populates='plan', lazy=True, cascade='all, delete-orphan')
 
     def to_dict(self):
-        # Подсчитываем "План" (общее количество записей) и "Факт" (записи с publication_id)
         plan_count = len(self.entries)
         fact_count = sum(1 for entry in self.entries if entry.publication_id is not None)
-
         return {
             'id': self.id,
             'year': self.year,
@@ -154,8 +154,10 @@ class Plan(db.Model):
             } if self.user else None,
             'entries': [entry.to_dict() for entry in self.entries],
             'return_comment': self.return_comment,
-            'plan_count': plan_count,  # Количество запланированных записей
-            'fact_count': fact_count   # Количество прикрепленных публикаций
+            'plan_count': plan_count,
+            'fact_count': fact_count,
+            'approved_at': self.approved_at.isoformat() if self.approved_at else None,  # Добавляем в ответ
+            'returned_at': self.returned_at.isoformat() if self.returned_at else None,  # Добавляем в ответ
         }
 
 class PlanEntry(db.Model):

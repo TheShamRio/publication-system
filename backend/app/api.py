@@ -480,6 +480,9 @@ def approve_plan(plan_id):
         return jsonify({'error': 'План не находится на проверке'}), 400
 
     plan.status = 'approved'
+    plan.approved_at = datetime.utcnow()  # Устанавливаем время утверждения
+    plan.returned_at = None  # Сбрасываем время возврата
+    plan.return_comment = None  # Сбрасываем комментарий
     db.session.commit()
     return jsonify({'message': 'План утверждён', 'plan': plan.to_dict()}), 200
 
@@ -498,9 +501,10 @@ def return_plan_for_revision(plan_id):
 
     plan.status = 'returned'
     plan.return_comment = comment
+    plan.returned_at = datetime.utcnow()  # Устанавливаем время возврата
+    plan.approved_at = None  # Сбрасываем время утверждения
     db.session.commit()
     return jsonify({'message': 'План возвращён на доработку', 'plan': plan.to_dict()}), 200
-
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'pdf', 'docx'}
 
@@ -512,6 +516,70 @@ def get_publications_by_year(user_id):
         yearly_counts[year] = yearly_counts.get(year, 0) + 1
     return sorted(yearly_counts.items(), key=lambda x: x[0])
 
+
+@bp.route('/admin/plan-action-history', methods=['GET'])
+@admin_or_manager_required
+def get_plan_action_history():
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    start_date = request.args.get('start_date', type=str)
+    end_date = request.args.get('end_date', type=str)
+
+    query = Plan.query.filter(
+        or_(Plan.status == 'approved', Plan.status == 'returned')
+    )
+
+    action_time = func.coalesce(
+        case(
+            (Plan.status == 'approved', Plan.approved_at),
+            (Plan.status == 'returned', Plan.returned_at),
+            else_=None
+        )
+    ).label('action_time')
+
+    if start_date:
+        try:
+            start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
+            query = query.filter(action_time >= start_datetime)
+        except ValueError as e:
+            logger.error(f"Некорректный формат start_date: {start_date}, ошибка: {str(e)}")
+            return jsonify({"error": "Некорректный формат даты начала"}), 400
+
+    if end_date:
+        try:
+            end_datetime = datetime.strptime(end_date, '%Y-%m-%d')
+            query = query.filter(action_time <= end_datetime)
+        except ValueError as e:
+            logger.error(f"Некорректный формат end_date: {end_date}, ошибка: {str(e)}")
+            return jsonify({"error": "Некорректный формат даты окончания"}), 400
+
+    query = query.order_by(desc(action_time))
+
+    paginated_plans = query.paginate(page=page, per_page=per_page, error_out=False)
+    
+    logger.debug(f"Найдено планов: {paginated_plans.total}")
+    for plan in paginated_plans.items:
+        logger.debug(f"План ID={plan.id}, статус={plan.status}, approved_at={plan.approved_at}, returned_at={plan.returned_at}")
+
+    history = []
+    for plan in paginated_plans.items:
+        action_type = 'approved' if plan.status == 'approved' else 'returned'
+        timestamp = plan.approved_at if plan.status == 'approved' else plan.returned_at
+        user_full_name = plan.user.full_name if plan.user else "Не указан"
+        history.append({
+            'id': plan.id,
+            'year': plan.year,
+            'action_type': action_type,
+            'timestamp': timestamp.isoformat(),
+            'comment': plan.return_comment if action_type == 'returned' else None,
+            'user_full_name': user_full_name
+        })
+
+    return jsonify({
+        'history': history,
+        'pages': paginated_plans.pages,
+        'total': paginated_plans.total
+    }), 200
 
 @bp.route('admin/plans/needs-review', methods=['GET'])
 @login_required
