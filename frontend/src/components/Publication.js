@@ -162,9 +162,18 @@ function Publication() {
 
 	const handleReject = async () => {
 		try {
+			const reviewerComment = publication.comments
+				.filter((comment) => ['admin', 'manager'].includes(comment.user.role))
+				.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]?.content || '';
+
+			if (!reviewerComment) {
+				setError('Добавьте комментарий перед отправкой на доработку.');
+				return;
+			}
+
 			const response = await axios.post(
 				`http://localhost:5000/api/publications/${id}/return-for-revision`,
-				{},
+				{ comment: reviewerComment },
 				{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
 			);
 			console.log('Return for revision response:', response.data);

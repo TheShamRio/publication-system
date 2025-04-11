@@ -118,12 +118,9 @@ function ManagerDashboard() {
 	const [value, setValue] = useState(0);
 	const [publications, setPublications] = useState([]);
 	const [plans, setPlans] = useState([]);
-	const [actionHistory, setActionHistory] = useState([]);
 	const [currentPagePublications, setCurrentPagePublications] = useState(1);
 	const [currentPagePlans, setCurrentPagePlans] = useState(1);
-	const [historyPage, setHistoryPage] = useState(1);
-	const [totalHistoryPages, setTotalHistoryPages] = useState(1);
-	const [dateFilterRange, setDateFilterRange] = useState({ start: '', end: '' }); // Диапазон дат для фильтрации
+	const [dateFilterRange, setDateFilterRange] = useState({ start: '', end: '' });
 	const [totalPagesPublications, setTotalPagesPublications] = useState(1);
 	const [totalPagesPlans, setTotalPagesPlans] = useState(1);
 	const [searchQuery, setSearchQuery] = useState('');
@@ -158,14 +155,16 @@ function ManagerDashboard() {
 	const [openHistoryDrawer, setOpenHistoryDrawer] = useState(false);
 	const [publicationsTransitionKey, setPublicationsTransitionKey] = useState(0);
 	const [plansTransitionKey, setPlansTransitionKey] = useState(0);
-	const [historyTransitionKey, setHistoryTransitionKey] = useState(0);
-	const [dateFilter, setDateFilter] = useState(''); // Для фильтра по одной дате
-	const [dateRange, setDateRange] = useState({ start: '', end: '' }); // Для диапазона дат
 	const [planActionHistory, setPlanActionHistory] = useState([]);
 	const [planHistoryPage, setPlanHistoryPage] = useState(1);
 	const [totalPlanHistoryPages, setTotalPlanHistoryPages] = useState(1);
 	const [openPlanHistoryDrawer, setOpenPlanHistoryDrawer] = useState(false);
 	const [planHistoryTransitionKey, setPlanHistoryTransitionKey] = useState(0);
+	const [pubActionHistory, setPubActionHistory] = useState([]);
+	const [pubHistoryPage, setPubHistoryPage] = useState(1);
+	const [totalPubHistoryPages, setTotalPubHistoryPages] = useState(1);
+	const [pubHistoryTransitionKey, setPubHistoryTransitionKey] = useState(0);
+	const [selectedPublication, setSelectedPublication] = useState(null);
 
 	// Эффект для автоматического закрытия уведомлений
 	useEffect(() => {
@@ -234,7 +233,6 @@ function ManagerDashboard() {
 		}
 	};
 
-	// Загрузка данных
 	const fetchPublications = async (page) => {
 		try {
 			const response = await axios.get(`http://localhost:5000/admin_api/admin/publications`, {
@@ -274,59 +272,54 @@ function ManagerDashboard() {
 		}
 	};
 
-	// Обновленная функция загрузки истории с учетом диапазона дат
-	const fetchActionHistory = async (page, startDate = '', endDate = '') => {
+	const fetchPubActionHistory = async (page, startDate = '', endDate = '') => {
 		try {
-			const response = await axios.get(`http://localhost:5000/admin_api/admin/manager-action-history`, {
+			const response = await axios.get('http://localhost:5000/admin_api/admin/publication-action-history', {
 				withCredentials: true,
 				headers: { 'X-CSRFToken': csrfToken },
 				params: {
 					page,
 					per_page: 10,
-					start_date: startDate || undefined, // Передаем только если задано
+					start_date: startDate || undefined,
 					end_date: endDate || undefined,
 				},
 			});
-			console.log('Данные с сервера:', response.data.history); // Отладочный вывод
-			setActionHistory(response.data.history);
-			setTotalHistoryPages(response.data.pages);
-			setHistoryTransitionKey((prev) => prev + 1);
+			setPubActionHistory(response.data.history);
+			setTotalPubHistoryPages(response.data.pages);
+			setPubHistoryTransitionKey((prev) => prev + 1);
 		} catch (err) {
-			console.error('Ошибка загрузки истории действий:', err);
-			setError('Не удалось загрузить историю действий.');
+			console.error('Ошибка загрузки истории действий с публикациями:', err);
+			setError('Не удалось загрузить историю действий с публикациями.');
 			setOpenError(true);
 		}
 	};
 
-	// Инициализация данных только при загрузке компонента
+	// Инициализация данных
 	useEffect(() => {
 		if (!isAuthenticated || user.role !== 'manager') navigate('/login');
 		setLoadingInitial(true);
 		Promise.all([
 			fetchPublications(currentPagePublications),
 			fetchPlans(currentPagePlans),
-			fetchActionHistory(historyPage, dateFilterRange.start, dateFilterRange.end),
+			fetchPubActionHistory(pubHistoryPage, dateFilterRange.start, dateFilterRange.end),
 			fetchPlanActionHistory(planHistoryPage, dateFilterRange.start, dateFilterRange.end),
 		]).finally(() => setLoadingInitial(false));
 	}, [isAuthenticated, user, navigate]);
 
+	// Обновление истории публикаций
 	useEffect(() => {
-		fetchPlanActionHistory(planHistoryPage, dateFilterRange.start, dateFilterRange.end);
-	}, [planHistoryPage, dateFilterRange.start, dateFilterRange.end]);
+		fetchPubActionHistory(pubHistoryPage, dateFilterRange.start, dateFilterRange.end);
+	}, [pubHistoryPage, dateFilterRange.start, dateFilterRange.end]);
 
-	// Обновление публикаций при изменении страницы, поиска или фильтра
+	// Обновление публикаций
 	useEffect(() => {
 		fetchPublications(currentPagePublications);
 	}, [currentPagePublications, searchQuery, statusFilter]);
 
-	// Обновление планов при изменении страницы
+	// Обновление планов
 	useEffect(() => {
 		fetchPlans(currentPagePlans);
 	}, [currentPagePlans]);
-
-	useEffect(() => {
-		fetchActionHistory(historyPage, dateFilterRange.start, dateFilterRange.end);
-	}, [historyPage, dateFilterRange.start, dateFilterRange.end]);
 
 	// Обработчики
 	const handleTabChange = (event, newValue) => setValue(newValue);
@@ -345,7 +338,7 @@ function ManagerDashboard() {
 
 	const handlePlanHistoryPageChange = (event, value) => {
 		setPlanHistoryPage(value);
-		fetchPlanActionHistory(value);
+		fetchPlanActionHistory(value, dateFilterRange.start, dateFilterRange.end);
 	};
 
 	const handleStatusFilterChange = (e) => {
@@ -358,8 +351,8 @@ function ManagerDashboard() {
 	const handlePageChangePlans = (event, value) => setCurrentPagePlans(value);
 
 	const handleHistoryPageChange = (event, value) => {
-		setHistoryPage(value);
-		fetchActionHistory(value);
+		setPubHistoryPage(value);
+		fetchPubActionHistory(value, dateFilterRange.start, dateFilterRange.end);
 	};
 
 	const handleDownload = async (fileUrl, fileName) => {
@@ -438,7 +431,7 @@ function ManagerDashboard() {
 			setSuccess('Публикация успешно обновлена!');
 			setOpenSuccess(true);
 			fetchPublications(currentPagePublications);
-			fetchActionHistory(historyPage);
+			fetchPubActionHistory(pubHistoryPage);
 			handleEditCancel();
 		} catch (err) {
 			setError('Не удалось обновить публикацию. Попробуйте позже.');
@@ -461,7 +454,7 @@ function ManagerDashboard() {
 				setSuccess('Публикация успешно удалена!');
 				setOpenSuccess(true);
 				fetchPublications(currentPagePublications);
-				fetchActionHistory(historyPage);
+				fetchPubActionHistory(pubHistoryPage);
 				setOpenDeleteDialog(false);
 				setPublicationToDelete(null);
 			} catch (err) {
@@ -480,7 +473,7 @@ function ManagerDashboard() {
 			setSuccess('План утверждён!');
 			setOpenSuccess(true);
 			fetchPlans(currentPagePlans);
-			fetchPlanActionHistory(planHistoryPage); // Добавляем обновление истории
+			fetchPlanActionHistory(planHistoryPage);
 		} catch (err) {
 			setError('Не удалось утвердить план. Попробуйте позже.');
 			setOpenError(true);
@@ -508,7 +501,7 @@ function ManagerDashboard() {
 			setSuccess('План возвращён на доработку!');
 			setOpenSuccess(true);
 			fetchPlans(currentPagePlans);
-			fetchPlanActionHistory(planHistoryPage); // Добавляем обновление истории
+			fetchPlanActionHistory(planHistoryPage);
 			setOpenReturnDialog(false);
 		} catch (err) {
 			setError('Не удалось вернуть план. Попробуйте позже.');
@@ -516,15 +509,47 @@ function ManagerDashboard() {
 		}
 	};
 
+	const handleApprovePublication = async (pub) => {
+		try {
+			await axios.put(
+				`http://localhost:5000/admin_api/admin/publications/${pub.id}`,
+				{ status: 'published' },
+				{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
+			);
+			setSuccess('Публикация утверждена!');
+			setOpenSuccess(true);
+			fetchPublications(currentPagePublications);
+			fetchPubActionHistory(pubHistoryPage);
+		} catch (err) {
+			setError('Не удалось утвердить публикацию. Попробуйте позже.');
+			setOpenError(true);
+		}
+	};
+
+	const handleReturnPublicationForRevision = async (pubId, comment) => {
+		try {
+			await axios.put(
+				`http://localhost:5000/admin_api/admin/publications/${pubId}`,
+				{ status: 'returned_for_revision', return_comment: comment },
+				{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
+			);
+			setSuccess('Публикация возвращена на доработку!');
+			setOpenSuccess(true);
+			fetchPublications(currentPagePublications);
+			fetchPubActionHistory(pubHistoryPage);
+			setOpenReturnDialog(false);
+		} catch (err) {
+			setError('Не удалось вернуть публикацию. Попробуйте позже.');
+			setOpenError(true);
+		}
+	};
+
 	const handleOpenHistoryDrawer = () => {
 		setOpenHistoryDrawer(true);
-		fetchActionHistory(historyPage);
+		fetchPubActionHistory(pubHistoryPage);
 	};
 
 	const handleCloseHistoryDrawer = () => setOpenHistoryDrawer(false);
-
-	// Функция фильтрации записей по дате
-
 
 	return (
 		<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
@@ -691,24 +716,16 @@ function ManagerDashboard() {
 									onClose={handleCloseHistoryDrawer}
 									sx={{
 										'& .MuiDrawer-paper': {
-											width: 600, // Увеличиваем ширину для длинных названий
+											width: 600,
 											backgroundColor: '#FFFFFF',
 											boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
 											borderRadius: '16px 0 0 16px',
-
 										},
 									}}
 								>
 									<Box sx={{ p: 2, pr: 4 }}>
-										<Typography
-											variant="h6"
-											sx={{
-												color: '#1D1D1F',
-												fontWeight: 600,
-												mb: 5, // Добавляем отступ снизу (16px)
-											}}
-										>
-											История действий
+										<Typography variant="h6" sx={{ color: '#1D1D1F', fontWeight: 600, mb: 5 }}>
+											История действий с публикациями
 										</Typography>
 										<Box sx={{ display: 'flex', gap: 2, mt: 2, mb: 2 }}>
 											<AppleTextField
@@ -717,7 +734,7 @@ function ManagerDashboard() {
 												value={dateFilterRange.start}
 												onChange={(e) => {
 													setDateFilterRange((prev) => ({ ...prev, start: e.target.value }));
-													setHistoryPage(1);
+													setPubHistoryPage(1);
 												}}
 												InputLabelProps={{ shrink: true }}
 												sx={{ width: '200px' }}
@@ -728,74 +745,42 @@ function ManagerDashboard() {
 												value={dateFilterRange.end}
 												onChange={(e) => {
 													setDateFilterRange((prev) => ({ ...prev, end: e.target.value }));
-													setHistoryPage(1);
+													setPubHistoryPage(1);
 												}}
 												InputLabelProps={{ shrink: true }}
 												sx={{ width: '200px' }}
 											/>
 										</Box>
-										{actionHistory.length > 0 ? (
+										{pubActionHistory.length > 0 ? (
 											<>
 												<AppleTable
 													sx={{
 														mt: 2,
-
 														overflowX: 'auto',
 														minWidth: '100%',
-														backgroundColor: '#F5F5F7', // Затемнённый фон таблицы
-														boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)', // Тень
-														borderRadius: '8px', // Скругление всей таблицы
+														backgroundColor: '#F5F5F7',
+														boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+														borderRadius: '8px',
 													}}
 												>
 													<TableHead>
-														<TableRow
-															sx={{
-																backgroundColor: '#0071E3',
-																borderRadius: '8px 8px 0 0', // Скругление верхних углов
-															}}
-														>
-															<TableCell
-																sx={{
-																	fontWeight: 600,
-																	color: '#FFFFFF',
-																	minWidth: '200px',
-																	borderTopLeftRadius: '8px', // Скругление левого верхнего угла
-																}}
-															>
+														<TableRow sx={{ backgroundColor: '#0071E3', borderRadius: '8px 8px 0 0' }}>
+															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '200px', borderTopLeftRadius: '8px' }}>
 																Название
 															</TableCell>
-															<TableCell
-																sx={{
-																	fontWeight: 600,
-																	color: '#FFFFFF',
-																	minWidth: '120px',
-																}}
-															>
+															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '120px' }}>
 																Действие
 															</TableCell>
-															<TableCell
-																sx={{
-																	fontWeight: 600,
-																	color: '#FFFFFF',
-																	minWidth: '140px',
-																	borderTopRightRadius: '8px', // Скругление правого верхнего угла
-																}}
-															>
+															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '140px', borderTopRightRadius: '8px' }}>
 																Время
 															</TableCell>
 														</TableRow>
 													</TableHead>
-													<Fade in={true} timeout={500} key={historyTransitionKey}>
+													<Fade in={true} timeout={500} key={pubHistoryTransitionKey}>
 														<TableBody>
-															{actionHistory.map((action) => (
-																<TableRow key={action.id}>
-																	<TableCell
-																		sx={{
-																			minWidth: '200px',
-																			whiteSpace: 'normal',
-																			wordWrap: 'break-word',
-																		}}
-																	>
+															{pubActionHistory.map((action) => (
+																<TableRow key={`${action.id}-${action.timestamp}`}>
+																	<TableCell sx={{ minWidth: '200px', whiteSpace: 'normal', wordWrap: 'break-word' }}>
 																		<Typography
 																			sx={{
 																				color: '#0071E3',
@@ -804,20 +789,15 @@ function ManagerDashboard() {
 																				'&:hover': { textDecoration: 'none' },
 																			}}
 																			onClick={() => {
-																				if (action.id) {
-																					handleCloseHistoryDrawer();
-																					navigate(`/publication/${action.id}`);
-																				} else {
-																					setError('ID публикации отсутствует в записи истории.');
-																					setOpenError(true);
-																				}
+																				handleCloseHistoryDrawer();
+																				navigate(`/publication/${action.id}`);
 																			}}
 																		>
 																			{action.title}
 																		</Typography>
 																	</TableCell>
 																	<TableCell sx={{ minWidth: '120px' }}>
-																		{action.action_type === 'published' ? 'Опубликовано' : 'Возвращено на доработку'}
+																		{action.action_type === 'approved' ? 'Утверждено' : 'Возвращено на доработку'}
 																	</TableCell>
 																	<TableCell sx={{ minWidth: '140px' }}>
 																		{new Date(action.timestamp).toLocaleString('ru-RU')}
@@ -829,8 +809,8 @@ function ManagerDashboard() {
 												</AppleTable>
 												<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
 													<Pagination
-														count={totalHistoryPages}
-														page={historyPage}
+														count={totalPubHistoryPages}
+														page={pubHistoryPage}
 														onChange={handleHistoryPageChange}
 														color="primary"
 														sx={{
@@ -845,7 +825,7 @@ function ManagerDashboard() {
 											</>
 										) : (
 											<Typography sx={{ mt: 2, color: '#6E6E73' }}>
-												Нет записей в истории действий.
+												Нет записей в истории действий с публикациями.
 											</Typography>
 										)}
 									</Box>
@@ -1105,7 +1085,7 @@ function ManagerDashboard() {
 									<AppleButton
 										startIcon={<HistoryIcon />}
 										onClick={handleOpenPlanHistoryDrawer}
-										sx={{ position: 'absolute', right: 16 }} // Отступ справа 16px
+										sx={{ position: 'absolute', right: 16 }}
 									>
 										Показать историю
 									</AppleButton>
@@ -1219,7 +1199,6 @@ function ManagerDashboard() {
 										}}
 									/>
 								</Box>
-								{/* Drawer для истории действий с планами остаётся без изменений */}
 								<Drawer
 									anchor="right"
 									open={openPlanHistoryDrawer}
@@ -1521,7 +1500,7 @@ function ManagerDashboard() {
 							}}
 						>
 							<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
-								Вернуть план на доработку
+								Вернуть на доработку
 							</DialogTitle>
 							<DialogContent sx={{ padding: '24px' }}>
 								<Typography sx={{ color: '#6E6E73', mb: 2 }}>
@@ -1542,7 +1521,17 @@ function ManagerDashboard() {
 							</DialogContent>
 							<DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5EA' }}>
 								<CancelButton onClick={() => setOpenReturnDialog(false)}>Отмена</CancelButton>
-								<AppleButton onClick={handleReturnForRevision}>Отправить</AppleButton>
+								<AppleButton
+									onClick={() => {
+										if (selectedPublication) {
+											handleReturnPublicationForRevision(selectedPublication, returnComment);
+										} else if (selectedPlan) {
+											handleReturnForRevision();
+										}
+									}}
+								>
+									Отправить
+								</AppleButton>
 							</DialogActions>
 						</Dialog>
 

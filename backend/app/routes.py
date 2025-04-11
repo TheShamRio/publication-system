@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request, make_response, current_app, send_file
 from .extensions import db, login_manager, csrf
-from .models import User, Publication, Comment, Plan, PlanEntry
+from .models import User, Publication, Comment, Plan, PlanEntry, PublicationActionHistory
 from .utils import allowed_file
 from flask_login import login_user, current_user, logout_user, login_required
 from werkzeug.utils import secure_filename
@@ -136,20 +136,26 @@ def submit_for_review(pub_id):
 @login_required
 def publish_publication(pub_id):
     publication = Publication.query.get_or_404(pub_id)
-
     if current_user.role not in ['admin', 'manager']:
-        logger.warning(f"Несанкционированная попытка опубликовать публикацию {pub_id} пользователем {current_user.id} с ролью {current_user.role}")
         return jsonify({"error": "У вас нет прав для публикации этой работы."}), 403
-
     if publication.status != 'needs_review':
         return jsonify({"error": "Публикация не находится на стадии проверки."}), 400
-
     if not publication.file_url:
         return jsonify({"error": "Нельзя опубликовать работу без прикреплённого файла."}), 400
 
     publication.status = 'published'
     publication.published_at = datetime.utcnow()
     publication.returned_for_revision = False
+
+    # Добавление записи в историю
+    action = PublicationActionHistory(
+        publication_id=publication.id,
+        user_id=current_user.id,
+        action_type='approved',
+        timestamp=publication.published_at,
+        comment=None  # Комментарий можно добавить, если он передаётся в запросе
+    )
+    db.session.add(action)
 
     try:
         db.session.commit()
@@ -171,41 +177,60 @@ def publish_publication(pub_id):
 @bp.route('/publications/<int:pub_id>/return-for-revision', methods=['POST'])
 @login_required
 def return_for_revision(pub_id):
+    # Получаем публикацию или возвращаем 404, если она не найдена
     publication = Publication.query.get_or_404(pub_id)
 
+    # Проверяем права пользователя
     if current_user.role not in ['admin', 'manager']:
         logger.warning(f"Несанкционированная попытка вернуть публикацию {pub_id} на доработку пользователем {current_user.id} с ролью {current_user.role}")
         return jsonify({"error": "У вас нет прав для возврата этой работы на доработку."}), 403
 
+    # Проверяем статус публикации
     if publication.status != 'needs_review':
         return jsonify({"error": "Публикация не находится на стадии проверки."}), 400
 
-    comments = Comment.query.filter_by(publication_id=pub_id).all()
-    has_reviewer_comment = any(
-        comment.user.role in ['admin', 'manager'] or any(reply.user.role in ['admin', 'manager'] for reply in comment.replies)
-        for comment in comments
-    )
-    if not has_reviewer_comment:
+    # Читаем комментарий из тела запроса
+    data = request.get_json()
+    comment = data.get('comment', '')
+
+    # Проверяем, что комментарий не пустой
+    if not comment.strip():
         return jsonify({"error": "Необходимо добавить комментарий перед возвратом на доработку."}), 400
 
-    # Исправляем статус на 'returned_for_revision'
+    # Обновляем поля публикации
     publication.status = 'returned_for_revision'
     publication.returned_for_revision = True
     publication.published_at = None
+    publication.returned_at = datetime.utcnow()
+    publication.return_comment = comment  # Сохраняем комментарий в публикации
+
+    # Создаем запись в истории действий без 'title'
+    action = PublicationActionHistory(
+        publication_id=publication.id,
+        user_id=current_user.id,
+        action_type='returned',
+        timestamp=publication.returned_at,
+        comment=comment  # Сохраняем комментарий в истории
+    )
+    db.session.add(action)
 
     try:
+        # Фиксируем изменения в базе данных
         db.session.commit()
-        logger.debug(f"Публикация {pub_id} возвращена на доработку пользователем {current_user.id}")
+        logger.debug(f"Публикация {pub_id} возвращена на доработку пользователем {current_user.id}, returned_at: {publication.returned_at}")
         return jsonify({
             'message': 'Публикация отправлена на доработку',
             'publication': {
                 'id': publication.id,
                 'title': publication.title,
                 'status': publication.status,
-                'returned_for_revision': publication.returned_for_revision
+                'returned_for_revision': publication.returned_for_revision,
+                'returned_at': publication.returned_at.isoformat() if publication.returned_at else None,
+                'return_comment': publication.return_comment
             }
         }), 200
     except Exception as e:
+        # Откатываем изменения в случае ошибки
         db.session.rollback()
         logger.error(f"Ошибка при возврате публикации {pub_id} на доработку: {str(e)}")
         return jsonify({"error": "Ошибка при возврате на доработку. Попробуйте позже."}), 500

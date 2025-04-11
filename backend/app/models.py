@@ -114,6 +114,17 @@ class PlanActionHistory(db.Model):
 
     plan = db.relationship('Plan', backref=db.backref('action_history', lazy='dynamic'))
     user = db.relationship('User', backref='plan_actions')
+    
+class PublicationActionHistory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    publication_id = db.Column(db.Integer, db.ForeignKey('publication.id'), nullable=False)
+    action_type = db.Column(db.String(20), nullable=False)  # 'approved', 'returned'
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    comment = db.Column(db.Text, nullable=True)  # Комментарий для возврата
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)  # Кто выполнил действие
+
+    publication = db.relationship('Publication', backref=db.backref('action_history', lazy='dynamic'))
+    user = db.relationship('User', backref='publication_actions')		
 class Achievement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)

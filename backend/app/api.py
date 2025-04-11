@@ -3,7 +3,7 @@ from werkzeug.utils import secure_filename
 from flask_login import login_required, current_user
 from flask import current_app
 from app.extensions import db
-from app.models import Publication, User, Plan, PlanEntry, PlanActionHistory
+from app.models import Publication, User, Plan, PlanEntry, PlanActionHistory, PublicationActionHistory
 import os
 import logging
 from io import BytesIO
@@ -223,19 +223,17 @@ def get_publications():
 @bp.route('/admin/publications/<int:pub_id>', methods=['PUT'])
 @admin_or_manager_required
 def update_publication(pub_id):
-    # Шаг 1: Находим публикацию по ID или возвращаем 404, если не найдена
+    # Получаем публикацию или возвращаем 404
     publication = Publication.query.get_or_404(pub_id)
 
-    # Шаг 2: Обрабатываем загрузку файла, если он есть в запросе
+    # Обрабатываем загрузку файла, если есть
     if 'file' in request.files:
         file = request.files['file']
         if file and allowed_file(file.filename):
-            # Удаляем старый файл, если он существует
             if publication.file_url:
                 old_file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
                 if os.path.exists(old_file_path):
                     os.remove(old_file_path)
-            # Сохраняем новый файл с уникальным именем
             filename = secure_filename(file.filename)
             file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
             if os.path.exists(file_path):
@@ -252,38 +250,53 @@ def update_publication(pub_id):
                 logger.error(f"Ошибка при сохранении файла: {str(e)}")
                 return jsonify({"error": "Ошибка при сохранении файла. Попробуйте снова."}), 500
 
-    # Шаг 3: Получаем данные из запроса
+    # Получаем данные
     data = request.form if 'file' in request.files else request.get_json()
     publication.title = data.get('title', publication.title)
     publication.authors = data.get('authors', publication.authors)
     publication.year = int(data.get('year', publication.year))
     publication.type = data.get('type', publication.type)
     new_status = data.get('status', publication.status)
+    comment = data.get('return_comment', '')  # Комментарий для любого действия
 
-    # Шаг 4: Обновляем статус и связанные поля
-    # Если новый статус — 'published', устанавливаем published_at
-    if new_status == 'published':
-        publication.published_at = datetime.utcnow()
-        publication.returned_for_revision = False
-        publication.returned_at = None
-        publication.return_comment = None
-    # Если новый статус — 'returned_for_revision', устанавливаем returned_at
-    elif new_status == 'returned_for_revision':
-        publication.returned_for_revision = True
-        publication.returned_at = datetime.utcnow()
-        publication.return_comment = data.get('return_comment', '')
-    # Если статус меняется с 'published' или 'returned_for_revision' на другой, сбрасываем временные метки
-    elif new_status not in ['published', 'returned_for_revision'] and publication.status in ['published', 'returned_for_revision']:
-        publication.published_at = None
-        publication.returned_at = None
-        publication.return_comment = None
-        publication.returned_for_revision = False
+    # Записываем действие в историю при смене статуса
+    if new_status != publication.status:
+        timestamp = datetime.utcnow()  # Время действия
+        if new_status == 'published':
+            publication.published_at = timestamp
+            publication.returned_for_revision = False
+            publication.returned_at = None
+            publication.return_comment = None
+            action_type = 'published'  # Исправляем на логичное значение
+        elif new_status == 'returned_for_revision':
+            publication.returned_for_revision = True
+            publication.returned_at = timestamp
+            publication.return_comment = comment
+            action_type = 'returned'
+        else:
+            # Для других статусов (например, 'needs_review')
+            action_type = new_status  # Используем новый статус как тип действия
+            if publication.status in ['published', 'returned_for_revision']:
+                publication.published_at = None
+                publication.returned_at = None
+                publication.return_comment = None
+                publication.returned_for_revision = False
+
+        # Создаем запись в истории
+        action = PublicationActionHistory(
+            publication_id=publication.id,
+            user_id=current_user.id,
+            action_type=action_type,
+            timestamp=timestamp,
+            comment=comment if comment.strip() else None  # Записываем комментарий, если он не пустой
+        )
+        db.session.add(action)
 
     publication.status = new_status
 
-    # Шаг 5: Сохраняем изменения в базе данных
     try:
         db.session.commit()
+        logger.debug(f"Публикация {pub_id} обновлена пользователем {current_user.id}, новый статус: {new_status}")
         return jsonify({
             'message': 'Публикация успешно обновлена',
             'publication': publication.to_dict()
@@ -604,73 +617,46 @@ def get_needs_review_plans():
 
 from sqlalchemy import case, or_, desc, func
 
-@bp.route('/admin/manager-action-history', methods=['GET'])
+@bp.route('/admin/publication-action-history', methods=['GET'])
 @admin_or_manager_required
-def get_manager_action_history():
-    # Получаем параметры пагинации и фильтрации по датам
+def get_publication_action_history():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
     start_date = request.args.get('start_date', type=str)
     end_date = request.args.get('end_date', type=str)
 
-    # Базовый запрос с фильтром по статусам
-    query = Publication.query.filter(
-        or_(Publication.status == 'published', Publication.status == 'returned_for_revision')
+    query = PublicationActionHistory.query.join(Publication).filter(
+        PublicationActionHistory.action_type.in_(['approved', 'returned'])
     )
 
-    # Определяем время действия
-    action_time = func.coalesce(
-        case(
-            (Publication.status == 'published', Publication.published_at),
-            (Publication.status == 'returned_for_revision', Publication.returned_at),
-            else_=None
-        ),
-        Publication.updated_at
-    ).label('action_time')
-
-    # Добавляем фильтрацию по диапазону дат, если параметры переданы
     if start_date:
         try:
-            start_datetime = datetime.fromisoformat(start_date.replace('Z', '+00:00'))
-            query = query.filter(action_time >= start_datetime)
-        except ValueError as e:
-            logger.error(f"Некорректный формат start_date: {start_date}, ошибка: {str(e)}")
+            start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
+            query = query.filter(PublicationActionHistory.timestamp >= start_datetime)
+        except ValueError:
             return jsonify({"error": "Некорректный формат даты начала"}), 400
 
     if end_date:
         try:
-            end_datetime = datetime.fromisoformat(end_date.replace('Z', '+00:00'))
-            query = query.filter(action_time <= end_datetime)
-        except ValueError as e:
-            logger.error(f"Некорректный формат end_date: {end_date}, ошибка: {str(e)}")
+            end_datetime = datetime.strptime(end_date, '%Y-%m-%d')
+            query = query.filter(PublicationActionHistory.timestamp <= end_datetime)
+        except ValueError:
             return jsonify({"error": "Некорректный формат даты окончания"}), 400
 
-    # Применяем сортировку по времени действия
-    query = query.order_by(desc(action_time))
+    query = query.order_by(db.desc(PublicationActionHistory.timestamp))
+    paginated_actions = query.paginate(page=page, per_page=per_page, error_out=False)
 
-    # Логируем запрос для отладки
-    logger.debug(f"Сгенерированный SQL-запрос: {query.statement.compile(compile_kwargs={'literal_binds': True})}")
+    history = [{
+        'id': action.publication_id,
+        'title': action.publication.title,
+        'action_type': action.action_type,
+        'timestamp': action.timestamp.isoformat(),
+        'comment': action.comment,
+        'user_full_name': action.user.full_name if action.user else "Не указан"
+    } for action in paginated_actions.items]
 
-    # Пагинация
-    paginated_publications = query.paginate(page=page, per_page=per_page, error_out=False)
-
-    # Формируем историю действий
-    history = []
-    for pub in paginated_publications.items:
-        action_type = 'published' if pub.status == 'published' else 'returned_for_revision'
-        timestamp = pub.published_at if pub.status == 'published' else pub.returned_at
-        logger.debug(f"Публикация ID={pub.id}, статус={pub.status}, timestamp={timestamp}")
-        history.append({
-            'id': pub.id,
-            'title': pub.title,
-            'action_type': action_type,
-            'timestamp': timestamp.isoformat() if timestamp else pub.updated_at.isoformat(),
-            'comment': pub.return_comment if action_type == 'returned_for_revision' else None
-        })
-
-    # Возвращаем результат
     return jsonify({
         'history': history,
-        'pages': paginated_publications.pages,
-        'total': paginated_publications.total
+        'pages': paginated_actions.pages,
+        'total': paginated_actions.total
     }), 200
