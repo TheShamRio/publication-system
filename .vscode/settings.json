@@ -1,0 +1,7 @@
+{
+	"Codegeex.GenerationPreference": "automatic",
+	"Codegeex.Chat.LanguagePreference": "Russian",
+	"Codegeex.CommitMessage.LanguagePreference": "Russian",
+	"Codegeex.CommitMessageStyle": "Auto",
+	"Codegeex.Comment.LanguagePreference": "Russian"
+}
