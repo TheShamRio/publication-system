@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import {
 	Container,
 	Typography,
+	LinearProgress,
 	Card as AppleCard,
 	Tabs,
 	Tab,
@@ -636,9 +637,6 @@ function ManagerDashboard() {
 
 	const handleCloseHistoryDrawer = () => setOpenHistoryDrawer(false);
 
-	// Компонент UserStatisticsChart
-	// Компонент для отображения статистики пользователя
-	// Компонент для отображения статистики пользователя
 	const UserStatisticsChart = ({ user }) => {
 		// Шаг 1: Безопасная проверка данных
 		const safeUser = user || { plan: {}, actual: {}, username: '' };
@@ -685,8 +683,13 @@ function ManagerDashboard() {
 			},
 		];
 
+		// Шаг 5: Вычисляем прогресс выполнения плана
+		const totalPlan = data[0].План; // Общее количество по плану
+		const totalActual = data[0].Факт; // Общее количество по факту
+		const progress = totalPlan > 0 ? (totalActual / totalPlan) * 100 : 0; // Прогресс в процентах
+
 		return (
-			// Шаг 5: Основной контейнер с flex-лейаутом
+			// Шаг 6: Основной контейнер с flex-лейаутом
 			<Box
 				sx={{
 					mt: 2,
@@ -713,52 +716,87 @@ function ManagerDashboard() {
 							<XAxis dataKey="name" />
 							<YAxis allowDecimals={false} />
 							<Legend />
-							<Bar dataKey="План" fill="#0071E3" />
-							<Bar dataKey="Факт" fill="#00A94F" />
+							{/* Устанавливаем ширину столбцов через barSize */}
+							<Bar dataKey="План" fill="#0071E3" barSize={20} />
+							<Bar dataKey="Факт" fill="#00A94F" barSize={20} />
 						</BarChart>
 					</ResponsiveContainer>
 				</Box>
 
-				{/* Текстовый блок с данными */}
-				<Box
-					sx={{
-						width: '60%',
-						display: 'flex',
-						gap: 4,
-						backgroundColor: '#FFFFFF',
-						border: '1px solid #D1D1D6',
-						borderRadius: '8px',
-						p: 2,
-						boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-					}}
-				>
-					{/* Колонка для Плана */}
-					<Box sx={{ flex: 1 }}>
-						<Typography sx={{ fontWeight: 600, color: '#0071E3', mb: 1 }}>
-							План
+				{/* Контейнер для прогресса и текстового блока */}
+				<Box sx={{ width: '60%' }}>
+					{/* Прогресс выполнения */}
+					<Typography sx={{ mb: 1, color: '#1D1D1F' }}>
+						Прогресс выполнения:
+					</Typography>
+					<Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+						<LinearProgress
+							variant="determinate"
+							value={Math.min(progress, 100)} // Ограничиваем прогресс 100%
+							sx={{
+								height: 8, // Высота прогресс-бара
+								borderRadius: 4, // Закругление углов
+								flexGrow: 1, // Занимает доступное пространство
+								backgroundColor: '#E5E5EA', // Цвет фона (незаполненная часть)
+								'& .MuiLinearProgress-bar': {
+									backgroundColor: progress > 100 ? '#FF9500' : '#34C759', // Цвет заполненной части (зелёный или оранжевый при превышении)
+								},
+							}}
+						/>
+						<Typography
+							variant="body2"
+							sx={{
+								minWidth: '50px',
+								textAlign: 'right',
+								color: progress > 100 ? '#FF9500' : '#1D1D1F', // Оранжевый цвет текста, если прогресс > 100%
+							}}
+						>
+							{Math.round(progress)}%
 						</Typography>
-						{Object.entries(data[0].planDetails).map(([key, value]) => (
-							<Typography key={key} sx={{ color: '#1D1D1F' }}>
-								{key}: {value}
-							</Typography>
-						))}
 					</Box>
 
-					{/* Колонка для Факта */}
-					<Box sx={{ flex: 1 }}>
-						<Typography sx={{ fontWeight: 600, color: '#00A94F', mb: 1 }}>
-							Факт
-						</Typography>
-						{Object.entries(data[0].actualDetails).map(([key, value]) => (
-							<Typography key={key} sx={{ color: '#1D1D1F' }}>
-								{key}: {value}
+					{/* Текстовый блок с данными */}
+					<Box
+						sx={{
+							display: 'flex',
+							gap: 4,
+							backgroundColor: '#FFFFFF',
+							border: '1px solid #D1D1D6',
+							borderRadius: '8px',
+							p: 2,
+							boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+							transform: 'translateY(-2px)', // Смещение вверх на 2 пикселя (из предыдущего запроса)
+						}}
+					>
+						{/* Колонка для Плана */}
+						<Box sx={{ flex: 1 }}>
+							<Typography sx={{ fontWeight: 600, color: '#0071E3', mb: 1 }}>
+								План
 							</Typography>
-						))}
+							{Object.entries(data[0].planDetails).map(([key, value]) => (
+								<Typography key={key} sx={{ color: '#1D1D1F' }}>
+									{key}: {value}
+								</Typography>
+							))}
+						</Box>
+
+						{/* Колонка для Факта */}
+						<Box sx={{ flex: 1 }}>
+							<Typography sx={{ fontWeight: 600, color: '#00A94F', mb: 1 }}>
+								Факт
+							</Typography>
+							{Object.entries(data[0].actualDetails).map(([key, value]) => (
+								<Typography key={key} sx={{ color: '#1D1D1F' }}>
+									{key}: {value}
+								</Typography>
+							))}
+						</Box>
 					</Box>
 				</Box>
 			</Box>
 		);
 	};
+
 
 	return (
 		<>
