@@ -1429,7 +1429,7 @@ function Dashboard() {
 			// Находим первую запись без publication_id
 			const entryToLink = entryGroup.entries.find((entry) => !entry.publication_id);
 			if (!entryToLink) {
-				setError('Нет доступных записей для привязки');
+				setError('Вы уже привязали планируемое количество работ этого типа');
 				setOpenError(true);
 				return;
 			}

@@ -147,7 +147,7 @@ function ManagerDashboard() {
 	const [publications, setPublications] = useState([]);
 	const [plans, setPlans] = useState([]);
 	const [statistics, setStatistics] = useState([]);
-	const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
+	const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
 	const [currentPagePublications, setCurrentPagePublications] = useState(1);
 	const [currentPagePlans, setCurrentPagePlans] = useState(1);
 	const [dateFilterRange, setDateFilterRange] = useState({ start: '', end: '' });
@@ -638,33 +638,55 @@ function ManagerDashboard() {
 
 	// Компонент UserStatisticsChart
 	// Компонент для отображения статистики пользователя
+	// Компонент для отображения статистики пользователя
 	const UserStatisticsChart = ({ user }) => {
-		// Шаг 1: Безопасная проверка данных с дефолтными значениями
-		const safeUser = user || { plan: {}, actual: {} };
+		// Шаг 1: Безопасная проверка данных
+		const safeUser = user || { plan: {}, actual: {}, username: '' };
 		const plan = safeUser.plan || { article: 0, monograph: 0, conference: 0 };
 		const actual = safeUser.actual || { article: 0, monograph: 0, conference: 0 };
 
-		// Шаг 2: Формируем данные для диаграммы и текстового блока
+		// Шаг 2: Проверка наличия плана
+		const hasPlan =
+			(plan.article || 0) > 0 ||
+			(plan.monograph || 0) > 0 ||
+			(plan.conference || 0) > 0;
+
+		// Если плана нет, показываем сообщение
+		if (!hasPlan) {
+			return (
+				<Box sx={{ mt: 2, textAlign: 'center' }}>
+					<Typography sx={{ color: '#6E6E73' }}>
+						У пользователя не создан или не утверждён план на этот год.
+					</Typography>
+				</Box>
+			);
+		}
+
+		// Шаг 3: Определяем типы, присутствующие в плане
+		const planTypes = [];
+		if (plan.article > 0) planTypes.push('article');
+		if (plan.monograph > 0) planTypes.push('monograph');
+		if (plan.conference > 0) planTypes.push('conference');
+
+		// Шаг 4: Формируем данные для диаграммы и текстового блока
 		const data = [
 			{
 				name: 'Итог',
-				План: (plan.article || 0) + (plan.monograph || 0) + (plan.conference || 0),
-				Факт: (actual.article || 0) + (actual.monograph || 0) + (actual.conference || 0),
-				planDetails: {
-					Статьи: plan.article || 0,
-					Монографии: plan.monograph || 0,
-					Доклады: plan.conference || 0,
-				},
-				actualDetails: {
-					Статьи: actual.article || 0,
-					Монографии: actual.monograph || 0,
-					Доклады: actual.conference || 0,
-				},
+				План: planTypes.reduce((sum, type) => sum + (plan[type] || 0), 0),
+				Факт: planTypes.reduce((sum, type) => sum + (actual[type] || 0), 0),
+				planDetails: planTypes.reduce((obj, type) => {
+					obj[type === 'article' ? 'Статьи' : type === 'monograph' ? 'Монографии' : 'Доклады'] = plan[type] || 0;
+					return obj;
+				}, {}),
+				actualDetails: planTypes.reduce((obj, type) => {
+					obj[type === 'article' ? 'Статьи' : type === 'monograph' ? 'Монографии' : 'Доклады'] = actual[type] || 0;
+					return obj;
+				}, {}),
 			},
 		];
 
 		return (
-			// Шаг 3: Основной контейнер с flex-лейаутом
+			// Шаг 5: Основной контейнер с flex-лейаутом
 			<Box
 				sx={{
 					mt: 2,
@@ -674,12 +696,12 @@ function ManagerDashboard() {
 					alignItems: 'center',
 				}}
 			>
-				{/* Шаг 4: Контейнер для диаграммы (примерно половина ширины) */}
+				{/* Контейнер для диаграммы */}
 				<Box
 					sx={{
-						width: '40%', // Уменьшено в ~2 раза относительно полной ширины
+						width: '40%',
 						height: '100%',
-						minWidth: 200, // Минимальная ширина для читаемости
+						minWidth: 200,
 					}}
 				>
 					<ResponsiveContainer width="100%" height="100%">
@@ -697,7 +719,7 @@ function ManagerDashboard() {
 					</ResponsiveContainer>
 				</Box>
 
-				{/* Шаг 5: Текстовый блок с данными (План и Факт рядом) */}
+				{/* Текстовый блок с данными */}
 				<Box
 					sx={{
 						width: '60%',
@@ -715,15 +737,11 @@ function ManagerDashboard() {
 						<Typography sx={{ fontWeight: 600, color: '#0071E3', mb: 1 }}>
 							План
 						</Typography>
-						<Typography sx={{ color: '#1D1D1F' }}>
-							Статьи: {data[0].planDetails.Статьи}
-						</Typography>
-						<Typography sx={{ color: '#1D1D1F' }}>
-							Монографии: {data[0].planDetails.Монографии}
-						</Typography>
-						<Typography sx={{ color: '#1D1D1F' }}>
-							Доклады: {data[0].planDetails.Доклады}
-						</Typography>
+						{Object.entries(data[0].planDetails).map(([key, value]) => (
+							<Typography key={key} sx={{ color: '#1D1D1F' }}>
+								{key}: {value}
+							</Typography>
+						))}
 					</Box>
 
 					{/* Колонка для Факта */}
@@ -731,15 +749,11 @@ function ManagerDashboard() {
 						<Typography sx={{ fontWeight: 600, color: '#00A94F', mb: 1 }}>
 							Факт
 						</Typography>
-						<Typography sx={{ color: '#1D1D1F' }}>
-							Статьи: {data[0].actualDetails.Статьи}
-						</Typography>
-						<Typography sx={{ color: '#1D1D1F' }}>
-							Монографии: {data[0].actualDetails.Монографии}
-						</Typography>
-						<Typography sx={{ color: '#1D1D1F' }}>
-							Доклады: {data[0].actualDetails.Доклады}
-						</Typography>
+						{Object.entries(data[0].actualDetails).map(([key, value]) => (
+							<Typography key={key} sx={{ color: '#1D1D1F' }}>
+								{key}: {value}
+							</Typography>
+						))}
 					</Box>
 				</Box>
 			</Box>
@@ -1041,17 +1055,40 @@ function ManagerDashboard() {
 									</Typography>
 									<Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 4 }}>
 										<AppleTextField
-											select
 											label="Год"
+											type="number"
 											value={selectedYear}
-											onChange={(e) => setSelectedYear(e.target.value)}
-											sx={{ width: 200 }}
-										>
-											{[...Array(5)].map((_, i) => {
-												const year = new Date().getFullYear() - i;
-												return <MenuItem key={year} value={year.toString()}>{year}</MenuItem>;
-											})}
-										</AppleTextField>
+											onChange={(e) => {
+												const value = e.target.value;
+												if (value === '') {
+													setSelectedYear('');
+													return;
+												}
+												const numValue = parseInt(value, 10);
+												if (!isNaN(numValue) && numValue >= 1900 && numValue <= new Date().getFullYear() + 1) {
+													setSelectedYear(numValue);
+													console.log(`Год изменён: ${numValue}`); // Обновляем лог
+												}
+											}}
+											onBlur={() => {
+												if (!selectedYear || selectedYear < 1900 || selectedYear > new Date().getFullYear() + 1) {
+													setSelectedYear(new Date().getFullYear());
+													console.log(`Год сброшен на текущий: ${new Date().getFullYear()}`);
+												}
+											}}
+											InputProps={{
+												inputProps: { min: 1900, max: new Date().getFullYear() + 1 }, // Оставляем ограничения для стандартных стрелок
+											}}
+											sx={{
+												width: 200, '& .MuiOutlinedInput-root': {
+													height: '40px',
+													padding: '0 14px',
+													'& input': {
+														padding: '12px 0',
+													},
+												},
+											}}
+										/>
 										<AppleTextField
 											label="Поиск по ФИО"
 											value={nameSearchQuery}
@@ -1059,22 +1096,19 @@ function ManagerDashboard() {
 											sx={{
 												width: 300,
 												'& .MuiOutlinedInput-root': {
-													height: '40px', // Уменьшаем высоту поля
-													padding: '0 14px', // Уменьшаем внутренние отступы для текста
+													height: '40px',
+													padding: '0 14px',
 													'& input': {
-														padding: '12px 0', // Устанавливаем отступы для текста ввода
+														padding: '12px 0',
 													},
 												},
 												'& .MuiInputLabel-outlined': {
-													// Корректируем положение метки в неактивном состоянии
-													transform: 'translate(14px, 9px) scale(1)', // Сдвигаем метку чуть выше из-за уменьшенной высоты
+													transform: 'translate(14px, 9px) scale(1)',
 												},
 												'& .MuiInputLabel-outlined.Mui-focused': {
-													// Положение метки при фокусе
 													transform: 'translate(14px, -6px) scale(0.75)',
 												},
 												'& .MuiInputLabel-outlined.MuiFormLabel-filled': {
-													// Положение метки при заполненном поле
 													transform: 'translate(14px, -6px) scale(0.75)',
 												},
 											}}
@@ -1089,11 +1123,7 @@ function ManagerDashboard() {
 									) : statistics.length > 0 ? (
 										<TransitionGroup>
 											{sortAndFilterStatistics(statistics, nameSearchQuery).map((user) => (
-												<CSSTransition
-													key={user.user_id}
-													timeout={300}
-													classNames="accordion"
-												>
+												<CSSTransition key={user.user_id} timeout={300} classNames="accordion">
 													<Accordion
 														defaultExpanded={false}
 														sx={{
@@ -1111,12 +1141,14 @@ function ManagerDashboard() {
 																'& .MuiAccordionSummary-content': { alignItems: 'center' },
 															}}
 														>
-															<Typography
-																variant="h6"
-																sx={{ color: '#1D1D1F', fontWeight: 600 }}
-															>
-																{user.full_name || 'Пользователь не указан'}
-															</Typography>
+															<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+																<Typography variant="h6" sx={{ color: '#1D1D1F', fontWeight: 600 }}>
+																	{user.full_name || 'Пользователь не указан'}
+																</Typography>
+																<Typography variant="h6" sx={{ color: '#6E6E73', fontWeight: 400 }}>
+																	({user.username || 'логин отсутствует'})
+																</Typography>
+															</Box>
 														</AccordionSummary>
 														<AccordionDetails sx={{ backgroundColor: '#FFFFFF', borderRadius: '0 0 16px 16px' }}>
 															<UserStatisticsChart user={user} />
