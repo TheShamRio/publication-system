@@ -30,7 +30,7 @@ import {
 	AccordionSummary,
 	AccordionDetails,
 } from '@mui/material';
-import { styled } from '@mui/system';
+import { styled, GlobalStyles } from '@mui/system';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DownloadIcon from '@mui/icons-material/Download';
 import CheckIcon from '@mui/icons-material/Check';
@@ -42,11 +42,13 @@ import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import HistoryIcon from '@mui/icons-material/History';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
+import { TransitionGroup, CSSTransition } from 'react-transition-group';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import StatusChip from './StatusChip';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 
-// Стили
+// Стили компонентов
 const AppleTextField = styled(TextField)({
 	'& .MuiOutlinedInput-root': {
 		borderRadius: '12px',
@@ -108,6 +110,32 @@ const CancelButton = styled(Button)({
 	'&:hover': { backgroundColor: '#C7C7CC', boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)' },
 });
 
+// Глобальные стили для анимации аккордеонов
+const animationStyles = (
+	<GlobalStyles
+		styles={{
+			'.accordion-enter': {
+				opacity: 0,
+				transform: 'translateY(20px)',
+			},
+			'.accordion-enter-active': {
+				opacity: 1,
+				transform: 'translateY(0)',
+				transition: 'opacity 300ms ease, transform 300ms ease',
+			},
+			'.accordion-exit': {
+				opacity: 1,
+				transform: 'translateY(0)',
+			},
+			'.accordion-exit-active': {
+				opacity: 0,
+				transform: 'translateY(20px)',
+				transition: 'opacity 300ms ease, transform 300ms ease',
+			},
+		}}
+	/>
+);
+
 // Регулярные выражения для проверки ФИО
 const namePartRegex = /^[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?$/;
 const fullNameRegex = /^[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?\s[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?\s[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?$/;
@@ -118,6 +146,8 @@ function ManagerDashboard() {
 	const [value, setValue] = useState(0);
 	const [publications, setPublications] = useState([]);
 	const [plans, setPlans] = useState([]);
+	const [statistics, setStatistics] = useState([]);
+	const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
 	const [currentPagePublications, setCurrentPagePublications] = useState(1);
 	const [currentPagePlans, setCurrentPagePlans] = useState(1);
 	const [dateFilterRange, setDateFilterRange] = useState({ start: '', end: '' });
@@ -126,6 +156,7 @@ function ManagerDashboard() {
 	const [searchQuery, setSearchQuery] = useState('');
 	const [statusFilter, setStatusFilter] = useState('needs_review');
 	const [loadingInitial, setLoadingInitial] = useState(true);
+	const [loadingStatistics, setLoadingStatistics] = useState(false);
 	const [openEditDialog, setOpenEditDialog] = useState(false);
 	const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
 	const [publicationToDelete, setPublicationToDelete] = useState(null);
@@ -148,23 +179,52 @@ function ManagerDashboard() {
 	const [showPassword, setShowPassword] = useState(false);
 	const [openReturnDialog, setOpenReturnDialog] = useState(false);
 	const [selectedPlan, setSelectedPlan] = useState(null);
+	const [selectedPublication, setSelectedPublication] = useState(null);
 	const [returnComment, setReturnComment] = useState('');
 	const [lastNameError, setLastNameError] = useState('');
 	const [firstNameError, setFirstNameError] = useState('');
 	const [middleNameError, setMiddleNameError] = useState('');
 	const [openHistoryDrawer, setOpenHistoryDrawer] = useState(false);
+	const [openPlanHistoryDrawer, setOpenPlanHistoryDrawer] = useState(false);
 	const [publicationsTransitionKey, setPublicationsTransitionKey] = useState(0);
 	const [plansTransitionKey, setPlansTransitionKey] = useState(0);
-	const [planActionHistory, setPlanActionHistory] = useState([]);
-	const [planHistoryPage, setPlanHistoryPage] = useState(1);
-	const [totalPlanHistoryPages, setTotalPlanHistoryPages] = useState(1);
-	const [openPlanHistoryDrawer, setOpenPlanHistoryDrawer] = useState(false);
-	const [planHistoryTransitionKey, setPlanHistoryTransitionKey] = useState(0);
 	const [pubActionHistory, setPubActionHistory] = useState([]);
 	const [pubHistoryPage, setPubHistoryPage] = useState(1);
 	const [totalPubHistoryPages, setTotalPubHistoryPages] = useState(1);
 	const [pubHistoryTransitionKey, setPubHistoryTransitionKey] = useState(0);
-	const [selectedPublication, setSelectedPublication] = useState(null);
+	const [planActionHistory, setPlanActionHistory] = useState([]);
+	const [planHistoryPage, setPlanHistoryPage] = useState(1);
+	const [totalPlanHistoryPages, setTotalPlanHistoryPages] = useState(1);
+	const [planHistoryTransitionKey, setPlanHistoryTransitionKey] = useState(0);
+	// Новое состояние для поиска по ФИО
+	const [nameSearchQuery, setNameSearchQuery] = useState('');
+
+	// Функция сортировки и фильтрации статистики
+	const sortAndFilterStatistics = (stats, query) => {
+		if (!query.trim()) return stats;
+
+		const normalizedQuery = query.trim().toLowerCase();
+
+		return [...stats]
+			.filter((user) =>
+				user.full_name.toLowerCase().includes(normalizedQuery)
+			)
+			.sort((a, b) => {
+				const aName = a.full_name.toLowerCase();
+				const bName = b.full_name.toLowerCase();
+
+				const aStartsWith = aName.startsWith(normalizedQuery);
+				const bStartsWith = bName.startsWith(normalizedQuery);
+				if (aStartsWith && !bStartsWith) return -1;
+				if (!aStartsWith && bStartsWith) return 1;
+
+				const aIndex = aName.indexOf(normalizedQuery);
+				const bIndex = bName.indexOf(normalizedQuery);
+				if (aIndex !== bIndex) return aIndex - bIndex;
+
+				return aName.localeCompare(bName);
+			});
+	};
 
 	// Эффект для автоматического закрытия уведомлений
 	useEffect(() => {
@@ -209,6 +269,24 @@ function ManagerDashboard() {
 		const value = e.target.value;
 		setNewMiddleName(value);
 		setMiddleNameError(validateNamePart(value, 'Отчество'));
+	};
+
+	const fetchStatistics = async (year) => {
+		setLoadingStatistics(true);
+		try {
+			const response = await axios.get('http://localhost:5000/admin_api/admin/statistics', {
+				withCredentials: true,
+				headers: { 'X-CSRFToken': csrfToken },
+				params: { year },
+			});
+			setStatistics(response.data);
+		} catch (err) {
+			console.error('Ошибка загрузки статистики:', err);
+			setError('Не удалось загрузить статистику. Попробуйте позже.');
+			setOpenError(true);
+		} finally {
+			setLoadingStatistics(false);
+		}
 	};
 
 	const fetchPlanActionHistory = async (page, startDate = '', endDate = '') => {
@@ -320,6 +398,13 @@ function ManagerDashboard() {
 	useEffect(() => {
 		fetchPlans(currentPagePlans);
 	}, [currentPagePlans]);
+
+	// Загрузка статистики
+	useEffect(() => {
+		if (value === 1) {
+			fetchStatistics(selectedYear);
+		}
+	}, [value, selectedYear]);
 
 	// Обработчики
 	const handleTabChange = (event, newValue) => setValue(newValue);
@@ -551,1020 +636,1204 @@ function ManagerDashboard() {
 
 	const handleCloseHistoryDrawer = () => setOpenHistoryDrawer(false);
 
-	return (
-		<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
-			<AppleCard elevation={4} sx={{ p: 4, borderRadius: '16px', backgroundColor: '#FFFFFF' }}>
-				<Typography variant="h4" sx={{ color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
-					Панель управляющего
-				</Typography>
-				<Tabs
-					value={value}
-					onChange={handleTabChange}
-					centered
+	// Компонент UserStatisticsChart
+	// Компонент для отображения статистики пользователя
+	const UserStatisticsChart = ({ user }) => {
+		// Шаг 1: Безопасная проверка данных с дефолтными значениями
+		const safeUser = user || { plan: {}, actual: {} };
+		const plan = safeUser.plan || { article: 0, monograph: 0, conference: 0 };
+		const actual = safeUser.actual || { article: 0, monograph: 0, conference: 0 };
+
+		// Шаг 2: Формируем данные для диаграммы и текстового блока
+		const data = [
+			{
+				name: 'Итог',
+				План: (plan.article || 0) + (plan.monograph || 0) + (plan.conference || 0),
+				Факт: (actual.article || 0) + (actual.monograph || 0) + (actual.conference || 0),
+				planDetails: {
+					Статьи: plan.article || 0,
+					Монографии: plan.monograph || 0,
+					Доклады: plan.conference || 0,
+				},
+				actualDetails: {
+					Статьи: actual.article || 0,
+					Монографии: actual.monograph || 0,
+					Доклады: actual.conference || 0,
+				},
+			},
+		];
+
+		return (
+			// Шаг 3: Основной контейнер с flex-лейаутом
+			<Box
+				sx={{
+					mt: 2,
+					height: 200,
+					display: 'flex',
+					gap: 2,
+					alignItems: 'center',
+				}}
+			>
+				{/* Шаг 4: Контейнер для диаграммы (примерно половина ширины) */}
+				<Box
 					sx={{
-						mb: 4,
-						'& .MuiTab-root': { color: '#6E6E73', fontWeight: 600 },
-						'& .MuiTab-root.Mui-selected': { color: '#0071E3' },
-						'& .MuiTabs-indicator': { backgroundColor: '#0071E3' },
+						width: '40%', // Уменьшено в ~2 раза относительно полной ширины
+						height: '100%',
+						minWidth: 200, // Минимальная ширина для читаемости
 					}}
 				>
-					<Tab label="Работы на проверке" />
-					<Tab label="Статистика по кафедре" />
-					<Tab label="Регистрация пользователей" />
-					<Tab label="Работа с планами" />
-				</Tabs>
+					<ResponsiveContainer width="100%" height="100%">
+						<BarChart
+							data={data}
+							margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
+						>
+							<CartesianGrid strokeDasharray="3 3" />
+							<XAxis dataKey="name" />
+							<YAxis allowDecimals={false} />
+							<Legend />
+							<Bar dataKey="План" fill="#0071E3" />
+							<Bar dataKey="Факт" fill="#00A94F" />
+						</BarChart>
+					</ResponsiveContainer>
+				</Box>
 
-				{loadingInitial ? (
-					<Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-						<CircularProgress sx={{ color: '#0071E3' }} />
+				{/* Шаг 5: Текстовый блок с данными (План и Факт рядом) */}
+				<Box
+					sx={{
+						width: '60%',
+						display: 'flex',
+						gap: 4,
+						backgroundColor: '#FFFFFF',
+						border: '1px solid #D1D1D6',
+						borderRadius: '8px',
+						p: 2,
+						boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+					}}
+				>
+					{/* Колонка для Плана */}
+					<Box sx={{ flex: 1 }}>
+						<Typography sx={{ fontWeight: 600, color: '#0071E3', mb: 1 }}>
+							План
+						</Typography>
+						<Typography sx={{ color: '#1D1D1F' }}>
+							Статьи: {data[0].planDetails.Статьи}
+						</Typography>
+						<Typography sx={{ color: '#1D1D1F' }}>
+							Монографии: {data[0].planDetails.Монографии}
+						</Typography>
+						<Typography sx={{ color: '#1D1D1F' }}>
+							Доклады: {data[0].planDetails.Доклады}
+						</Typography>
 					</Box>
-				) : (
-					<>
-						{value === 0 && (
-							<>
-								<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
-									Работы на проверке
-								</Typography>
-								<AppleCard sx={{ mt: 2, mb: 2, p: 2, backgroundColor: '#F5F5F7', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
-									<AppleTextField
-										fullWidth
-										label="Поиск по названию, авторам или году"
-										value={searchQuery}
-										onChange={handleSearchChange}
-										margin="normal"
-										variant="outlined"
-									/>
-									<Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 2 }}>
+
+					{/* Колонка для Факта */}
+					<Box sx={{ flex: 1 }}>
+						<Typography sx={{ fontWeight: 600, color: '#00A94F', mb: 1 }}>
+							Факт
+						</Typography>
+						<Typography sx={{ color: '#1D1D1F' }}>
+							Статьи: {data[0].actualDetails.Статьи}
+						</Typography>
+						<Typography sx={{ color: '#1D1D1F' }}>
+							Монографии: {data[0].actualDetails.Монографии}
+						</Typography>
+						<Typography sx={{ color: '#1D1D1F' }}>
+							Доклады: {data[0].actualDetails.Доклады}
+						</Typography>
+					</Box>
+				</Box>
+			</Box>
+		);
+	};
+
+	return (
+		<>
+			{animationStyles}
+			<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
+				<AppleCard elevation={4} sx={{ p: 4, borderRadius: '16px', backgroundColor: '#FFFFFF' }}>
+					<Typography variant="h4" sx={{ color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
+						Панель управляющего
+					</Typography>
+					<Tabs
+						value={value}
+						onChange={handleTabChange}
+						centered
+						sx={{
+							mb: 4,
+							'& .MuiTab-root': { color: '#6E6E73', fontWeight: 600 },
+							'& .MuiTab-root.Mui-selected': { color: '#0071E3' },
+							'& .MuiTabs-indicator': { backgroundColor: '#0071E3' },
+						}}
+					>
+						<Tab label="Работы на проверке" />
+						<Tab label="Статистика по кафедре" />
+						<Tab label="Регистрация пользователей" />
+						<Tab label="Работа с планами" />
+					</Tabs>
+
+					{loadingInitial ? (
+						<Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+							<CircularProgress sx={{ color: '#0071E3' }} />
+						</Box>
+					) : (
+						<>
+							{value === 0 && (
+								<>
+									<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
+										Работы на проверке
+									</Typography>
+									<AppleCard sx={{ mt: 2, mb: 2, p: 2, backgroundColor: '#F5F5F7', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
 										<AppleTextField
-											select
-											label="Фильтр по статусу"
-											value={statusFilter}
-											onChange={handleStatusFilterChange}
+											fullWidth
+											label="Поиск по названию, авторам или году"
+											value={searchQuery}
+											onChange={handleSearchChange}
 											margin="normal"
 											variant="outlined"
-											sx={{ width: '200px' }}
+										/>
+										<Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mt: 2 }}>
+											<AppleTextField
+												select
+												label="Фильтр по статусу"
+												value={statusFilter}
+												onChange={handleStatusFilterChange}
+												margin="normal"
+												variant="outlined"
+												sx={{ width: '200px' }}
+											>
+												<MenuItem value="needs_review">На проверке</MenuItem>
+												<MenuItem value="returned_for_revision">Отправлено на доработку</MenuItem>
+												<MenuItem value="published">Опубликовано</MenuItem>
+											</AppleTextField>
+											<AppleButton startIcon={<HistoryIcon />} onClick={handleOpenHistoryDrawer} sx={{ height: 'fit-content', marginTop: '6px' }}>
+												Показать историю
+											</AppleButton>
+										</Box>
+									</AppleCard>
+									<AppleTable sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
+										<TableHead>
+											<TableRow sx={{ backgroundColor: '#0071E3' }}>
+												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
+												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Название</TableCell>
+												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Авторы</TableCell>
+												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
+												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Тип</TableCell>
+												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
+												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Пользователь</TableCell>
+												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>
+													Действия
+												</TableCell>
+											</TableRow>
+										</TableHead>
+										<Fade in={true} timeout={500} key={publicationsTransitionKey}>
+											<TableBody>
+												{publications.length > 0 ? (
+													publications.map((pub) => (
+														<TableRow
+															key={pub.id}
+															sx={{ '&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' } }}
+														>
+															<TableCell sx={{ color: '#1D1D1F' }}>{pub.id}</TableCell>
+															<TableCell sx={{ color: '#1D1D1F' }}>
+																<Typography
+																	sx={{
+																		color: '#0071E3',
+																		textDecoration: 'underline',
+																		cursor: 'pointer',
+																		'&:hover': { textDecoration: 'none' },
+																	}}
+																	onClick={() => navigate(`/publication/${pub.id}`)}
+																>
+																	{pub.title}
+																</Typography>
+															</TableCell>
+															<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
+															<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
+															<TableCell sx={{ color: '#1D1D1F' }}>
+																{pub.type === 'article'
+																	? 'Статья'
+																	: pub.type === 'monograph'
+																		? 'Монография'
+																		: pub.type === 'conference'
+																			? 'Доклад/конференция'
+																			: 'Неизвестный тип'}
+															</TableCell>
+															<TableCell sx={{ color: '#1D1D1F' }}>
+																<StatusChip status={pub.status} role={user.role} />
+															</TableCell>
+															<TableCell sx={{ color: '#1D1D1F' }}>{pub.user?.full_name || 'Не указан'}</TableCell>
+															<TableCell sx={{ textAlign: 'center' }}>
+																<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
+																	{pub.file_url && pub.file_url.trim() !== '' && (
+																		<IconButton
+																			aria-label="download"
+																			onClick={() => handleDownload(pub.file_url, pub.file_url.split('/').pop())}
+																			sx={{
+																				color: '#0071E3',
+																				borderRadius: '8px',
+																				'&:hover': { color: '#FFFFFF', backgroundColor: '#0071E3', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)' },
+																			}}
+																		>
+																			<DownloadIcon />
+																		</IconButton>
+																	)}
+																</Box>
+															</TableCell>
+														</TableRow>
+													))
+												) : (
+													<TableRow>
+														<TableCell colSpan={8} sx={{ textAlign: 'center', color: '#6E6E73' }}>
+															Нет публикаций с указанными статусами.
+														</TableCell>
+													</TableRow>
+												)}
+											</TableBody>
+										</Fade>
+									</AppleTable>
+									<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+										<Pagination
+											count={totalPagesPublications}
+											page={currentPagePublications}
+											onChange={handlePageChangePublications}
+											color="primary"
+											sx={{
+												'& .MuiPaginationItem-root': {
+													borderRadius: 20,
+													transition: 'all 0.3s ease',
+													'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
+													'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
+												},
+											}}
+										/>
+									</Box>
+									<Drawer
+										anchor="right"
+										open={openHistoryDrawer}
+										onClose={handleCloseHistoryDrawer}
+										sx={{
+											'& .MuiDrawer-paper': {
+												width: 600,
+												backgroundColor: '#FFFFFF',
+												boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+												borderRadius: '16px 0 0 16px',
+											},
+										}}
+									>
+										<Box sx={{ p: 2, pr: 4 }}>
+											<Typography variant="h6" sx={{ color: '#1D1D1F', fontWeight: 600, mb: 5 }}>
+												История действий с публикациями
+											</Typography>
+											<Box sx={{ display: 'flex', gap: 2, mt: 2, mb: 2 }}>
+												<AppleTextField
+													label="Дата начала"
+													type="date"
+													value={dateFilterRange.start}
+													onChange={(e) => {
+														setDateFilterRange((prev) => ({ ...prev, start: e.target.value }));
+														setPubHistoryPage(1);
+													}}
+													InputLabelProps={{ shrink: true }}
+													sx={{ width: '200px' }}
+												/>
+												<AppleTextField
+													label="Дата окончания"
+													type="date"
+													value={dateFilterRange.end}
+													onChange={(e) => {
+														setDateFilterRange((prev) => ({ ...prev, end: e.target.value }));
+														setPubHistoryPage(1);
+													}}
+													InputLabelProps={{ shrink: true }}
+													sx={{ width: '200px' }}
+												/>
+											</Box>
+											{pubActionHistory.length > 0 ? (
+												<>
+													<AppleTable
+														sx={{
+															mt: 2,
+															overflowX: 'auto',
+															minWidth: '100%',
+															backgroundColor: '#F5F5F7',
+															boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+															borderRadius: '8px',
+														}}
+													>
+														<TableHead>
+															<TableRow sx={{ backgroundColor: '#0071E3', borderRadius: '8px 8px 0 0' }}>
+																<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '200px', borderTopLeftRadius: '8px' }}>
+																	Название
+																</TableCell>
+																<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '120px' }}>
+																	Действие
+																</TableCell>
+																<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '140px', borderTopRightRadius: '8px' }}>
+																	Время
+																</TableCell>
+															</TableRow>
+														</TableHead>
+														<Fade in={true} timeout={500} key={pubHistoryTransitionKey}>
+															<TableBody>
+																{pubActionHistory.map((action) => (
+																	<TableRow key={`${action.id}-${action.timestamp}`}>
+																		<TableCell sx={{ minWidth: '200px', whiteSpace: 'normal', wordWrap: 'break-word' }}>
+																			<Typography
+																				sx={{
+																					color: '#0071E3',
+																					textDecoration: 'underline',
+																					cursor: 'pointer',
+																					'&:hover': { textDecoration: 'none' },
+																				}}
+																				onClick={() => {
+																					handleCloseHistoryDrawer();
+																					navigate(`/publication/${action.id}`);
+																				}}
+																			>
+																				{action.title}
+																			</Typography>
+																		</TableCell>
+																		<TableCell sx={{ minWidth: '120px' }}>
+																			{action.action_type === 'approved' ? 'Утверждено' : 'Возвращено на доработку'}
+																		</TableCell>
+																		<TableCell sx={{ minWidth: '140px' }}>
+																			{new Date(action.timestamp).toLocaleString('ru-RU')}
+																		</TableCell>
+																	</TableRow>
+																))}
+															</TableBody>
+														</Fade>
+													</AppleTable>
+													<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
+														<Pagination
+															count={totalPubHistoryPages}
+															page={pubHistoryPage}
+															onChange={handleHistoryPageChange}
+															color="primary"
+															sx={{
+																'& .MuiPaginationItem-root': {
+																	borderRadius: 20,
+																	'&:hover': { backgroundColor: 'grey.100' },
+																	'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white' },
+																},
+															}}
+														/>
+													</Box>
+												</>
+											) : (
+												<Typography sx={{ mt: 2, color: '#6E6E73' }}>
+													Нет записей в истории действий с публикациями.
+												</Typography>
+											)}
+										</Box>
+									</Drawer>
+								</>
+							)}
+
+							{value === 1 && (
+								<Box>
+									<Typography
+										variant="h5"
+										gutterBottom
+										sx={{ mt: 4, color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}
+									>
+										Статистика по кафедре
+									</Typography>
+									<Box sx={{ display: 'flex', justifyContent: 'center', gap: 2, mb: 4 }}>
+										<AppleTextField
+											select
+											label="Год"
+											value={selectedYear}
+											onChange={(e) => setSelectedYear(e.target.value)}
+											sx={{ width: 200 }}
 										>
-											<MenuItem value="needs_review">На проверке</MenuItem>
-											<MenuItem value="returned_for_revision">Отправлено на доработку</MenuItem>
-											<MenuItem value="published">Опубликовано</MenuItem>
+											{[...Array(5)].map((_, i) => {
+												const year = new Date().getFullYear() - i;
+												return <MenuItem key={year} value={year.toString()}>{year}</MenuItem>;
+											})}
 										</AppleTextField>
-										<AppleButton startIcon={<HistoryIcon />} onClick={handleOpenHistoryDrawer} sx={{ height: 'fit-content', marginTop: '6px' }}>
+										<AppleTextField
+											label="Поиск по ФИО"
+											value={nameSearchQuery}
+											onChange={(e) => setNameSearchQuery(e.target.value)}
+											sx={{
+												width: 300,
+												'& .MuiOutlinedInput-root': {
+													height: '40px', // Уменьшаем высоту поля
+													padding: '0 14px', // Уменьшаем внутренние отступы для текста
+													'& input': {
+														padding: '12px 0', // Устанавливаем отступы для текста ввода
+													},
+												},
+												'& .MuiInputLabel-outlined': {
+													// Корректируем положение метки в неактивном состоянии
+													transform: 'translate(14px, 9px) scale(1)', // Сдвигаем метку чуть выше из-за уменьшенной высоты
+												},
+												'& .MuiInputLabel-outlined.Mui-focused': {
+													// Положение метки при фокусе
+													transform: 'translate(14px, -6px) scale(0.75)',
+												},
+												'& .MuiInputLabel-outlined.MuiFormLabel-filled': {
+													// Положение метки при заполненном поле
+													transform: 'translate(14px, -6px) scale(0.75)',
+												},
+											}}
+											variant="outlined"
+											placeholder="Введите ФИО"
+										/>
+									</Box>
+									{loadingStatistics ? (
+										<Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
+											<CircularProgress sx={{ color: '#0071E3' }} />
+										</Box>
+									) : statistics.length > 0 ? (
+										<TransitionGroup>
+											{sortAndFilterStatistics(statistics, nameSearchQuery).map((user) => (
+												<CSSTransition
+													key={user.user_id}
+													timeout={300}
+													classNames="accordion"
+												>
+													<Accordion
+														defaultExpanded={false}
+														sx={{
+															mb: 2,
+															borderRadius: '16px',
+															boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+															'&:before': { display: 'none' },
+														}}
+													>
+														<AccordionSummary
+															expandIcon={<ExpandMoreIcon sx={{ color: '#0071E3' }} />}
+															sx={{
+																backgroundColor: '#F5F5F7',
+																borderRadius: '16px',
+																'& .MuiAccordionSummary-content': { alignItems: 'center' },
+															}}
+														>
+															<Typography
+																variant="h6"
+																sx={{ color: '#1D1D1F', fontWeight: 600 }}
+															>
+																{user.full_name || 'Пользователь не указан'}
+															</Typography>
+														</AccordionSummary>
+														<AccordionDetails sx={{ backgroundColor: '#FFFFFF', borderRadius: '0 0 16px 16px' }}>
+															<UserStatisticsChart user={user} />
+														</AccordionDetails>
+													</Accordion>
+												</CSSTransition>
+											))}
+										</TransitionGroup>
+									) : (
+										<Typography sx={{ textAlign: 'center', color: '#6E6E73', mt: 2 }}>
+											Нет данных для выбранного года.
+										</Typography>
+									)}
+								</Box>
+							)}
+
+							{value === 2 && (
+								<>
+									<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
+										Регистрация нового пользователя
+									</Typography>
+									<AppleCard sx={{ maxWidth: 'none', mx: 'auto', mt: 2, p: 4 }}>
+										<form onSubmit={(e) => e.preventDefault()}>
+											<AppleTextField
+												fullWidth
+												label="Фамилия"
+												value={newLastName}
+												onChange={handleLastNameChange}
+												margin="normal"
+												variant="outlined"
+												autoComplete="family-name"
+												error={!!lastNameError}
+												helperText={lastNameError}
+											/>
+											<AppleTextField
+												fullWidth
+												label="Имя"
+												value={newFirstName}
+												onChange={handleFirstNameChange}
+												margin="normal"
+												variant="outlined"
+												autoComplete="given-name"
+												error={!!firstNameError}
+												helperText={firstNameError}
+											/>
+											<AppleTextField
+												fullWidth
+												label="Отчество"
+												value={newMiddleName}
+												onChange={handleMiddleNameChange}
+												margin="normal"
+												variant="outlined"
+												autoComplete="additional-name"
+												error={!!middleNameError}
+												helperText={middleNameError}
+											/>
+											<AppleTextField
+												fullWidth
+												label="Логин"
+												value={newUsername}
+												onChange={(e) => setNewUsername(e.target.value)}
+												margin="normal"
+												variant="outlined"
+												autoComplete="username"
+											/>
+											<AppleTextField
+												fullWidth
+												label="Пароль"
+												type={showPassword ? 'text' : 'password'}
+												value={newPassword}
+												onChange={(e) => setNewPassword(e.target.value)}
+												margin="normal"
+												variant="outlined"
+												autoComplete="new-password"
+												InputProps={{
+													endAdornment: (
+														<IconButton onClick={() => setShowPassword(!showPassword)}>
+															{showPassword ? <VisibilityOff /> : <Visibility />}
+														</IconButton>
+													),
+												}}
+											/>
+											<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+												<AppleButton
+													startIcon={<RefreshIcon />}
+													onClick={async () => {
+														const lastNameErr = validateNamePart(newLastName, 'Фамилия');
+														const firstNameErr = validateNamePart(newFirstName, 'Имя');
+														const middleNameErr = validateNamePart(newMiddleName, 'Отчество');
+														const fullNameErr = validateFullName(newLastName, newFirstName, newMiddleName);
+
+														if (lastNameErr || firstNameErr || middleNameErr || fullNameErr) {
+															setLastNameError(lastNameErr);
+															setFirstNameError(firstNameErr);
+															setMiddleNameError(middleNameErr);
+															if (fullNameErr) {
+																setError(fullNameErr);
+																setOpenError(true);
+															}
+															return;
+														}
+
+														const generateUsername = async () => {
+															const transliterate = (text) => {
+																const ruToEn = {
+																	а: 'a', б: 'b', в: 'v', г: 'g', д: 'd',
+																	е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i',
+																	й: 'y', к: 'k', л: 'l', м: 'm', н: 'n',
+																	о: 'o', п: 'p', р: 'r', с: 's', т: 't',
+																	у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch',
+																	ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '',
+																	э: 'e', ю: 'yu', я: 'ya'
+																};
+																return text.toLowerCase().split('').map(char => ruToEn[char] || char).join('');
+															};
+															const capitalizeFirstLetter = (string) =>
+																string ? string.charAt(0).toUpperCase() + string.slice(1) : '';
+															const baseUsername = `${capitalizeFirstLetter(transliterate(newLastName))}${capitalizeFirstLetter(transliterate(newFirstName[0]))}${capitalizeFirstLetter(transliterate(newMiddleName[0]))}`;
+															let generatedUsername = baseUsername;
+															let suffix = 1;
+
+															while (true) {
+																try {
+																	const response = await axios.post(
+																		'http://localhost:5000/admin_api/admin/check-username',
+																		{ username: generatedUsername },
+																		{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
+																	);
+																	if (!response.data.exists) break;
+																	generatedUsername = `${baseUsername}${suffix}`;
+																	suffix++;
+																} catch (err) {
+																	setError('Ошибка проверки логина.');
+																	setOpenError(true);
+																	return null;
+																}
+															}
+															return generatedUsername;
+														};
+
+														const generatedUsername = await generateUsername();
+														if (!generatedUsername) return;
+
+														try {
+															const response = await axios.get('http://localhost:5000/admin_api/admin/generate-password', {
+																withCredentials: true,
+																headers: { 'X-CSRFToken': csrfToken },
+															});
+															setNewUsername(generatedUsername);
+															setNewPassword(response.data.password);
+															setSuccess('Логин и пароль успешно сгенерированы.');
+															setOpenSuccess(true);
+														} catch (err) {
+															setError('Ошибка генерации пароля.');
+															setOpenError(true);
+														}
+													}}
+												>
+													Сгенерировать логин и пароль
+												</AppleButton>
+												<AppleButton
+													startIcon={<ContentCopyIcon />}
+													onClick={() => {
+														navigator.clipboard.writeText(`Логин: ${newUsername}\nПароль: ${newPassword}`);
+														setSuccess('Данные скопированы в буфер обмена!');
+														setOpenSuccess(true);
+													}}
+												>
+													Скопировать в буфер обмена
+												</AppleButton>
+												<AppleButton
+													type="submit"
+													onClick={async () => {
+														const lastNameErr = validateNamePart(newLastName, 'Фамилия');
+														const firstNameErr = validateNamePart(newFirstName, 'Имя');
+														const middleNameErr = validateNamePart(newMiddleName, 'Отчество');
+														const fullNameErr = validateFullName(newLastName, newFirstName, newMiddleName);
+
+														if (lastNameErr || firstNameErr || middleNameErr || fullNameErr) {
+															setLastNameError(lastNameErr);
+															setFirstNameError(firstNameErr);
+															setMiddleNameError(middleNameErr);
+															if (fullNameErr) {
+																setError(fullNameErr);
+																setOpenError(true);
+															}
+															return;
+														}
+
+														if (!newUsername.trim() || !newPassword.trim()) {
+															setError('Логин и пароль обязательны.');
+															setOpenError(true);
+															return;
+														}
+
+														try {
+															await axios.post(
+																'http://localhost:5000/admin_api/admin/register',
+																{
+																	username: newUsername,
+																	password: newPassword,
+																	last_name: newLastName,
+																	first_name: newFirstName,
+																	middle_name: newMiddleName,
+																},
+																{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
+															);
+															setSuccess('Пользователь успешно зарегистрирован!');
+															setOpenSuccess(true);
+															setNewLastName('');
+															setNewFirstName('');
+															setNewMiddleName('');
+															setNewUsername('');
+															setNewPassword('');
+															setLastNameError('');
+															setFirstNameError('');
+															setMiddleNameError('');
+														} catch (err) {
+															setError(err.response?.data?.error || 'Не удалось зарегистрировать пользователя.');
+															setOpenError(true);
+														}
+													}}
+												>
+													Создать
+												</AppleButton>
+											</Box>
+											<Collapse in={openError}>
+												{error && (
+													<Alert
+														severity="error"
+														sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#FFF1F0', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
+														onClose={() => setOpenError(false)}
+													>
+														{error}
+													</Alert>
+												)}
+											</Collapse>
+											<Collapse in={openSuccess}>
+												{success && (
+													<Alert
+														severity="success"
+														sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#E7F8E7', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
+														onClose={() => setOpenSuccess(false)}
+													>
+														{success}
+													</Alert>
+												)}
+											</Collapse>
+										</form>
+									</AppleCard>
+								</>
+							)}
+
+							{value === 3 && (
+								<Box sx={{ mt: 4 }}>
+									<Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 2, position: 'relative' }}>
+										<Typography variant="h5" sx={{ color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
+											Работа с планами
+										</Typography>
+										<AppleButton
+											startIcon={<HistoryIcon />}
+											onClick={handleOpenPlanHistoryDrawer}
+											sx={{ position: 'absolute', right: 16 }}
+										>
 											Показать историю
 										</AppleButton>
 									</Box>
-								</AppleCard>
-								<AppleTable sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
-									<TableHead>
-										<TableRow sx={{ backgroundColor: '#0071E3' }}>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Название</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Авторы</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Тип</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Пользователь</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>
-												Действия
-											</TableCell>
-										</TableRow>
-									</TableHead>
-									<Fade in={true} timeout={500} key={publicationsTransitionKey}>
-										<TableBody>
-											{publications.length > 0 ? (
-												publications.map((pub) => (
-													<TableRow
-														key={pub.id}
-														sx={{ '&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' } }}
-													>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.id}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															<Typography
-																sx={{
-																	color: '#0071E3',
-																	textDecoration: 'underline',
-																	cursor: 'pointer',
-																	'&:hover': { textDecoration: 'none' },
-																}}
-																onClick={() => navigate(`/publication/${pub.id}`)}
-															>
-																{pub.title}
-															</Typography>
-														</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															{pub.type === 'article'
-																? 'Статья'
-																: pub.type === 'monograph'
-																	? 'Монография'
-																	: pub.type === 'conference'
-																		? 'Доклад/конференция'
-																		: 'Неизвестный тип'}
-														</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															<StatusChip status={pub.status} role={user.role} />
-														</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.user?.full_name || 'Не указан'}</TableCell>
-														<TableCell sx={{ textAlign: 'center' }}>
-															<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-																{pub.file_url && pub.file_url.trim() !== '' && (
-																	<IconButton
-																		aria-label="download"
-																		onClick={() => handleDownload(pub.file_url, pub.file_url.split('/').pop())}
-																		sx={{
-																			color: '#0071E3',
-																			borderRadius: '8px',
-																			'&:hover': { color: '#FFFFFF', backgroundColor: '#0071E3', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)' },
-																		}}
-																	>
-																		<DownloadIcon />
-																	</IconButton>
-																)}
+									{plans.length > 0 ? (
+										plans.map((plan) => {
+											const entriesByType = plan.entries.reduce((acc, entry) => {
+												const type = entry.type || 'unknown';
+												if (!acc[type]) {
+													acc[type] = { count: 0, type };
+												}
+												acc[type].count += 1;
+												return acc;
+											}, {});
+											const groupedEntries = Object.values(entriesByType);
+
+											return (
+												<Accordion
+													key={plan.id}
+													sx={{ mb: 2, borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}
+												>
+													<AccordionSummary expandIcon={<ExpandMoreIcon />}>
+														<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+															<Box>
+																<Typography variant="h6" sx={{ color: '#1D1D1F', whiteSpace: 'nowrap' }}>
+																	План на {plan.year} год
+																</Typography>
+																<Typography variant="body2" sx={{ color: '#6E6E73', mt: 0.5 }}>
+																	{plan.user && plan.user.full_name
+																		? `${plan.user.full_name} (${plan.user.username || 'логин отсутствует'})`
+																		: 'Пользователь не указан'}
+																</Typography>
 															</Box>
-														</TableCell>
-													</TableRow>
-												))
-											) : (
-												<TableRow>
-													<TableCell colSpan={8} sx={{ textAlign: 'center', color: '#6E6E73' }}>
-														Нет публикаций с указанными статусами.
-													</TableCell>
-												</TableRow>
-											)}
-										</TableBody>
-									</Fade>
-								</AppleTable>
-								<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-									<Pagination
-										count={totalPagesPublications}
-										page={currentPagePublications}
-										onChange={handlePageChangePublications}
-										color="primary"
-										sx={{
-											'& .MuiPaginationItem-root': {
-												borderRadius: 20,
-												transition: 'all 0.3s ease',
-												'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
-												'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
-											},
-										}}
-									/>
-								</Box>
-								<Drawer
-									anchor="right"
-									open={openHistoryDrawer}
-									onClose={handleCloseHistoryDrawer}
-									sx={{
-										'& .MuiDrawer-paper': {
-											width: 600,
-											backgroundColor: '#FFFFFF',
-											boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-											borderRadius: '16px 0 0 16px',
-										},
-									}}
-								>
-									<Box sx={{ p: 2, pr: 4 }}>
-										<Typography variant="h6" sx={{ color: '#1D1D1F', fontWeight: 600, mb: 5 }}>
-											История действий с публикациями
-										</Typography>
-										<Box sx={{ display: 'flex', gap: 2, mt: 2, mb: 2 }}>
-											<AppleTextField
-												label="Дата начала"
-												type="date"
-												value={dateFilterRange.start}
-												onChange={(e) => {
-													setDateFilterRange((prev) => ({ ...prev, start: e.target.value }));
-													setPubHistoryPage(1);
-												}}
-												InputLabelProps={{ shrink: true }}
-												sx={{ width: '200px' }}
-											/>
-											<AppleTextField
-												label="Дата окончания"
-												type="date"
-												value={dateFilterRange.end}
-												onChange={(e) => {
-													setDateFilterRange((prev) => ({ ...prev, end: e.target.value }));
-													setPubHistoryPage(1);
-												}}
-												InputLabelProps={{ shrink: true }}
-												sx={{ width: '200px' }}
-											/>
-										</Box>
-										{pubActionHistory.length > 0 ? (
-											<>
-												<AppleTable
-													sx={{
-														mt: 2,
-														overflowX: 'auto',
-														minWidth: '100%',
-														backgroundColor: '#F5F5F7',
-														boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-														borderRadius: '8px',
-													}}
-												>
-													<TableHead>
-														<TableRow sx={{ backgroundColor: '#0071E3', borderRadius: '8px 8px 0 0' }}>
-															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '200px', borderTopLeftRadius: '8px' }}>
-																Название
-															</TableCell>
-															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '120px' }}>
-																Действие
-															</TableCell>
-															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '140px', borderTopRightRadius: '8px' }}>
-																Время
-															</TableCell>
-														</TableRow>
-													</TableHead>
-													<Fade in={true} timeout={500} key={pubHistoryTransitionKey}>
-														<TableBody>
-															{pubActionHistory.map((action) => (
-																<TableRow key={`${action.id}-${action.timestamp}`}>
-																	<TableCell sx={{ minWidth: '200px', whiteSpace: 'normal', wordWrap: 'break-word' }}>
-																		<Typography
-																			sx={{
-																				color: '#0071E3',
-																				textDecoration: 'underline',
-																				cursor: 'pointer',
-																				'&:hover': { textDecoration: 'none' },
-																			}}
-																			onClick={() => {
-																				handleCloseHistoryDrawer();
-																				navigate(`/publication/${action.id}`);
-																			}}
-																		>
-																			{action.title}
-																		</Typography>
-																	</TableCell>
-																	<TableCell sx={{ minWidth: '120px' }}>
-																		{action.action_type === 'approved' ? 'Утверждено' : 'Возвращено на доработку'}
-																	</TableCell>
-																	<TableCell sx={{ minWidth: '140px' }}>
-																		{new Date(action.timestamp).toLocaleString('ru-RU')}
-																	</TableCell>
-																</TableRow>
-															))}
-														</TableBody>
-													</Fade>
-												</AppleTable>
-												<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
-													<Pagination
-														count={totalPubHistoryPages}
-														page={pubHistoryPage}
-														onChange={handleHistoryPageChange}
-														color="primary"
-														sx={{
-															'& .MuiPaginationItem-root': {
-																borderRadius: 20,
-																'&:hover': { backgroundColor: 'grey.100' },
-																'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white' },
-															},
-														}}
-													/>
-												</Box>
-											</>
-										) : (
-											<Typography sx={{ mt: 2, color: '#6E6E73' }}>
-												Нет записей в истории действий с публикациями.
-											</Typography>
-										)}
-									</Box>
-								</Drawer>
-							</>
-						)}
-
-						{value === 1 && (
-							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
-								Статистика по кафедре
-							</Typography>
-						)}
-
-						{value === 2 && (
-							<>
-								<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
-									Регистрация нового пользователя
-								</Typography>
-								<AppleCard sx={{ maxWidth: 'none', mx: 'auto', mt: 2, p: 4 }}>
-									<form onSubmit={(e) => e.preventDefault()}>
-										<AppleTextField
-											fullWidth
-											label="Фамилия"
-											value={newLastName}
-											onChange={handleLastNameChange}
-											margin="normal"
-											variant="outlined"
-											autoComplete="family-name"
-											error={!!lastNameError}
-											helperText={lastNameError}
-										/>
-										<AppleTextField
-											fullWidth
-											label="Имя"
-											value={newFirstName}
-											onChange={handleFirstNameChange}
-											margin="normal"
-											variant="outlined"
-											autoComplete="given-name"
-											error={!!firstNameError}
-											helperText={firstNameError}
-										/>
-										<AppleTextField
-											fullWidth
-											label="Отчество"
-											value={newMiddleName}
-											onChange={handleMiddleNameChange}
-											margin="normal"
-											variant="outlined"
-											autoComplete="additional-name"
-											error={!!middleNameError}
-											helperText={middleNameError}
-										/>
-										<AppleTextField
-											fullWidth
-											label="Логин"
-											value={newUsername}
-											onChange={(e) => setNewUsername(e.target.value)}
-											margin="normal"
-											variant="outlined"
-											autoComplete="username"
-										/>
-										<AppleTextField
-											fullWidth
-											label="Пароль"
-											type={showPassword ? 'text' : 'password'}
-											value={newPassword}
-											onChange={(e) => setNewPassword(e.target.value)}
-											margin="normal"
-											variant="outlined"
-											autoComplete="new-password"
-											InputProps={{
-												endAdornment: (
-													<IconButton onClick={() => setShowPassword(!showPassword)}>
-														{showPassword ? <VisibilityOff /> : <Visibility />}
-													</IconButton>
-												),
-											}}
-										/>
-										<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-											<AppleButton
-												startIcon={<RefreshIcon />}
-												onClick={async () => {
-													const lastNameErr = validateNamePart(newLastName, 'Фамилия');
-													const firstNameErr = validateNamePart(newFirstName, 'Имя');
-													const middleNameErr = validateNamePart(newMiddleName, 'Отчество');
-													const fullNameErr = validateFullName(newLastName, newFirstName, newMiddleName);
-
-													if (lastNameErr || firstNameErr || middleNameErr || fullNameErr) {
-														setLastNameError(lastNameErr);
-														setFirstNameError(firstNameErr);
-														setMiddleNameError(middleNameErr);
-														if (fullNameErr) {
-															setError(fullNameErr);
-															setOpenError(true);
-														}
-														return;
-													}
-
-													const generateUsername = async () => {
-														const transliterate = (text) => {
-															const ruToEn = {
-																а: 'a', б: 'b', в: 'v', г: 'g', д: 'd',
-																е: 'e', ё: 'e', ж: 'zh', з: 'z', и: 'i',
-																й: 'y', к: 'k', л: 'l', м: 'm', н: 'n',
-																о: 'o', п: 'p', р: 'r', с: 's', т: 't',
-																у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch',
-																ш: 'sh', щ: 'sch', ъ: '', ы: 'y', ь: '',
-																э: 'e', ю: 'yu', я: 'ya'
-															};
-															return text.toLowerCase().split('').map(char => ruToEn[char] || char).join('');
-														};
-														const capitalizeFirstLetter = (string) =>
-															string ? string.charAt(0).toUpperCase() + string.slice(1) : '';
-														const baseUsername = `${capitalizeFirstLetter(transliterate(newLastName))}${capitalizeFirstLetter(transliterate(newFirstName[0]))}${capitalizeFirstLetter(transliterate(newMiddleName[0]))}`;
-														let generatedUsername = baseUsername;
-														let suffix = 1;
-
-														while (true) {
-															try {
-																const response = await axios.post(
-																	'http://localhost:5000/admin_api/admin/check-username',
-																	{ username: generatedUsername },
-																	{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
-																);
-																if (!response.data.exists) break;
-																generatedUsername = `${baseUsername}${suffix}`;
-																suffix++;
-															} catch (err) {
-																setError('Ошибка проверки логина.');
-																setOpenError(true);
-																return null;
-															}
-														}
-														return generatedUsername;
-													};
-
-													const generatedUsername = await generateUsername();
-													if (!generatedUsername) return;
-
-													try {
-														const response = await axios.get('http://localhost:5000/admin_api/admin/generate-password', {
-															withCredentials: true,
-															headers: { 'X-CSRFToken': csrfToken },
-														});
-														setNewUsername(generatedUsername);
-														setNewPassword(response.data.password);
-														setSuccess('Логин и пароль успешно сгенерированы.');
-														setOpenSuccess(true);
-													} catch (err) {
-														setError('Ошибка генерации пароля.');
-														setOpenError(true);
-													}
-												}}
-											>
-												Сгенерировать логин и пароль
-											</AppleButton>
-											<AppleButton
-												startIcon={<ContentCopyIcon />}
-												onClick={() => {
-													navigator.clipboard.writeText(`Логин: ${newUsername}\nПароль: ${newPassword}`);
-													setSuccess('Данные скопированы в буфер обмена!');
-													setOpenSuccess(true);
-												}}
-											>
-												Скопировать в буфер обмена
-											</AppleButton>
-											<AppleButton
-												type="submit"
-												onClick={async () => {
-													const lastNameErr = validateNamePart(newLastName, 'Фамилия');
-													const firstNameErr = validateNamePart(newFirstName, 'Имя');
-													const middleNameErr = validateNamePart(newMiddleName, 'Отчество');
-													const fullNameErr = validateFullName(newLastName, newFirstName, newMiddleName);
-
-													if (lastNameErr || firstNameErr || middleNameErr || fullNameErr) {
-														setLastNameError(lastNameErr);
-														setFirstNameError(firstNameErr);
-														setMiddleNameError(middleNameErr);
-														if (fullNameErr) {
-															setError(fullNameErr);
-															setOpenError(true);
-														}
-														return;
-													}
-
-													if (!newUsername.trim() || !newPassword.trim()) {
-														setError('Логин и пароль обязательны.');
-														setOpenError(true);
-														return;
-													}
-
-													try {
-														await axios.post(
-															'http://localhost:5000/admin_api/admin/register',
-															{
-																username: newUsername,
-																password: newPassword,
-																last_name: newLastName,
-																first_name: newFirstName,
-																middle_name: newMiddleName,
-															},
-															{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
-														);
-														setSuccess('Пользователь успешно зарегистрирован!');
-														setOpenSuccess(true);
-														setNewLastName('');
-														setNewFirstName('');
-														setNewMiddleName('');
-														setNewUsername('');
-														setNewPassword('');
-														setLastNameError('');
-														setFirstNameError('');
-														setMiddleNameError('');
-													} catch (err) {
-														setError(err.response?.data?.error || 'Не удалось зарегистрировать пользователя.');
-														setOpenError(true);
-													}
-												}}
-											>
-												Создать
-											</AppleButton>
-										</Box>
-										<Collapse in={openError}>
-											{error && (
-												<Alert
-													severity="error"
-													sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#FFF1F0', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
-													onClose={() => setOpenError(false)}
-												>
-													{error}
-												</Alert>
-											)}
-										</Collapse>
-										<Collapse in={openSuccess}>
-											{success && (
-												<Alert
-													severity="success"
-													sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#E7F8E7', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
-													onClose={() => setOpenSuccess(false)}
-												>
-													{success}
-												</Alert>
-											)}
-										</Collapse>
-									</form>
-								</AppleCard>
-							</>
-						)}
-
-						{value === 3 && (
-							<Box sx={{ mt: 4 }}>
-								<Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'center', mb: 2, position: 'relative' }}>
-									<Typography variant="h5" sx={{ color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
-										Работа с планами
-									</Typography>
-									<AppleButton
-										startIcon={<HistoryIcon />}
-										onClick={handleOpenPlanHistoryDrawer}
-										sx={{ position: 'absolute', right: 16 }}
-									>
-										Показать историю
-									</AppleButton>
-								</Box>
-								{plans.length > 0 ? (
-									plans.map((plan) => {
-										const entriesByType = plan.entries.reduce((acc, entry) => {
-											const type = entry.type || 'unknown';
-											if (!acc[type]) {
-												acc[type] = { count: 0, type };
-											}
-											acc[type].count += 1;
-											return acc;
-										}, {});
-										const groupedEntries = Object.values(entriesByType);
-
-										return (
-											<Accordion
-												key={plan.id}
-												sx={{ mb: 2, borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}
-											>
-												<AccordionSummary expandIcon={<ExpandMoreIcon />}>
-													<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-														<Box>
-															<Typography variant="h6" sx={{ color: '#1D1D1F', whiteSpace: 'nowrap' }}>
-																План на {plan.year} год
-															</Typography>
-															<Typography variant="body2" sx={{ color: '#6E6E73', mt: 0.5 }}>
-																{plan.user && plan.user.full_name
-																	? `${plan.user.full_name} (${plan.user.username || 'логин отсутствует'})`
-																	: 'Пользователь не указан'}
-															</Typography>
+															<StatusChip status={plan.status} role={user.role} />
 														</Box>
-														<StatusChip status={plan.status} role={user.role} />
-													</Box>
-												</AccordionSummary>
-												<AccordionDetails>
-													<PlanTable>
-														<TableHead>
-															<TableRow>
-																<TableCell>Планируемое количество</TableCell>
-																<TableCell>Тип</TableCell>
-															</TableRow>
-														</TableHead>
-														<Fade in={true} timeout={500} key={plansTransitionKey}>
-															<TableBody>
-																{groupedEntries.length > 0 ? (
-																	groupedEntries.map((group, index) => (
-																		<TableRow key={index}>
-																			<TableCell sx={{ padding: '16px' }}>{group.count}</TableCell>
-																			<TableCell>
-																				{group.type === 'article'
-																					? 'Статья'
-																					: group.type === 'monograph'
-																						? 'Монография'
-																						: group.type === 'conference'
-																							? 'Доклад/конференция'
-																							: 'Не указано'}
+													</AccordionSummary>
+													<AccordionDetails>
+														<PlanTable>
+															<TableHead>
+																<TableRow>
+																	<TableCell>Планируемое количество</TableCell>
+																	<TableCell>Тип</TableCell>
+																</TableRow>
+															</TableHead>
+															<Fade in={true} timeout={500} key={plansTransitionKey}>
+																<TableBody>
+																	{groupedEntries.length > 0 ? (
+																		groupedEntries.map((group, index) => (
+																			<TableRow key={index}>
+																				<TableCell sx={{ padding: '16px' }}>{group.count}</TableCell>
+																				<TableCell>
+																					{group.type === 'article'
+																						? 'Статья'
+																						: group.type === 'monograph'
+																							? 'Монография'
+																							: group.type === 'conference'
+																								? 'Доклад/конференция'
+																								: 'Не указано'}
+																				</TableCell>
+																			</TableRow>
+																		))
+																	) : (
+																		<TableRow>
+																			<TableCell colSpan={2} sx={{ textAlign: 'center', color: '#6E6E73' }}>
+																				Нет записей в плане.
 																			</TableCell>
 																		</TableRow>
-																	))
-																) : (
-																	<TableRow>
-																		<TableCell colSpan={2} sx={{ textAlign: 'center', color: '#6E6E73' }}>
-																			Нет записей в плане.
-																		</TableCell>
-																	</TableRow>
-																)}
-															</TableBody>
-														</Fade>
-													</PlanTable>
-													{plan.return_comment && (
-														<Typography
-															sx={{ mt: 2, color: '#000000', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}
-														>
-															<WarningAmberIcon sx={{ color: '#FF3B30' }} />
-															Комментарий при возврате: {plan.return_comment}
-														</Typography>
-													)}
-													{plan.status === 'needs_review' && (
-														<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-															<GreenButton startIcon={<CheckIcon />} onClick={() => handleApprovePlan(plan)}>
-																Утвердить
-															</GreenButton>
-															<AppleButton startIcon={<ReplayIcon />} onClick={() => handleOpenReturnDialog(plan)}>
-																На доработку
-															</AppleButton>
-														</Box>
-													)}
-												</AccordionDetails>
-											</Accordion>
-										);
-									})
-								) : (
-									<Typography sx={{ textAlign: 'center', color: '#6E6E73', mt: 2 }}>
-										Нет планов для проверки.
-									</Typography>
-								)}
-								<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-									<Pagination
-										count={totalPagesPlans}
-										page={currentPagePlans}
-										onChange={handlePageChangePlans}
-										color="primary"
+																	)}
+																</TableBody>
+															</Fade>
+														</PlanTable>
+														{plan.return_comment && (
+															<Typography
+																sx={{ mt: 2, color: '#000000', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}
+															>
+																<WarningAmberIcon sx={{ color: '#FF3B30' }} />
+																Комментарий при возврате: {plan.return_comment}
+															</Typography>
+														)}
+														{plan.status === 'needs_review' && (
+															<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+																<GreenButton startIcon={<CheckIcon />} onClick={() => handleApprovePlan(plan)}>
+																	Утвердить
+																</GreenButton>
+																<AppleButton startIcon={<ReplayIcon />} onClick={() => handleOpenReturnDialog(plan)}>
+																	На доработку
+																</AppleButton>
+															</Box>
+														)}
+													</AccordionDetails>
+												</Accordion>
+											);
+										})
+									) : (
+										<Typography sx={{ textAlign: 'center', color: '#6E6E73', mt: 2 }}>
+											Нет планов для проверки.
+										</Typography>
+									)}
+									<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+										<Pagination
+											count={totalPagesPlans}
+											page={currentPagePlans}
+											onChange={handlePageChangePlans}
+											color="primary"
+											sx={{
+												'& .MuiPaginationItem-root': {
+													borderRadius: 20,
+													'&:hover': { backgroundColor: 'grey.100' },
+													'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white' },
+												},
+											}}
+										/>
+									</Box>
+									<Drawer
+										anchor="right"
+										open={openPlanHistoryDrawer}
+										onClose={handleClosePlanHistoryDrawer}
 										sx={{
-											'& .MuiPaginationItem-root': {
-												borderRadius: 20,
-												'&:hover': { backgroundColor: 'grey.100' },
-												'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white' },
+											'& .MuiDrawer-paper': {
+												width: 600,
+												backgroundColor: '#FFFFFF',
+												boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+												borderRadius: '16px 0 0 16px',
 											},
 										}}
-									/>
-								</Box>
-								<Drawer
-									anchor="right"
-									open={openPlanHistoryDrawer}
-									onClose={handleClosePlanHistoryDrawer}
-									sx={{
-										'& .MuiDrawer-paper': {
-											width: 600,
-											backgroundColor: '#FFFFFF',
-											boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-											borderRadius: '16px 0 0 16px',
-										},
-									}}
-								>
-									<Box sx={{ p: 2, pr: 4 }}>
-										<Typography variant="h6" sx={{ color: '#1D1D1F', fontWeight: 600, mb: 5 }}>
-											История действий с планами
-										</Typography>
-										<Box sx={{ display: 'flex', gap: 2, mt: 2, mb: 2 }}>
-											<AppleTextField
-												label="Дата начала"
-												type="date"
-												value={dateFilterRange.start}
-												onChange={(e) => {
-													setDateFilterRange((prev) => ({ ...prev, start: e.target.value }));
-													setPlanHistoryPage(1);
-												}}
-												InputLabelProps={{ shrink: true }}
-												sx={{ width: '200px' }}
-											/>
-											<AppleTextField
-												label="Дата окончания"
-												type="date"
-												value={dateFilterRange.end}
-												onChange={(e) => {
-													setDateFilterRange((prev) => ({ ...prev, end: e.target.value }));
-													setPlanHistoryPage(1);
-												}}
-												InputLabelProps={{ shrink: true }}
-												sx={{ width: '200px' }}
-											/>
-										</Box>
-										{planActionHistory.length > 0 ? (
-											<>
-												<AppleTable
-													sx={{
-														mt: 2,
-														backgroundColor: '#F5F5F7',
-														boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-														borderRadius: '8px',
-													}}
-												>
-													<TableHead>
-														<TableRow sx={{ backgroundColor: '#0071E3', borderRadius: '8px 8px 0 0' }}>
-															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '150px', borderTopLeftRadius: '8px' }}>
-																План
-															</TableCell>
-															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '150px' }}>
-																Пользователь
-															</TableCell>
-															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '120px' }}>
-																Действие
-															</TableCell>
-															<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '140px', borderTopRightRadius: '8px' }}>
-																Время
-															</TableCell>
-														</TableRow>
-													</TableHead>
-													<Fade in={true} timeout={500} key={planHistoryTransitionKey}>
-														<TableBody>
-															{planActionHistory.map((action) => (
-																<TableRow key={action.id}>
-																	<TableCell sx={{ minWidth: '150px', whiteSpace: 'nowrap' }}>
-																		<Typography
-																			sx={{
-																				color: '#0071E3',
-																				textDecoration: 'underline',
-																				cursor: 'pointer',
-																				'&:hover': { textDecoration: 'none' },
-																			}}
-																			onClick={() => {
-																				if (action.id) {
-																					handleClosePlanHistoryDrawer();
-																					// navigate(`/plan/${action.id}`); // Раскомментируйте, если есть страница плана
-																				} else {
-																					setError('ID плана отсутствует в записи истории.');
-																					setOpenError(true);
-																				}
-																			}}
-																		>
-																			План на {action.year} год
-																		</Typography>
-																	</TableCell>
-																	<TableCell sx={{ minWidth: '150px', whiteSpace: 'normal', wordWrap: 'break-word' }}>
-																		{action.user_full_name}
-																	</TableCell>
-																	<TableCell sx={{ minWidth: '120px' }}>
-																		{action.action_type === 'approved' ? 'Утверждён' : 'Возвращён на доработку'}
-																	</TableCell>
-																	<TableCell sx={{ minWidth: '140px' }}>
-																		{new Date(action.timestamp).toLocaleString('ru-RU')}
-																	</TableCell>
-																</TableRow>
-															))}
-														</TableBody>
-													</Fade>
-												</AppleTable>
-												<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
-													<Pagination
-														count={totalPlanHistoryPages}
-														page={planHistoryPage}
-														onChange={handlePlanHistoryPageChange}
-														color="primary"
-														sx={{
-															'& .MuiPaginationItem-root': {
-																borderRadius: 20,
-																'&:hover': { backgroundColor: 'grey.100' },
-																'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white' },
-															},
-														}}
-													/>
-												</Box>
-											</>
-										) : (
-											<Typography sx={{ mt: 2, color: '#6E6E73' }}>
-												Нет записей в истории действий с планами.
+									>
+										<Box sx={{ p: 2, pr: 4 }}>
+											<Typography variant="h6" sx={{ color: '#1D1D1F', fontWeight: 600, mb: 5 }}>
+												История действий с планами
 											</Typography>
-										)}
-									</Box>
-								</Drawer>
-							</Box>
-						)}
+											<Box sx={{ display: 'flex', gap: 2, mt: 2, mb: 2 }}>
+												<AppleTextField
+													label="Дата начала"
+													type="date"
+													value={dateFilterRange.start}
+													onChange={(e) => {
+														setDateFilterRange((prev) => ({ ...prev, start: e.target.value }));
+														setPlanHistoryPage(1);
+													}}
+													InputLabelProps={{ shrink: true }}
+													sx={{ width: '200px' }}
+												/>
+												<AppleTextField
+													label="Дата окончания"
+													type="date"
+													value={dateFilterRange.end}
+													onChange={(e) => {
+														setDateFilterRange((prev) => ({ ...prev, end: e.target.value }));
+														setPlanHistoryPage(1);
+													}}
+													InputLabelProps={{ shrink: true }}
+													sx={{ width: '200px' }}
+												/>
+											</Box>
+											{planActionHistory.length > 0 ? (
+												<>
+													<AppleTable
+														sx={{
+															mt: 2,
+															backgroundColor: '#F5F5F7',
+															boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+															borderRadius: '8px',
+														}}
+													>
+														<TableHead>
+															<TableRow sx={{ backgroundColor: '#0071E3', borderRadius: '8px 8px 0 0' }}>
+																<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '150px', borderTopLeftRadius: '8px' }}>
+																	План
+																</TableCell>
+																<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '150px' }}>
+																	Пользователь
+																</TableCell>
+																<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '120px' }}>
+																	Действие
+																</TableCell>
+																<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', minWidth: '140px', borderTopRightRadius: '8px' }}>
+																	Время
+																</TableCell>
+															</TableRow>
+														</TableHead>
+														<Fade in={true} timeout={500} key={planHistoryTransitionKey}>
+															<TableBody>
+																{planActionHistory.map((action) => (
+																	<TableRow key={action.id}>
+																		<TableCell sx={{ minWidth: '150px', whiteSpace: 'nowrap' }}>
+																			<Typography
+																				sx={{
+																					color: '#0071E3',
+																					textDecoration: 'underline',
+																					cursor: 'pointer',
+																					'&:hover': { textDecoration: 'none' },
+																				}}
+																				onClick={() => {
+																					if (action.id) {
+																						handleClosePlanHistoryDrawer();
+																						// navigate(`/plan/${action.id}`); // Раскомментируйте, если есть страница плана
+																					} else {
+																						setError('ID плана отсутствует в записи истории.');
+																						setOpenError(true);
+																					}
+																				}}
+																			>
+																				План на {action.year} год
+																			</Typography>
+																		</TableCell>
+																		<TableCell sx={{ minWidth: '150px', whiteSpace: 'normal', wordWrap: 'break-word' }}>
+																			{action.user_full_name}
+																		</TableCell>
+																		<TableCell sx={{ minWidth: '120px' }}>
+																			{action.action_type === 'approved' ? 'Утверждён' : 'Возвращён на доработку'}
+																		</TableCell>
+																		<TableCell sx={{ minWidth: '140px' }}>
+																			{new Date(action.timestamp).toLocaleString('ru-RU')}
+																		</TableCell>
+																	</TableRow>
+																))}
+															</TableBody>
+														</Fade>
+													</AppleTable>
+													<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
+														<Pagination
+															count={totalPlanHistoryPages}
+															page={planHistoryPage}
+															onChange={handlePlanHistoryPageChange}
+															color="primary"
+															sx={{
+																'& .MuiPaginationItem-root': {
+																	borderRadius: 20,
+																	'&:hover': { backgroundColor: 'grey.100' },
+																	'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white' },
+																},
+															}}
+														/>
+													</Box>
+												</>
+											) : (
+												<Typography sx={{ mt: 2, color: '#6E6E73' }}>
+													Нет записей в истории действий с планами.
+												</Typography>
+											)}
+										</Box>
+									</Drawer>
+								</Box>
+							)}
+						</>
+					)}
+				</AppleCard>
 
-						<Dialog
-							open={openDeleteDialog}
-							onClose={() => {
-								setOpenDeleteDialog(false);
-								setPublicationToDelete(null);
-							}}
-							sx={{
-								'& .MuiDialog-paper': {
-									backgroundColor: '#FFFFFF',
-									boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-									borderRadius: '16px',
-									fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif",
-								},
-							}}
-						>
-							<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
-								Подтвердите удаление
-							</DialogTitle>
-							<DialogContent sx={{ padding: '24px' }}>
-								<Typography sx={{ color: '#6E6E73' }}>
-									Вы уверены, что хотите удалить публикацию "{publicationToDelete?.title}"?
-								</Typography>
-							</DialogContent>
-							<DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5EA' }}>
-								<CancelButton
-									onClick={() => {
-										setOpenDeleteDialog(false);
-										setPublicationToDelete(null);
-									}}
-								>
-									Отмена
-								</CancelButton>
-								<AppleButton onClick={handleDeletePlanConfirm}>Удалить</AppleButton>
-							</DialogActions>
-						</Dialog>
-
-						<Dialog
-							open={openEditDialog}
-							onClose={handleEditCancel}
-							sx={{
-								'& .MuiDialog-paper': {
-									backgroundColor: '#FFFFFF',
-									boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-									borderRadius: '16px',
-									fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif",
-								},
-							}}
-						>
-							<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
-								Редактировать публикацию
-							</DialogTitle>
-							<DialogContent sx={{ padding: '24px' }}>
-								<form onSubmit={handleEditSubmit}>
-									<AppleTextField
-										fullWidth
-										label="Название"
-										value={editTitle}
-										onChange={(e) => setEditTitle(e.target.value)}
-										margin="normal"
-										variant="outlined"
-									/>
-									<AppleTextField
-										fullWidth
-										label="Авторы"
-										value={editAuthors}
-										onChange={(e) => setEditAuthors(e.target.value)}
-										margin="normal"
-										variant="outlined"
-									/>
-									<AppleTextField
-										fullWidth
-										label="Год"
-										type="number"
-										value={editYear}
-										onChange={(e) => setEditYear(e.target.value)}
-										margin="normal"
-										variant="outlined"
-									/>
-									<AppleTextField
-										fullWidth
-										select
-										label="Тип публикации"
-										value={editType}
-										onChange={(e) => setEditType(e.target.value)}
-										margin="normal"
-										variant="outlined"
-									>
-										<MenuItem value="article">Статья</MenuItem>
-										<MenuItem value="monograph">Монография</MenuItem>
-										<MenuItem value="conference">Доклад/конференция</MenuItem>
-									</AppleTextField>
-									<AppleTextField
-										fullWidth
-										select
-										label="Статус"
-										value={editStatus}
-										onChange={(e) => setEditStatus(e.target.value)}
-										margin="normal"
-										variant="outlined"
-										disabled={!editPublication?.file_url && !editFile}
-									>
-										<MenuItem value="draft">Черновик</MenuItem>
-										<MenuItem value="needs_review">Нуждается в проверке</MenuItem>
-										<MenuItem value="published" disabled={!editPublication?.file_url && !editFile}>
-											Опубликовано
-										</MenuItem>
-									</AppleTextField>
-									<Box sx={{ mt: 2 }}>
-										<Typography variant="body2" sx={{ color: '#6E6E73', mb: 1 }}>
-											Текущий файл: {editPublication?.file_url || 'Нет файла'}
-										</Typography>
-										<input
-											type="file"
-											accept=".pdf,.docx"
-											onChange={(e) => setEditFile(e.target.files[0])}
-											style={{ display: 'none' }}
-											id="edit-upload-file"
-										/>
-										<label htmlFor="edit-upload-file">
-											<AppleButton sx={{ border: '1px solid #D1D1D6', backgroundColor: '#F5F5F7', color: '#1D1D1F' }} component="span">
-												Выбрать файл
-											</AppleButton>
-										</label>
-										{editFile && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{editFile.name}</Typography>}
-									</Box>
-									<Collapse in={openError}>
-										{error && (
-											<Alert
-												severity="error"
-												sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#FFF1F0', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
-												onClose={() => setOpenError(false)}
-											>
-												{error}
-											</Alert>
-										)}
-									</Collapse>
-									<Collapse in={openSuccess}>
-										{success && (
-											<Alert
-												severity="success"
-												sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#E7F8E7', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
-												onClose={() => setOpenSuccess(false)}
-											>
-												{success}
-											</Alert>
-										)}
-									</Collapse>
-									<DialogActions sx={{ padding: '16px 0', borderTop: '1px solid #E5E5EA' }}>
-										<CancelButton onClick={handleEditCancel}>Отмена</CancelButton>
-										<AppleButton type="submit">Сохранить</AppleButton>
-									</DialogActions>
-								</form>
-							</DialogContent>
-						</Dialog>
-
-						<Dialog
-							open={openReturnDialog}
-							onClose={() => setOpenReturnDialog(false)}
-							sx={{
-								'& .MuiDialog-paper': {
-									backgroundColor: '#FFFFFF',
-									boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-									borderRadius: '16px',
-									fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif",
-									maxWidth: '400px',
-								},
-							}}
-						>
-							<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
-								Вернуть на доработку
-							</DialogTitle>
-							<DialogContent sx={{ padding: '24px' }}>
-								<Typography sx={{ color: '#6E6E73', mb: 2 }}>
-									Пожалуйста, укажите комментарий для пользователя:
-								</Typography>
-								<TextField
-									autoFocus
-									margin="dense"
-									label="Комментарий"
-									type="text"
-									fullWidth
-									multiline
-									rows={3}
-									value={returnComment}
-									onChange={(e) => setReturnComment(e.target.value)}
-									variant="outlined"
+				{/* Диалог редактирования публикации */}
+				<Dialog
+					open={openEditDialog}
+					onClose={handleEditCancel}
+					PaperProps={{
+						sx: { borderRadius: '16px', p: 2, backgroundColor: '#FFFFFF', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' },
+					}}
+				>
+					<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600 }}>Редактировать публикацию</DialogTitle>
+					<DialogContent>
+						<form onSubmit={handleEditSubmit}>
+							<AppleTextField
+								fullWidth
+								label="Название"
+								value={editTitle}
+								onChange={(e) => setEditTitle(e.target.value)}
+								margin="normal"
+								variant="outlined"
+								autoComplete="off"
+							/>
+							<AppleTextField
+								fullWidth
+								label="Авторы"
+								value={editAuthors}
+								onChange={(e) => setEditAuthors(e.target.value)}
+								margin="normal"
+								variant="outlined"
+								autoComplete="off"
+							/>
+							<AppleTextField
+								fullWidth
+								label="Год"
+								type="number"
+								value={editYear}
+								onChange={(e) => setEditYear(e.target.value)}
+								margin="normal"
+								variant="outlined"
+								inputProps={{ min: 1900, max: new Date().getFullYear() }}
+							/>
+							<AppleTextField
+								select
+								fullWidth
+								label="Тип"
+								value={editType}
+								onChange={(e) => setEditType(e.target.value)}
+								margin="normal"
+								variant="outlined"
+							>
+								<MenuItem value="article">Статья</MenuItem>
+								<MenuItem value="monograph">Монография</MenuItem>
+								<MenuItem value="conference">Доклад/конференция</MenuItem>
+							</AppleTextField>
+							<AppleTextField
+								select
+								fullWidth
+								label="Статус"
+								value={editStatus}
+								onChange={(e) => setEditStatus(e.target.value)}
+								margin="normal"
+								variant="outlined"
+							>
+								<MenuItem value="draft">Черновик</MenuItem>
+								<MenuItem value="needs_review">На проверке</MenuItem>
+								<MenuItem value="returned_for_revision">Возвращено на доработку</MenuItem>
+								<MenuItem value="published">Опубликовано</MenuItem>
+							</AppleTextField>
+							<Button
+								component="label"
+								sx={{
+									mt: 2,
+									borderRadius: '12px',
+									backgroundColor: '#F5F5F7',
+									color: '#0071E3',
+									textTransform: 'none',
+									padding: '8px 16px',
+									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+									'&:hover': { backgroundColor: '#E8ECEF' },
+								}}
+							>
+								Загрузить новый файл
+								<input
+									type="file"
+									hidden
+									onChange={(e) => setEditFile(e.target.files[0])}
 								/>
-							</DialogContent>
-							<DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5EA' }}>
-								<CancelButton onClick={() => setOpenReturnDialog(false)}>Отмена</CancelButton>
-								<AppleButton
-									onClick={() => {
-										if (selectedPublication) {
-											handleReturnPublicationForRevision(selectedPublication, returnComment);
-										} else if (selectedPlan) {
-											handleReturnForRevision();
-										}
-									}}
-								>
-									Отправить
-								</AppleButton>
-							</DialogActions>
-						</Dialog>
+							</Button>
+							{editFile && (
+								<Typography sx={{ mt: 1, color: '#6E6E73' }}>
+									Выбран файл: {editFile.name}
+								</Typography>
+							)}
+							<Collapse in={openError}>
+								{error && (
+									<Alert
+										severity="error"
+										sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#FFF1F0', color: '#1D1D1F' }}
+										onClose={() => setOpenError(false)}
+									>
+										{error}
+									</Alert>
+								)}
+							</Collapse>
+						</form>
+					</DialogContent>
+					<DialogActions sx={{ p: 2 }}>
+						<CancelButton onClick={handleEditCancel}>Отмена</CancelButton>
+						<AppleButton type="submit" onClick={handleEditSubmit}>
+							Сохранить
+						</AppleButton>
+					</DialogActions>
+				</Dialog>
 
-						{value !== 2 && (
-							<>
-								<Collapse in={openError}>
-									{error && (
-										<Alert
-											severity="error"
-											sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#FFF1F0', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
-											onClose={() => setOpenError(false)}
-										>
-											{error}
-										</Alert>
-									)}
-								</Collapse>
-								<Collapse in={openSuccess}>
-									{success && (
-										<Alert
-											severity="success"
-											sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#E7F8E7', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
-											onClose={() => setOpenSuccess(false)}
-										>
-											{success}
-										</Alert>
-									)}
-								</Collapse>
-							</>
-						)}
-					</>
-				)}
-			</AppleCard>
-		</Container>
+				{/* Диалог удаления публикации */}
+				<Dialog
+					open={openDeleteDialog}
+					onClose={() => setOpenDeleteDialog(false)}
+					PaperProps={{
+						sx: { borderRadius: '16px', p: 2, backgroundColor: '#FFFFFF', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' },
+					}}
+				>
+					<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600 }}>Удалить публикацию</DialogTitle>
+					<DialogContent>
+						<Typography sx={{ color: '#1D1D1F' }}>
+							Вы уверены, что хотите удалить публикацию "{publicationToDelete?.title || 'Не указано'}"? Это действие нельзя отменить.
+						</Typography>
+					</DialogContent>
+					<DialogActions sx={{ p: 2 }}>
+						<CancelButton onClick={() => setOpenDeleteDialog(false)}>Отмена</CancelButton>
+						<AppleButton
+							sx={{ backgroundColor: '#FF3B30', '&:hover': { backgroundColor: '#E6392E' } }}
+							onClick={handleDeletePlanConfirm}
+						>
+							Удалить
+						</AppleButton>
+					</DialogActions>
+				</Dialog>
+
+				{/* Диалог возврата плана на доработку */}
+				<Dialog
+					open={openReturnDialog}
+					onClose={() => setOpenReturnDialog(false)}
+					PaperProps={{
+						sx: { borderRadius: '16px', p: 2, backgroundColor: '#FFFFFF', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' },
+					}}
+				>
+					<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600 }}>
+						Возврат плана на доработку
+					</DialogTitle>
+					<DialogContent>
+						<Typography sx={{ color: '#1D1D1F', mb: 2 }}>
+							Укажите причину возврата плана на доработку.
+						</Typography>
+						<AppleTextField
+							fullWidth
+							label="Комментарий"
+							value={returnComment}
+							onChange={(e) => setReturnComment(e.target.value)}
+							margin="normal"
+							variant="outlined"
+							multiline
+							rows={4}
+						/>
+						<Collapse in={openError}>
+							{error && (
+								<Alert
+									severity="error"
+									sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#FFF1F0', color: '#1D1D1F' }}
+									onClose={() => setOpenError(false)}
+								>
+									{error}
+								</Alert>
+							)}
+						</Collapse>
+					</DialogContent>
+					<DialogActions sx={{ p: 2 }}>
+						<CancelButton onClick={() => setOpenReturnDialog(false)}>Отмена</CancelButton>
+						<AppleButton onClick={handleReturnForRevision}>Отправить</AppleButton>
+					</DialogActions>
+				</Dialog>
+
+				{/* Уведомления */}
+				<Collapse in={openSuccess}>
+					{success && (
+						<Alert
+							severity="success"
+							sx={{
+								position: 'fixed',
+								top: 16,
+								left: '50%',
+								transform: 'translateX(-50%)',
+								width: 'fit-content',
+								maxWidth: '90%',
+								borderRadius: '12px',
+								backgroundColor: '#E7F8E7',
+								color: '#1D1D1F',
+								boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+								zIndex: 1500,
+							}}
+							onClose={() => setOpenSuccess(false)}
+						>
+							{success}
+						</Alert>
+					)}
+				</Collapse>
+			</Container>
+		</>
 	);
 }
 

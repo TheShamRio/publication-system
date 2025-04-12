@@ -88,6 +88,7 @@ function Header() {
 							variant="contained"
 							color="primary"
 							sx={{
+								textTransform: 'none',
 								borderRadius: 16,
 								transition: 'all 0.3s ease',
 								'&:hover': { transform: 'scale(1.05)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)' },
@@ -103,6 +104,7 @@ function Header() {
 								variant="contained"
 								color="primary"
 								sx={{
+									textTransform: 'none',
 									borderRadius: 16,
 									transition: 'all 0.3s ease',
 									'&:hover': { transform: 'scale(1.05)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)' },
@@ -115,6 +117,7 @@ function Header() {
 								variant="contained"
 								color="primary"
 								sx={{
+									textTransform: 'none',
 									borderRadius: 16,
 									transition: 'all 0.3s ease',
 									'&:hover': { transform: 'scale(1.05)', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.15)' },

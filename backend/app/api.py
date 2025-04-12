@@ -660,3 +660,52 @@ def get_publication_action_history():
         'pages': paginated_actions.pages,
         'total': paginated_actions.total
     }), 200
+
+@bp.route('/admin/statistics', methods=['GET'])
+@admin_or_manager_required
+def get_statistics():
+    """
+    Получение статистики план/факт по пользователям за указанный год.
+    Параметры:
+        year (int, необязательный): Год для фильтрации (по умолчанию текущий год).
+    Возвращает:
+        Список пользователей с их планами и фактическими публикациями по типам.
+    """
+    year = request.args.get('year', type=int, default=datetime.utcnow().year)
+    logger.debug(f"Получен GET запрос для /admin_api/admin/statistics?year={year}")
+
+    # Получаем всех пользователей с ролью 'user'
+    users = User.query.filter_by(role='user').all()
+    result = []
+
+    for user in users:
+        # Получаем план пользователя за указанный год
+        plan = Plan.query.filter_by(user_id=user.id, year=year).first()
+        plan_data = {'article': 0, 'monograph': 0, 'conference': 0}
+        
+        if plan:
+            # Подсчитываем количество по типам из PlanEntry
+            for entry in plan.entries:
+                if entry.type in plan_data:
+                    plan_data[entry.type] += 1
+
+        # Получаем опубликованные публикации за указанный год
+        actual_data = {'article': 0, 'monograph': 0, 'conference': 0}
+        publications = Publication.query.filter_by(
+            user_id=user.id,
+            status='published',
+            year=year
+        ).all()
+        
+        for pub in publications:
+            if pub.type in actual_data:
+                actual_data[pub.type] += 1
+
+        result.append({
+            'user_id': user.id,
+            'full_name': user.full_name or user.username,
+            'plan': plan_data,
+            'actual': actual_data
+        })
+
+    return jsonify(result), 200

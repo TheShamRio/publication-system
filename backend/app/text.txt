@@ -1,961 +1,5 @@
-Скидываю файлы заного, упустил еще один 
-D:\publication-system\backend\app\routes.py
-
-from flask import Blueprint, jsonify, request, make_response, current_app, send_file
-from .extensions import db, login_manager, csrf
-from .models import User, Publication, Comment, Plan, PlanEntry
-from .utils import allowed_file
-from flask_login import login_user, current_user, logout_user, login_required
-from werkzeug.utils import secure_filename
-from flask_wtf.csrf import generate_csrf
-import os
-from .analytics import get_publications_by_year
-import bibtexparser
-from reportlab.platypus import SimpleDocTemplate, Paragraph
-from reportlab.lib.pagesizes import letter
-from bibtexparser.bibdatabase import BibDatabase
-from bibtexparser.bwriter import BibTexWriter
-import logging
-from datetime import datetime, UTC
-from werkzeug.security import generate_password_hash, check_password_hash
-
-bp = Blueprint('api', __name__, url_prefix='/api')
-
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
-
-@bp.route('/uploads/<path:filename>')
-def download_file(filename):
-    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-    logger.debug(f"Serving file from {file_path}")
-    if not os.path.exists(file_path):
-        logger.error(f"File not found: {file_path}")
-        return jsonify({'error': 'Файл не найден'}), 404
-    response = send_file(file_path, as_attachment=True)
-    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
-    response.headers['Pragma'] = 'no-cache'
-    response.headers['Expires'] = '0'
-    return response
-
-@bp.route('/publications/<int:pub_id>', methods=['GET'])
-@login_required
-def get_publication(pub_id):
-    publication = Publication.query.get_or_404(pub_id)
-
-    if publication.user_id != current_user.id and current_user.role not in ['admin', 'manager']:
-        logger.warning(f"Unauthorized access attempt to publication {pub_id} by user {current_user.id} with role {current_user.role}")
-        return jsonify({"error": "У вас нет прав для просмотра этой публикации."}), 403
-
-    comments = Comment.query.filter_by(publication_id=pub_id, parent_id=None).order_by(Comment.created_at.asc()).all()
-    
-    def build_comment_tree(comment):
-        return {
-            'id': comment.id,
-            'content': comment.content,
-            'user': {'username': comment.user.username, 'full_name': comment.user.full_name, 'role': comment.user.role},
-            'created_at': comment.created_at.isoformat(),
-            'replies': [build_comment_tree(reply) for reply in comment.replies]
-        }
-    
-    return jsonify({
-        'id': publication.id,
-        'title': publication.title,
-        'authors': publication.authors,
-        'year': publication.year,
-        'type': publication.type,
-        'status': publication.status,
-        'file_url': publication.file_url if publication.file_url else None,
-        'user': {
-            'id': publication.user.id if publication.user else None,
-            'full_name': publication.user.full_name if publication.user else None},
-        'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
-        'published_at': publication.published_at.isoformat() if publication.published_at else None,
-        'returned_for_revision': publication.returned_for_revision,
-        'comments': [build_comment_tree(comment) for comment in comments]
-    }), 200
-
-@bp.route('/publications/<int:pub_id>/comments', methods=['POST'])
-@login_required
-def add_comment(pub_id):
-    publication = Publication.query.get_or_404(pub_id)
-    data = request.get_json()
-    content = data.get('content')
-    parent_id = data.get('parent_id')
-
-    if not content:
-        return jsonify({'error': 'Комментарий не может быть пустым'}), 400
-
-    comment = Comment(
-        content=content,
-        user_id=current_user.id,
-        publication_id=pub_id,
-        parent_id=parent_id if parent_id else None
-    )
-    db.session.add(comment)
-    db.session.commit()
-
-    return jsonify({
-        'message': 'Комментарий добавлен',
-        'comment': {
-            'id': comment.id,
-            'content': comment.content,
-            'user': {'username': current_user.username, 'full_name': current_user.full_name, 'role': current_user.role},
-            'created_at': comment.created_at.isoformat(),
-            'replies': []
-        }
-    }), 201
-
-@bp.route('/publications/<int:pub_id>/submit-for-review', methods=['POST'])
-@login_required
-def submit_for_review(pub_id):
-    publication = Publication.query.get_or_404(pub_id)
-    
-    if publication.user_id != current_user.id:
-        logger.warning(f"Несанкционированная попытка отправить публикацию {pub_id} на проверку пользователем {current_user.id}")
-        return jsonify({'error': 'У вас нет прав на отправку этой публикации на проверку'}), 403
-
-    if publication.status not in ['draft', 'returned_for_revision']:
-        logger.debug(f"Публикация {pub_id} со статусом {publication.status} не может быть отправлена на проверку")
-        return jsonify({'error': 'Публикация уже отправлена на проверку или опубликована'}), 400
-
-    if not publication.file_url:
-        logger.debug(f"Попытка отправить публикацию {pub_id} без файла")
-        return jsonify({'error': 'Нельзя отправить на проверку публикацию без прикреплённого файла'}), 400
-
-    publication.status = 'needs_review'
-    publication.updated_at = datetime.utcnow()
-    publication.returned_for_revision = False
-
-    try:
-        db.session.commit()
-        logger.debug(f"Публикация {pub_id} успешно отправлена на проверку пользователем {current_user.id}")
-        return jsonify({'message': 'Публикация отправлена на проверку'}), 200
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Ошибка отправки на проверку публикации {pub_id}: {str(e)}")
-        return jsonify({'error': 'Ошибка при отправке на проверку. Попробуйте позже.'}), 500
-
-@bp.route('/publications/<int:pub_id>/publish', methods=['POST'])
-@login_required
-def publish_publication(pub_id):
-    publication = Publication.query.get_or_404(pub_id)
-
-    if current_user.role not in ['admin', 'manager']:
-        logger.warning(f"Несанкционированная попытка опубликовать публикацию {pub_id} пользователем {current_user.id} с ролью {current_user.role}")
-        return jsonify({"error": "У вас нет прав для публикации этой работы."}), 403
-
-    if publication.status != 'needs_review':
-        return jsonify({"error": "Публикация не находится на стадии проверки."}), 400
-
-    if not publication.file_url:
-        return jsonify({"error": "Нельзя опубликовать работу без прикреплённого файла."}), 400
-
-    publication.status = 'published'
-    publication.published_at = datetime.utcnow()
-    publication.returned_for_revision = False
-
-    try:
-        db.session.commit()
-        logger.debug(f"Публикация {pub_id} успешно опубликована пользователем {current_user.id}")
-        return jsonify({
-            'message': 'Публикация успешно опубликована',
-            'publication': {
-                'id': publication.id,
-                'title': publication.title,
-                'status': publication.status,
-                'published_at': publication.published_at.isoformat()
-            }
-        }), 200
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Ошибка при публикации публикации {pub_id}: {str(e)}")
-        return jsonify({"error": "Ошибка при публикации. Попробуйте позже."}), 500
-
-@bp.route('/publications/<int:pub_id>/return-for-revision', methods=['POST'])
-@login_required
-def return_for_revision(pub_id):
-    publication = Publication.query.get_or_404(pub_id)
-
-    if current_user.role not in ['admin', 'manager']:
-        logger.warning(f"Несанкционированная попытка вернуть публикацию {pub_id} на доработку пользователем {current_user.id} с ролью {current_user.role}")
-        return jsonify({"error": "У вас нет прав для возврата этой работы на доработку."}), 403
-
-    if publication.status != 'needs_review':
-        return jsonify({"error": "Публикация не находится на стадии проверки."}), 400
-
-    comments = Comment.query.filter_by(publication_id=pub_id).all()
-    has_reviewer_comment = any(
-        comment.user.role in ['admin', 'manager'] or any(reply.user.role in ['admin', 'manager'] for reply in comment.replies)
-        for comment in comments
-    )
-    if not has_reviewer_comment:
-        return jsonify({"error": "Необходимо добавить комментарий перед возвратом на доработку."}), 400
-
-    # Исправляем статус на 'returned_for_revision'
-    publication.status = 'returned_for_revision'
-    publication.returned_for_revision = True
-    publication.published_at = None
-
-    try:
-        db.session.commit()
-        logger.debug(f"Публикация {pub_id} возвращена на доработку пользователем {current_user.id}")
-        return jsonify({
-            'message': 'Публикация отправлена на доработку',
-            'publication': {
-                'id': publication.id,
-                'title': publication.title,
-                'status': publication.status,
-                'returned_for_revision': publication.returned_for_revision
-            }
-        }), 200
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Ошибка при возврате публикации {pub_id} на доработку: {str(e)}")
-        return jsonify({"error": "Ошибка при возврате на доработку. Попробуйте позже."}), 500
-@bp.route('/login', methods=['POST'])
-@csrf.exempt
-def login():
-    logger.debug(f"Получен POST запрос для /login")
-    data = request.get_json()
-    username = data.get('username')
-    password = data.get('password')
-
-    user = User.query.filter_by(username=username).first()
-    if user and check_password_hash(user.password_hash, password):
-        login_user(user, remember=True)
-        return jsonify({
-            'message': 'Успешная авторизация',
-            'user': {
-                'id': user.id,
-                'username': user.username,
-                'role': user.role,
-                'last_name': user.last_name,
-                'first_name': user.first_name,
-                'middle_name': user.middle_name
-            }
-        }), 200
-    return jsonify({'error': 'Неверное имя пользователя или пароль'}), 401
-
-@bp.route('/csrf-token', methods=['GET'])
-def get_csrf_token():
-    logger.debug(f"Получен GET запрос для /api/csrf-token")
-    token = generate_csrf()
-    return jsonify({'csrf_token': token}), 200
-
-@bp.route('/logout', methods=['POST'])
-@login_required
-def logout():
-    logger.debug(f"Получен POST запрос для /logout")
-    logout_user()
-    response = jsonify({'message': 'Успешный выход'})
-    response.set_cookie('session', '', expires=0)
-    return response, 200
-
-@bp.route('/user', methods=['GET', 'PUT'])
-@login_required
-def user():
-    logger.debug(f"Получен {request.method} запрос для /user")
-    logger.debug(f"Текущий пользователь: {current_user.id if current_user.is_authenticated else 'Не аутентифицирован'}")
-    logger.debug(f"Куки сессии: {request.cookies.get('session')}")
-    if request.method == 'GET':
-        response_data = {
-            'id': current_user.id,
-            'username': current_user.username,
-            'role': current_user.role,
-            'last_name': current_user.last_name,
-            'first_name': current_user.first_name,
-            'middle_name': current_user.middle_name,
-            'created_at': current_user.created_at.isoformat() if current_user.created_at else None
-        }
-        logger.debug(f"Ответ сервера для /api/user: {response_data}")
-        return jsonify(response_data), 200
-    elif request.method == 'PUT':
-        data = request.get_json()
-        current_user.last_name = data.get('last_name', current_user.last_name)
-        current_user.first_name = data.get('first_name', current_user.first_name)
-        current_user.middle_name = data.get('middle_name', current_user.middle_name)
-        try:
-            db.session.commit()
-            return jsonify({
-                'message': 'Данные пользователя успешно обновлены',
-                'user': {
-                    'id': current_user.id,
-                    'username': current_user.username,
-                    'role': current_user.role,
-                    'last_name': current_user.last_name,
-                    'first_name': current_user.first_name,
-                    'middle_name': current_user.middle_name
-                }
-            }), 200
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Ошибка обновления данных пользователя {current_user.id}: {str(e)}")
-            return jsonify({"error": "Ошибка при обновлении данных. Попробуйте позже."}), 500
-
-@bp.route('/user/password', methods=['PUT'])
-@login_required
-def change_password():
-    logger.debug(f"Получен PUT запрос для /user/password")
-    data = request.get_json()
-    current_password = data.get('current_password')
-    new_password = data.get('new_password')
-
-    if not check_password_hash(current_user.password_hash, current_password):
-        return jsonify({'error': 'Текущий пароль неверен'}), 401
-
-    current_user.password_hash = generate_password_hash(new_password)
-    try:
-        db.session.commit()
-        return jsonify({'message': 'Пароль успешно изменён'}), 200
-    except Exception as e:
-        db.session.rollback()
-        logger.error(f"Ошибка изменения пароля для пользователя {current_user.id}: {str(e)}")
-        return jsonify({"error": "Ошибка при изменении пароля. Попробуйте позже."}), 500
-
-@bp.route('/public/publications', methods=['GET'])
-def get_public_publications():
-    logger.debug(f"Получен GET запрос для /api/public/publications")
-    
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 10, type=int)
-
-    query = Publication.query.filter_by(status='published').order_by(
-        db.func.coalesce(Publication.published_at, Publication.updated_at).desc()
-    )
-
-    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-    publications = pagination.items
-
-    logger.debug(f"Returning {len(publications)} published publications, sorted by published_at/updated_at: {[pub.published_at.isoformat() if pub.published_at else pub.updated_at.isoformat() for pub in publications]}")
-    logger.debug(f"Total published publications: {pagination.total}, pages: {pagination.pages}, current page: {pagination.page}")
-
-    response = [{
-        'id': pub.id,
-        'title': pub.title,
-        'authors': pub.authors,
-        'year': pub.year,
-        'type': pub.type,
-        'status': pub.status,
-        'file_url': pub.file_url,
-        'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
-        'published_at': pub.published_at.isoformat() if pub.published_at else None,
-        'returned_for_revision': pub.returned_for_revision,
-        'user': {
-            'full_name': pub.user.full_name if pub.user else 'Не указан'
-        } if pub.user else None
-    } for pub in publications]
-
-    return jsonify({
-        'publications': response,
-        'total': pagination.total,
-        'pages': pagination.pages,
-        'current_page': pagination.page
-    }), 200
-
-@bp.route('/publications', methods=['GET'])
-@login_required
-def get_publications():
-    logger.debug(f"Получен GET запрос для /publications")
-    
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 10, type=int)
-    search = request.args.get('search', '').lower()
-    pub_type = request.args.get('type', 'all')
-    status = request.args.get('status', 'all')
-
-    query = Publication.query.filter_by(user_id=current_user.id)
-
-    total_records_before_filters = query.count()
-    logger.debug(f"Total records before filters: {total_records_before_filters}")
-
-    if search:
-        query = query.filter(
-            db.or_(
-                Publication.title.ilike(f'%{search}%'),
-                Publication.authors.ilike(f'%{search}%'),
-                db.cast(Publication.year, db.String).ilike(f'%{search}%')
-            )
-        )
-
-    total_records_after_search = query.count()
-    logger.debug(f"Total records after search: {total_records_after_search}")
-
-    if pub_type != 'all':
-        query = query.filter(Publication.type == pub_type)
-
-    total_records_after_type = query.count()
-    logger.debug(f"Total records after type filter: {total_records_after_type}")
-
-    if status != 'all':
-        query = query.filter(Publication.status == status)
-
-    total_records_after_status = query.count()
-    logger.debug(f"Total records after status filter: {total_records_after_status}")
-
-    query = query.order_by(Publication.updated_at.desc())
-
-    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
-    publications = pagination.items
-
-    logger.debug(f"Publications on page {page}: {len(publications)}")
-
-    response = [{
-        'id': pub.id,
-        'title': pub.title,
-        'authors': pub.authors,
-        'year': pub.year,
-        'type': pub.type,
-        'status': pub.status,
-        'file_url': pub.file_url,
-        'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
-        'returned_for_revision': pub.returned_for_revision,
-    } for pub in publications]
-
-    return jsonify({
-        'publications': response,
-        'total': pagination.total,
-        'pages': pagination.pages,
-        'current_page': pagination.page
-    }), 200
-
-@bp.route('/publications/<int:pub_id>', methods=['PUT', 'DELETE'])
-@login_required
-def manage_publication(pub_id):
-    logger.debug(f"Получен {request.method} запрос для /publications/{pub_id}")
-    publication = Publication.query.get_or_404(pub_id)
-    if publication.user_id != current_user.id:
-        return jsonify({'error': 'У вас нет прав на управление этой публикацией'}), 403
-
-    if publication.status == 'needs_review':
-        return jsonify({'error': 'Нельзя редактировать публикацию, пока она на проверке'}), 403
-
-    if request.method == 'PUT':
-        if request.content_type == 'application/json':
-            data = request.get_json()
-        elif 'file' in request.files or request.content_type.startswith('multipart/form-data'):
-            data = request.form
-        else:
-            return jsonify({"error": "Неподдерживаемый формат данных. Используйте application/json или multipart/form-data."}), 415
-
-        old_status = publication.status
-
-        if 'file' in request.files:
-            file = request.files['file']
-            if file and allowed_file(file.filename):
-                if publication.file_url:
-                    old_file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
-                    if os.path.exists(old_file_path):
-                        os.remove(old_file_path)
-                filename = secure_filename(file.filename)
-                file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-                if os.path.exists(file_path):
-                    base, extension = os.path.splitext(filename)
-                    counter = 1
-                    while os.path.exists(file_path):
-                        filename = f"{base}_{counter}{extension}"
-                        file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-                        counter += 1
-                file.save(file_path)
-                publication.file_url = f"/uploads/{filename}"
-
-        publication.title = data.get('title', publication.title)
-        publication.authors = data.get('authors', publication.authors)
-        publication.year = data.get('year', publication.year)
-        publication.type = data.get('type', publication.type)
-        new_status = data.get('status', publication.status)
-
-        if new_status == 'published' and not publication.file_url:
-            return jsonify({'error': 'Нельзя опубликовать работу без прикреплённого файла.'}), 400
-
-        publication.status = new_status
-
-        if publication.status == 'published' and old_status != 'published':
-            publication.published_at = datetime.utcnow()
-
-        try:
-            db.session.commit()
-            return jsonify({
-                'message': 'Публикация успешно обновлена',
-                'publication': {
-                    'id': publication.id,
-                    'title': publication.title,
-                    'authors': publication.authors,
-                    'year': publication.year,
-                    'type': publication.type,
-                    'status': publication.status,
-                    'file_url': publication.file_url,
-                    'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
-                    'published_at': publication.published_at.isoformat() if publication.published_at else None,
-                    'returned_for_revision': publication.returned_for_revision,
-                }
-            }), 200
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Ошибка обновления публикации {pub_id}: {str(e)}")
-            return jsonify({"error": "Ошибка при обновлении публикации. Попробуйте позже."}), 500
-
-    elif request.method == 'DELETE':
-        try:
-            if publication.file_url:
-                file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-            db.session.delete(publication)
-            db.session.commit()
-            return jsonify({'message': 'Публикация успешно удалена'}), 200
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Ошибка удаления публикации {pub_id}: {str(e)}")
-            return jsonify({"error": "Ошибка при удалении публикации. Попробуйте позже."}), 500
-
-@bp.route('/publications/upload-file', methods=['POST'])
-@login_required
-def upload_file():
-    logger.debug(f"Получен POST запрос для /publications/upload-file")
-    if 'file' not in request.files:
-        return jsonify({'error': 'Файл не предоставлен'}), 400
-
-    file = request.files['file']
-    if not file or not allowed_file(file.filename):
-        return jsonify({'error': 'Недопустимый файл'}), 400
-
-    title = request.form.get('title')
-    authors = request.form.get('authors')
-    year = request.form.get('year')
-    type = request.form.get('type', 'article')
-    
-    if not title or not authors or not year:
-        return jsonify({'error': 'Название, авторы и год обязательны'}), 400
-
-    try:
-        year = int(year)
-        if year < 1900 or year > datetime.now().year:
-            return jsonify({'error': 'Недопустимый год'}), 400
-    except ValueError:
-        return jsonify({'error': 'Год должен быть числом'}), 400
-
-    filename = secure_filename(file.filename)
-    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-    if os.path.exists(file_path):
-        base, extension = os.path.splitext(filename)
-        counter = 1
-        while os.path.exists(file_path):
-            filename = f"{base}_{counter}{extension}"
-            file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-            counter += 1
-    file.save(file_path)
-
-    publication = Publication(
-        title=title,
-        authors=authors,
-        year=year,
-        type=type,
-        status='draft',
-        file_url=f"/uploads/{filename}",
-        user_id=current_user.id,
-        returned_for_revision=False,
-    )
-
-    db.session.add(publication)
-    db.session.commit()
-
-    return jsonify({
-        'message': 'Публикация успешно загружена',
-        'publication': {
-            'id': publication.id,
-            'title': publication.title,
-            'authors': publication.authors,
-            'year': publication.year,
-            'type': publication.type,
-            'status': publication.status,
-            'file_url': publication.file_url,
-            'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
-            'returned_for_revision': publication.returned_for_revision,
-        }
-    }), 200
-
-@bp.route('/publications/upload-bibtex', methods=['POST'])
-@login_required
-def upload_bibtex():
-    logger.debug(f"Получен POST запрос для /publications/upload-bibtex")
-    if 'file' not in request.files:
-        return jsonify({'error': 'BibTeX файл не предоставлен'}), 400
-
-    file = request.files['file']
-    if file and file.filename.endswith('.bib'):
-        try:
-            content = file.read().decode('utf-8')
-            bib_database = bibtexparser.loads(content)
-            publications_added = 0
-
-            for entry in bib_database.entries:
-                title = entry.get('title', 'Без названия')
-                authors = entry.get('author', 'Неизвестный автор')
-                year = entry.get('year', datetime.now().year)
-                try:
-                    year = int(year)
-                except (ValueError, TypeError):
-                    year = datetime.now().year
-                type = entry.get('entrytype', 'article')
-
-                publication = Publication(
-                    title=title,
-                    authors=authors,
-                    year=year,
-                    type=type,
-                    status='draft',
-                    user_id=current_user.id,
-                    returned_for_revision=False,
-                )
-                db.session.add(publication)
-                publications_added += 1
-
-            db.session.commit()
-            return jsonify({'message': f'Обработано {publications_added} публикаций'}), 200
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Ошибка обработки BibTeX: {str(e)}")
-            return jsonify({'error': 'Ошибка при обработке BibTeX файла'}), 500
-    return jsonify({'error': 'Недопустимый файл. Ожидается .bib'}), 400
-
-@bp.route('/publications/<int:pub_id>/attach-file', methods=['POST'])
-@login_required
-def attach_file(pub_id):
-    logger.debug(f"Получен POST запрос для /publications/{pub_id}/attach-file")
-    publication = Publication.query.get_or_404(pub_id)
-    if publication.user_id != current_user.id:
-        return jsonify({'error': 'У вас нет прав на изменение этой публикации'}), 403
-
-    if publication.status == 'needs_review':
-        return jsonify({'error': 'Нельзя редактировать публикацию, пока она на проверке'}), 403
-
-    if 'file' not in request.files:
-        return jsonify({'error': 'Файл не предоставлен'}), 400
-
-    file = request.files['file']
-    if file and allowed_file(file.filename):
-        if publication.file_url:
-            old_file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
-            if os.path.exists(old_file_path):
-                os.remove(old_file_path)
-        filename = secure_filename(file.filename)
-        file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-        if os.path.exists(file_path):
-            base, extension = os.path.splitext(filename)
-            counter = 1
-            while os.path.exists(file_path):
-                filename = f"{base}_{counter}{extension}"
-                file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-                counter += 1
-        file.save(file_path)
-        publication.file_url = f"/uploads/{filename}"
-
-        try:
-            db.session.commit()
-            return jsonify({
-                'message': 'Файл успешно прикреплен',
-                'publication': {
-                    'id': publication.id,
-                    'title': publication.title,
-                    'authors': publication.authors,
-                    'year': publication.year,
-                    'type': publication.type,
-                    'status': publication.status,
-                    'file_url': publication.file_url,
-                    'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
-                    'returned_for_revision': publication.returned_for_revision,
-                }
-            }), 200
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Ошибка прикрепления файла к публикации {pub_id}: {str(e)}")
-            return jsonify({"error": "Ошибка при прикреплении файла. Попробуйте позже."}), 500
-    return jsonify({'error': 'Недопустимый файл'}), 400
-
-@bp.route('/publications/export-bibtex', methods=['GET'])
-@login_required
-def export_bibtex():
-    logger.debug(f"Получен GET запрос для /publications/export-bibtex")
-    try:
-        logger.debug("Начинаем запрос публикаций для текущего пользователя")
-        publications = Publication.query.filter_by(user_id=current_user.id).all()
-        logger.debug(f"Найдено публикаций: {len(publications)}")
-
-        bib_db = BibDatabase()
-        bib_db.entries = [{
-            'ENTRYTYPE': pub.type or 'article',
-            'ID': f'pub{pub.id}',
-            'title': pub.title or 'Без названия',
-            'author': pub.authors or 'Неизвестный автор',
-            'year': str(pub.year) if pub.year else str(datetime.now().year)
-        } for pub in publications]
-
-        writer = BibTexWriter()
-        if not callable(writer.write):
-            raise AttributeError("Метод write в BibTexWriter не является callable. Проверьте версию bibtexparser.")
-
-        bibtex_str = writer.write(bib_db)
-        
-        response = make_response(bibtex_str)
-        response.headers['Content-Disposition'] = 'attachment; filename=publications.bib'
-        response.headers['Content-Type'] = 'application/x-bibtex'
-        logger.debug("BibTeX успешно сгенерирован и отправлен")
-        return response
-    except ImportError as e:
-        logger.error(f"Ошибка импорта bibtexparser: {str(e)}")
-        return jsonify({'error': 'Ошибка импорта библиотеки bibtexparser. Установите или обновите bibtexparser (>=1.4.0).'}), 500
-    except AttributeError as e:
-        logger.error(f"Ошибка атрибута в bibtexparser: {str(e)}")
-        return jsonify({'error': 'Ошибка в библиотеке bibtexparser. Проверьте установку и версию.'}), 500
-    except Exception as e:
-        logger.error(f"Ошибка экспорта BibTeX: {str(e)}")
-        return jsonify({'error': f'Внутренняя ошибка сервера при экспорте BibTeX: {str(e)}'}), 500
-
-@bp.route('/analytics/yearly', methods=['GET'])
-@login_required
-def get_analytics_yearly():
-    logger.debug(f"Получен GET запрос для /analytics/yearly")
-    analytics = get_publications_by_year(current_user.id)
-    return jsonify([{
-        'year': year,
-        'count': count
-    } for year, count in analytics]), 200
-
-@bp.route('/plans', methods=['GET'])
-@login_required
-def get_plans():
-    logger.debug(f"Получен GET запрос для /plans")
-    page = request.args.get('page', 1, type=int)
-    per_page = request.args.get('per_page', 10, type=int)
-    plans = Plan.query.filter_by(user_id=current_user.id).order_by(Plan.year.desc()).paginate(page=page, per_page=per_page)
-    return jsonify({
-        'plans': [plan.to_dict() for plan in plans.items],
-        'total': plans.total,
-        'pages': plans.pages,
-        'current_page': plans.page
-    })
-
-@bp.route('/plans', methods=['POST'])
-@login_required
-def create_plan():
-    logger.debug(f"Получен POST запрос для /plans")
-    data = request.get_json()
-    if not data.get('year') or not data.get('fillType') or 'entries' not in data:
-        return jsonify({'error': 'Missing required fields'}), 400
-    
-    if not isinstance(data['year'], int) or data['year'] < 1900 or data['year'] > 2100:
-        return jsonify({'error': 'Invalid year'}), 400
-    
-    if data['fillType'] not in ['manual', 'link']:
-        return jsonify({'error': 'Invalid fill type'}), 400
-
-    # Проверка на существующий утверждённый план
-    existing_approved_plan = Plan.query.filter_by(
-        user_id=current_user.id,
-        year=data['year'],
-        status='approved'
-    ).first()
-    if existing_approved_plan:
-        return jsonify({
-            'error': f'У вас уже есть утверждённый план на {data["year"]} год. Создание нового плана невозможно.'
-        }), 403
-
-    plan = Plan(
-        year=data['year'],
-        fillType=data['fillType'],
-        user_id=current_user.id,
-        status='draft'
-    )
-    db.session.add(plan)
-
-    for entry_data in data['entries']:
-        entry = PlanEntry(
-            title=entry_data.get('title'),
-            type=entry_data.get('type'),
-            publication_id=entry_data.get('publication_id'),
-            status=entry_data.get('status', 'planned'),
-            isPostApproval=False,
-            plan=plan
-        )
-        if entry.publication_id:
-            publication = Publication.query.filter_by(id=entry.publication_id, user_id=current_user.id, status='published').first()
-            if not publication:
-                db.session.rollback()
-                return jsonify({'error': f'Publication with ID {entry.publication_id} not found or not published'}), 404
-        db.session.add(entry)
-
-    db.session.commit()
-    return jsonify({'message': f'Plan created with ID {plan.id}', 'plan': plan.to_dict()}), 201
-
-@bp.route('/plans/<int:plan_id>', methods=['PUT'])
-@login_required
-def update_plan(plan_id):
-    logger.debug(f"Получен PUT запрос для /plans/{plan_id}")
-    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
-    if not plan:
-        return jsonify({'error': 'Plan not found or unauthorized'}), 404
-    
-    if plan.status not in ['draft', 'returned', 'approved']:
-        return jsonify({'error': 'Cannot edit plan that is under review'}), 403
-
-    data = request.get_json()
-    if not all(k in data for k in ('year', 'fillType', 'entries')):
-        return jsonify({'error': 'Missing required fields'}), 400
-    
-    if not isinstance(data['year'], int) or data['year'] < 1900 or data['year'] > 2100:
-        return jsonify({'error': 'Invalid year'}), 400
-    
-    if data['fillType'] not in ['manual', 'link']:
-        return jsonify({'error': 'Invalid fill type'}), 400
-
-    if plan.status == 'approved':
-        existing_entries = {entry.id: entry for entry in plan.entries}
-        new_entries = []
-        for entry_data in data['entries']:
-            entry_id = entry_data.get('id')
-            if entry_id and entry_id in existing_entries:
-                entry = existing_entries[entry_id]
-                entry.title = entry_data.get('title', entry.title)
-                entry.type = entry_data.get('type', entry.type)
-                entry.publication_id = entry_data.get('publication_id', entry.publication_id)
-                entry.status = entry_data.get('status', entry.status)
-                if entry.publication_id:
-                    publication = Publication.query.filter_by(id=entry.publication_id, user_id=current_user.id, status='published').first()
-                    if not publication:
-                        db.session.rollback()
-                        return jsonify({'error': f'Publication with ID {entry.publication_id} not found or not published'}), 404
-            else:
-                new_entry = PlanEntry(
-                    title=entry_data.get('title', ''),
-                    type=entry_data.get('type', 'article'),
-                    publication_id=entry_data.get('publication_id'),
-                    status=entry_data.get('status', 'planned'),
-                    isPostApproval=True,
-                    plan=plan
-                )
-                if new_entry.publication_id:
-                    publication = Publication.query.filter_by(id=new_entry.publication_id, user_id=current_user.id, status='published').first()
-                    if not publication:
-                        db.session.rollback()
-                        return jsonify({'error': f'Publication with ID {new_entry.publication_id} not found or not published'}), 404
-                new_entries.append(new_entry)
-                db.session.add(new_entry)
-    else:
-        plan.year = data['year']
-        plan.fillType = data['fillType']
-        PlanEntry.query.filter_by(plan_id=plan.id).delete()
-        for entry_data in data['entries']:
-            entry = PlanEntry(
-                title=entry_data.get('title'),
-                type=entry_data.get('type'),
-                publication_id=entry_data.get('publication_id'),
-                status=entry_data.get('status', 'planned'),
-                isPostApproval=False,
-                plan=plan
-            )
-            if entry.publication_id:
-                publication = Publication.query.filter_by(id=entry.publication_id, user_id=current_user.id, status='published').first()
-                if not publication:
-                    db.session.rollback()
-                    return jsonify({'error': f'Publication with ID {entry.publication_id} not found or not published'}), 404
-            db.session.add(entry)
-
-    db.session.commit()
-    return jsonify({'message': 'Plan updated successfully', 'plan': plan.to_dict()}), 200
-
-@bp.route('/plans/<int:plan_id>', methods=['DELETE'])
-@login_required
-def delete_plan(plan_id):
-    logger.debug(f"Получен DELETE запрос для /plans/{plan_id}")
-    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
-    if not plan:
-        return jsonify({'error': 'Plan not found or unauthorized'}), 404
-    
-    if plan.status not in ['draft', 'returned']:
-        return jsonify({'error': 'Cannot delete plan that is under review or approved'}), 403
-
-    db.session.delete(plan)
-    db.session.commit()
-    return jsonify({'message': 'Plan deleted successfully'}), 200
-
-@bp.route('/plans/<int:plan_id>/submit-for-review', methods=['POST'])
-@login_required
-def submit_plan_for_review(plan_id):
-    logger.debug(f"Получен POST запрос для /plans/{plan_id}/submit-for-review")
-    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
-    if not plan:
-        return jsonify({'error': 'Plan not found or unauthorized'}), 404
-    
-    if plan.status not in ['draft', 'returned']:
-        return jsonify({'error': 'План уже отправлен на проверку или утверждён'}), 400
-    
-    if not all(entry.title and entry.title.strip() for entry in plan.entries):
-        return jsonify({'error': 'Все записи плана должны иметь заполненные заголовки'}), 400
-
-    plan.status = 'needs_review'
-    db.session.commit()
-    return jsonify({'message': 'План отправлен на проверку', 'plan': plan.to_dict()}), 200
-
-@bp.route('/plans/<int:plan_id>/entries/<int:entry_id>/link', methods=['POST'])
-@login_required
-def link_publication_to_plan_entry(plan_id, entry_id):
-    logger.debug(f"Получен POST запрос для /plans/{plan_id}/entries/{entry_id}/link")
-    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
-    if not plan:
-        return jsonify({'error': 'Plan not found or unauthorized'}), 404
-    
-    entry = PlanEntry.query.filter_by(id=entry_id, plan_id=plan_id).first()
-    if not entry:
-        return jsonify({'error': 'Entry not found'}), 404
-    
-    if plan.status != 'approved':
-        return jsonify({'error': 'Can only link publications to approved plans'}), 403
-    
-    if entry.publication_id:
-        return jsonify({'error': 'Entry already linked to a publication'}), 400
-
-    data = request.get_json()
-    publication_id = data.get('publication_id')
-    if not publication_id:
-        return jsonify({'error': 'Publication ID is required'}), 400
-
-    publication = Publication.query.filter_by(id=publication_id, user_id=current_user.id, status='published').first()
-    if not publication:
-        return jsonify({'error': f'Publication with ID {publication_id} not found or not published'}), 404
-
-    existing_link = PlanEntry.query.filter_by(publication_id=publication_id).first()
-    if existing_link:
-        return jsonify({'error': f'Publication with ID {publication_id} is already linked to another plan entry'}), 400
-
-    entry.publication_id = publication_id
-    entry.status = 'completed'
-    db.session.commit()
-    return jsonify({'message': 'Publication linked successfully', 'entry': entry.to_dict()}), 200
-
-@bp.route('/plans/<int:plan_id>/entries/<int:entry_id>/unlink', methods=['POST'])
-@login_required
-def unlink_publication_from_plan_entry(plan_id, entry_id):
-    logger.debug(f"Получен POST запрос для /plans/{plan_id}/entries/{entry_id}/unlink")
-    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
-    if not plan:
-        return jsonify({'error': 'Plan not found or unauthorized'}), 404
-    
-    entry = PlanEntry.query.filter_by(id=entry_id, plan_id=plan_id).first()
-    if not entry:
-        return jsonify({'error': 'Entry not found'}), 404
-    
-    if plan.status != 'approved':
-        return jsonify({'error': 'Can only unlink publications from approved plans'}), 403
-    
-    if not entry.publication_id:
-        return jsonify({'error': 'No publication linked to this entry'}), 400
-
-    entry.publication_id = None
-    entry.status = 'planned'
-    db.session.commit()
-    return jsonify({'message': 'Publication unlinked successfully', 'entry': entry.to_dict()}), 200
-
 D:\publication-system\backend\app\api.py
+
 from flask import Blueprint, jsonify, request, send_file
 from werkzeug.utils import secure_filename
 from flask_login import login_required, current_user
@@ -1181,6 +225,7 @@ def get_publications():
 @bp.route('/admin/publications/<int:pub_id>', methods=['PUT'])
 @admin_or_manager_required
 def update_publication(pub_id):
+    # Получаем публикацию или возвращаем 404
     publication = Publication.query.get_or_404(pub_id)
 
     # Обрабатываем загрузку файла, если есть
@@ -1214,44 +259,46 @@ def update_publication(pub_id):
     publication.year = int(data.get('year', publication.year))
     publication.type = data.get('type', publication.type)
     new_status = data.get('status', publication.status)
-    comment = data.get('return_comment', '')
+    comment = data.get('return_comment', '')  # Комментарий для любого действия
 
     # Записываем действие в историю при смене статуса
     if new_status != publication.status:
+        timestamp = datetime.utcnow()  # Время действия
         if new_status == 'published':
-            publication.published_at = datetime.utcnow()
+            publication.published_at = timestamp
             publication.returned_for_revision = False
             publication.returned_at = None
             publication.return_comment = None
-            action = PublicationActionHistory(
-                publication_id=pub_id,
-                action_type='approved',
-                timestamp=publication.published_at,
-                user_id=current_user.id
-            )
-            db.session.add(action)
+            action_type = 'published'  # Исправляем на логичное значение
         elif new_status == 'returned_for_revision':
             publication.returned_for_revision = True
-            publication.returned_at = datetime.utcnow()
+            publication.returned_at = timestamp
             publication.return_comment = comment
-            action = PublicationActionHistory(
-                publication_id=pub_id,
-                action_type='returned',
-                timestamp=publication.returned_at,
-                comment=comment,
-                user_id=current_user.id
-            )
-            db.session.add(action)
-        elif new_status not in ['published', 'returned_for_revision'] and publication.status in ['published', 'returned_for_revision']:
-            publication.published_at = None
-            publication.returned_at = None
-            publication.return_comment = None
-            publication.returned_for_revision = False
+            action_type = 'returned'
+        else:
+            # Для других статусов (например, 'needs_review')
+            action_type = new_status  # Используем новый статус как тип действия
+            if publication.status in ['published', 'returned_for_revision']:
+                publication.published_at = None
+                publication.returned_at = None
+                publication.return_comment = None
+                publication.returned_for_revision = False
+
+        # Создаем запись в истории
+        action = PublicationActionHistory(
+            publication_id=publication.id,
+            user_id=current_user.id,
+            action_type=action_type,
+            timestamp=timestamp,
+            comment=comment if comment.strip() else None  # Записываем комментарий, если он не пустой
+        )
+        db.session.add(action)
 
     publication.status = new_status
 
     try:
         db.session.commit()
+        logger.debug(f"Публикация {pub_id} обновлена пользователем {current_user.id}, новый статус: {new_status}")
         return jsonify({
             'message': 'Публикация успешно обновлена',
             'publication': publication.to_dict()
@@ -1616,7 +663,227 @@ def get_publication_action_history():
         'total': paginated_actions.total
     }), 200
 
-import React, { useState, useEffect } from 'react';
+
+		D:\publication-system\backend\app\models.py
+
+		from datetime import datetime
+from werkzeug.security import generate_password_hash, check_password_hash
+from .extensions import db
+from flask_login import UserMixin
+
+class Comment(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    content = db.Column(db.Text, nullable=False)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    publication_id = db.Column(db.Integer, db.ForeignKey('publication.id'), nullable=False)
+    parent_id = db.Column(db.Integer, db.ForeignKey('comment.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), nullable=False)
+
+    user = db.relationship('User', backref='comments', lazy=True)
+    publication = db.relationship('Publication', backref='comments', lazy=True)
+    parent = db.relationship('Comment', remote_side=[id], backref='replies', lazy=True)
+
+class User(db.Model, UserMixin):
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(50), unique=True, nullable=False)
+    publications = db.relationship('Publication', back_populates='user', lazy=True)
+    password_hash = db.Column(db.Text)
+    role = db.Column(db.String(20), default='user', nullable=False)  # 'user', 'admin', 'manager'
+    last_name = db.Column(db.String(100), nullable=True)
+    first_name = db.Column(db.String(100), nullable=True)
+    middle_name = db.Column(db.String(100), nullable=True)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    @property
+    def full_name(self):
+        return f"{self.last_name or ''} {self.first_name or ''} {self.middle_name or ''}".strip()
+    
+    def set_password(self, password):
+        self.password_hash = generate_password_hash(password)
+
+    def check_password(self, password):
+        return check_password_hash(self.password_hash, password)
+    
+    def is_active(self):
+        return True
+
+    def is_authenticated(self):
+        return True
+
+    def is_anonymous(self):
+        return False
+    
+    def get_id(self):
+        return str(self.id)
+    
+		
+
+class Publication(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    title = db.Column(db.String(200), nullable=False)
+    authors = db.Column(db.String(200), nullable=False)
+    year = db.Column(db.Integer, nullable=False)
+    type = db.Column(db.String(50), nullable=False)
+    status = db.Column(db.String(50), nullable=False, default='draft')
+    file_url = db.Column(db.String(200), nullable=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow(), nullable=False)
+    returned_for_revision = db.Column(db.Boolean, default=False)
+    published_at = db.Column(db.DateTime, nullable=True)
+    # Новые поля
+    returned_at = db.Column(db.DateTime, nullable=True)  # Время возврата на доработку
+    return_comment = db.Column(db.Text, nullable=True)   # Комментарий при возврате
+
+    user = db.relationship('User', back_populates='publications', lazy=True)
+    plan_entries = db.relationship('PlanEntry', back_populates='publication', lazy=True)
+    @property
+    def type_ru(self):
+        return {
+            'article': 'Статья',
+            'monograph': 'Монография',
+            'conference': 'Доклад/конференция'
+        }.get(self.type, self.type)
+
+    @property
+    def status_ru(self):
+        return {
+            'draft': 'Черновик',
+            'needs_review': 'На проверке',
+            'published': 'Опубликованные'
+        }.get(self.status, self.status)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'title': self.title,
+            'authors': self.authors,
+            'year': self.year,
+            'type': self.type,
+            'status': self.status,
+            'file_url': self.file_url,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None,
+            'returned_for_revision': self.returned_for_revision,
+            'published_at': self.published_at.isoformat() if self.published_at else None,
+            'returned_at': self.returned_at.isoformat() if self.returned_at else None,  # Добавляем новое поле
+            'return_comment': self.return_comment,  # Добавляем новое поле
+            'user': {
+                'full_name': self.user.full_name if self.user else None
+            } if self.user else None
+        }
+
+class PlanActionHistory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    plan_id = db.Column(db.Integer, db.ForeignKey('plan.id'), nullable=False)
+    action_type = db.Column(db.String(20), nullable=False)  # 'approved', 'returned', etc.
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    comment = db.Column(db.Text, nullable=True)  # Комментарий для возврата
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)  # Кто выполнил действие
+
+    plan = db.relationship('Plan', backref=db.backref('action_history', lazy='dynamic'))
+    user = db.relationship('User', backref='plan_actions')
+    
+class PublicationActionHistory(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    publication_id = db.Column(db.Integer, db.ForeignKey('publication.id'), nullable=False)
+    action_type = db.Column(db.String(20), nullable=False)  # 'approved', 'returned'
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    comment = db.Column(db.Text, nullable=True)  # Комментарий для возврата
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)  # Кто выполнил действие
+
+    publication = db.relationship('Publication', backref=db.backref('action_history', lazy='dynamic'))
+    user = db.relationship('User', backref='publication_actions')		
+class Achievement(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    badge = db.Column(db.String(50))
+    date_earned = db.Column(db.DateTime, default=lambda: datetime.utcnow(), nullable=False)
+
+    user = db.relationship('User', backref='achievements', lazy=True)
+
+    @staticmethod
+    def check_achievements(user_id):
+        user = User.query.get_or_404(user_id)
+        pub_count = Publication.query.filter_by(user_id=user_id).count()
+
+        achievements = [
+            ('top_author', pub_count >= 10),
+            ('10_publications', pub_count >= 10),
+            ('50_publications', pub_count >= 50)
+        ]
+
+        for badge, condition in achievements:
+            if condition and not Achievement.query.filter_by(user_id=user_id, badge=badge).first():
+                new_achievement = Achievement(user_id=user_id, badge=badge)
+                db.session.add(new_achievement)
+        db.session.commit()
+
+class Plan(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    year = db.Column(db.Integer, nullable=False)
+    fillType = db.Column(db.String(10), nullable=False, default='manual')
+    user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
+    status = db.Column(db.String(20), nullable=False, default='draft')
+    return_comment = db.Column(db.Text, nullable=True)
+    approved_at = db.Column(db.DateTime, nullable=True)  # Новое поле
+    returned_at = db.Column(db.DateTime, nullable=True)  # Новое поле
+
+    user = db.relationship('User', backref='plans', lazy=True)
+    entries = db.relationship('PlanEntry', back_populates='plan', lazy=True, cascade='all, delete-orphan')
+
+    def to_dict(self):
+        plan_count = len(self.entries)
+        fact_count = sum(1 for entry in self.entries if entry.publication_id is not None)
+        return {
+            'id': self.id,
+            'year': self.year,
+            'fillType': self.fillType,
+            'status': self.status,
+            'user': {
+                'full_name': self.user.full_name if self.user else None,
+                'username': self.user.username if self.user else None
+            } if self.user else None,
+            'entries': [entry.to_dict() for entry in self.entries],
+            'return_comment': self.return_comment,
+            'plan_count': plan_count,
+            'fact_count': fact_count,
+            'approved_at': self.approved_at.isoformat() if self.approved_at else None,  # Добавляем в ответ
+            'returned_at': self.returned_at.isoformat() if self.returned_at else None,  # Добавляем в ответ
+        }
+
+class PlanEntry(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    plan_id = db.Column(db.Integer, db.ForeignKey('plan.id'), nullable=False)
+    title = db.Column(db.String(200), nullable=True)  # Для ручного заполнения
+    type = db.Column(db.String(50), nullable=True)  # Для ручного заполнения
+    publication_id = db.Column(db.Integer, db.ForeignKey('publication.id'), nullable=True)  # Для привязки
+    status = db.Column(db.String(50), nullable=False, default='planned')  # 'planned', 'in_progress', 'completed'
+    isPostApproval = db.Column(db.Boolean, nullable=False, default=False)  # Новое поле
+
+    plan = db.relationship('Plan', back_populates='entries')
+    publication = db.relationship('Publication', back_populates='plan_entries', lazy=True)
+
+    def to_dict(self):
+        from flask_login import current_user
+        result = {
+            'id': self.id,
+            'title': self.title,
+            'type': self.type,
+            'publication_id': self.publication_id,
+            'status': self.status,
+            'isPostApproval': self.isPostApproval,  # Добавляем поле в ответ
+            'publication': {
+                'id': self.publication.id,
+                'title': self.publication.title
+            } if self.publication else None
+        }
+        if current_user.is_authenticated and current_user.role in ['admin', 'manager']:
+            result['status'] = self.status
+        return result
+
+
+			D:\publication-system\frontend\src\components\ManagerDashboard.js	
+			import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
 	Container,
@@ -3187,388 +2454,3 @@ function ManagerDashboard() {
 }
 
 export default ManagerDashboard;
-
-import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import {
-	Container,
-	Typography,
-	Card,
-	Button,
-	CardContent,
-	Box,
-	Pagination,
-} from '@mui/material';
-import { styled } from '@mui/system';
-import { Document, Page, pdfjs } from 'react-pdf';
-import 'react-pdf/dist/Page/AnnotationLayer.css';
-import 'react-pdf/dist/Page/TextLayer.css';
-import axios from 'axios';
-import DownloadIcon from '@mui/icons-material/Download';
-import { useAuth } from '../contexts/AuthContext';
-import CommentSection from './CommentSection';
-
-pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
-
-const AppleButton = styled(Button)({
-	borderRadius: '12px',
-	textTransform: 'none',
-	backgroundColor: '#0071E3',
-	color: '#FFFFFF',
-	padding: '8px 16px',
-	fontSize: '14px',
-	fontWeight: 600,
-	boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-	'&:hover': { backgroundColor: '#0066CC', boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)' },
-});
-
-const GreenButton = styled(Button)({
-	borderRadius: '12px',
-	textTransform: 'none',
-	backgroundColor: 'green',
-	color: '#FFFFFF',
-	padding: '8px 16px',
-	fontSize: '14px',
-	fontWeight: 600,
-	boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-	'&:hover': {
-		backgroundColor: '#2EBB4A',
-		boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
-	},
-	'&:disabled': {
-		backgroundColor: '#D1D1D6',
-		color: '#FFFFFF',
-	},
-});
-
-const RedButton = styled(Button)({
-	borderRadius: '12px',
-	textTransform: 'none',
-	backgroundColor: '#FF3B30',
-	color: '#FFFFFF',
-	padding: '8px 16px',
-	fontSize: '14px',
-	fontWeight: 600,
-	boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-	'&:hover': {
-		backgroundColor: '#E63935',
-		boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
-	},
-	'&:disabled': {
-		backgroundColor: '#D1D1D6',
-		color: '#FFFFFF',
-	},
-});
-
-const AppleCard = styled(Card)({
-	borderRadius: '16px',
-	boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-	backgroundColor: '#FFFFFF',
-});
-
-const DocumentViewer = styled(Box)({
-	mb: 4,
-	border: '1px solid #E5E5EA',
-	borderRadius: '12px',
-	overflow: 'hidden',
-	backgroundColor: '#FFFFFF',
-	boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-	width: '100%',
-	height: '850px',
-	display: 'flex',
-	justifyContent: 'center',
-	alignItems: 'flex-start',
-	'&::-webkit-scrollbar': { display: 'none' },
-	'-ms-overflow-style': 'none',
-	'scrollbar-width': 'none',
-});
-
-function Publication() {
-	const { id } = useParams();
-	const [publication, setPublication] = useState(null);
-	const [error, setError] = useState('');
-	const [numPages, setNumPages] = useState(null);
-	const [pageNumber, setPageNumber] = useState(1);
-	const { user, isAuthenticated, csrfToken } = useAuth();
-	const [hasReviewerComment, setHasReviewerComment] = useState(false);
-	const [loadingUser, setLoadingUser] = useState(true);
-
-	const fetchPublication = useCallback(async () => {
-		try {
-			const response = await axios.get(`http://localhost:5000/api/publications/${id}`, { withCredentials: true });
-			setPublication(response.data);
-			const reviewerComment = response.data.comments.some(
-				(comment) =>
-					['admin', 'manager'].includes(comment.user.role) ||
-					comment.replies.some((reply) => ['admin', 'manager'].includes(reply.user.role))
-			);
-			setHasReviewerComment(reviewerComment);
-		} catch (err) {
-			console.error('Ошибка загрузки публикации:', err);
-			setError('Не удалось загрузить публикацию. Попробуйте позже.');
-		}
-	}, [id]);
-
-	useEffect(() => {
-		fetchPublication();
-	}, [fetchPublication]);
-
-	useEffect(() => {
-		if (user !== null) {
-			setLoadingUser(false);
-		}
-	}, [user]);
-
-	const onDocumentLoadSuccess = ({ numPages }) => {
-		setNumPages(numPages);
-	};
-
-	const handleDownload = () => {
-		if (publication && publication.file_url) {
-			const fileUrl = `http://localhost:5000${publication.file_url}`;
-			const link = document.createElement('a');
-			link.href = fileUrl;
-			link.download = publication.file_url.split('/').pop();
-			document.body.appendChild(link);
-			link.click();
-			document.body.removeChild(link);
-		}
-	};
-
-	const handlePublish = async () => {
-		try {
-			const response = await axios.post(
-				`http://localhost:5000/api/publications/${id}/publish`,
-				{},
-				{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
-			);
-			console.log('Publication response:', response.data);
-			fetchPublication();
-		} catch (err) {
-			console.error('Ошибка при публикации:', err);
-			setError('Не удалось опубликовать публикацию.');
-		}
-	};
-
-	const handleReject = async () => {
-		try {
-			const reviewerComment = publication.comments
-				.filter((comment) => ['admin', 'manager'].includes(comment.user.role))
-				.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]?.content || '';
-
-			if (!reviewerComment) {
-				setError('Добавьте комментарий перед отправкой на доработку.');
-				return;
-			}
-
-			const response = await axios.post(
-				`http://localhost:5000/api/publications/${id}/return-for-revision`,
-				{ comment: reviewerComment },
-				{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
-			);
-			console.log('Return for revision response:', response.data);
-			fetchPublication();
-		} catch (err) {
-			console.error('Ошибка при отправке на доработку:', err);
-			setError('Не удалось отправить на доработку. Убедитесь, что был добавлен комментарий.');
-		}
-	};
-
-	const handleCommentAdded = (newComment) => {
-		setPublication((prev) => {
-			if (newComment.parent_id) {
-				const updatedComments = prev.comments.map((comment) =>
-					comment.id === newComment.parent_id
-						? { ...comment, replies: [...comment.replies, newComment] }
-						: comment
-				);
-				return { ...prev, comments: updatedComments };
-			}
-			return { ...prev, comments: [...prev.comments, newComment] };
-		});
-		if (['admin', 'manager'].includes(newComment.user.role)) {
-			setHasReviewerComment(true);
-		}
-	};
-
-	if (error) return <Typography color="error">{error}</Typography>;
-	if (!publication || loadingUser) return <Typography sx={{ color: '#212121' }}>Загрузка...</Typography>;
-
-	const fileUrl = publication.file_url ? `http://localhost:5000${publication.file_url}` : null;
-
-	// Функция для отображения статуса с учётом локализации и цвета
-	const renderStatus = (status, returnedForRevision, isReviewer) => {
-		console.log('renderStatus called with:', { status, returnedForRevision, isReviewer });
-
-		let statusText = '';
-		let statusColor = '#757575'; // Цвет по умолчанию (серый)
-		let backgroundColor = 'transparent'; // Фон по умолчанию
-
-		// Проверяем оба возможных условия для "Требует доработки"
-		if (status === 'returned_for_revision' || (status === 'draft' && returnedForRevision)) {
-			statusText = 'Требует доработки';
-			statusColor = '#FF3B30'; // Белый текст
-			backgroundColor = '#FFfff'; // Красный фон с приоритетом
-			console.log('Condition matched: Требует доработки');
-		} else if (isReviewer) {
-			// Логика для менеджера или админа
-			switch (status) {
-				case 'draft':
-					statusText = 'Черновик';
-					break;
-				case 'needs_review':
-					statusText = 'Нуждается в проверке';
-					statusColor = '#FF3B30'; // Красный текст
-					break;
-				case 'published':
-					statusText = 'Опубликованные';
-					break;
-				default:
-					statusText = status || 'Неизвестный статус';
-			}
-			console.log('Reviewer logic applied:', statusText);
-		} else {
-			// Логика для обычного пользователя
-			if (status === 'needs_review') {
-				statusText = 'На проверке';
-			} else if (status === 'draft') {
-				statusText = 'Черновик';
-			} else if (status === 'published') {
-				statusText = 'Опубликованные';
-			} else {
-				statusText = status || 'Неизвестный статус';
-			}
-			console.log('User logic applied:', statusText);
-		}
-
-		return (
-			<Typography
-				variant="body1"
-				sx={{
-					color: statusColor,
-					backgroundColor: backgroundColor,
-					display: 'inline-block',
-					padding: 'px 8px',
-					borderRadius: '4px',
-					mb: 1,
-				}}
-			>
-				{`Статус: ${statusText}`}
-			</Typography>
-		);
-	};
-	const isReviewer = ['admin', 'manager'].includes(user?.role);
-
-	console.log('User:', user);
-	console.log('User role:', user?.role);
-	console.log('Publication status:', publication.status);
-	console.log('Is reviewer and needs_review:', isReviewer && publication.status === 'needs_review');
-
-	return (
-		<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
-			<AppleCard elevation={4}>
-				<CardContent sx={{ pt: 4, pb: 4 }}>
-					<Typography variant="h4" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 600 }}>
-						{publication.title}
-					</Typography>
-					<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
-						Авторы: {publication.authors}
-					</Typography>
-					<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
-						Год: {publication.year}
-					</Typography>
-					<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
-						Тип: {publication.type === 'article' ? 'Статья' : publication.type === 'monograph' ? 'Монография' : publication.type === 'conference' ? 'Доклад/конференция' : publication.type}
-					</Typography>
-					{renderStatus(publication.status, publication.returned_for_revision, isReviewer)}
-					<Typography variant="body1" sx={{ color: '#757575', mb: 2 }}>
-						Опубликовал: {publication.user.full_name}
-					</Typography>
-
-					<Typography variant="h6" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 500 }}>
-						Предпросмотр:
-					</Typography>
-					{fileUrl ? (
-						fileUrl.endsWith('.pdf') ? (
-							<>
-								<DocumentViewer>
-									<Document
-										file={fileUrl}
-										onLoadSuccess={onDocumentLoadSuccess}
-										onLoadError={(err) => setError(`Ошибка загрузки PDF: ${err.message}`)}
-									>
-										<Page
-											pageNumber={pageNumber}
-											scale={1}
-											renderTextLayer={false}
-											renderAnnotationLayer={false}
-										/>
-									</Document>
-								</DocumentViewer>
-								{numPages > 1 && (
-									<Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, mb: 4 }}>
-										<Pagination
-											count={numPages}
-											page={pageNumber}
-											onChange={(event, newPage) => setPageNumber(newPage)}
-											color="primary"
-											sx={{
-												'& .MuiPaginationItem-root': {
-													borderRadius: 20,
-													transition: 'all 0.3s ease',
-													'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
-													'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
-												},
-											}}
-										/>
-									</Box>
-								)}
-							</>
-						) : fileUrl.endsWith('.docx') ? (
-							<Typography sx={{ color: '#6E6E73', mb: 2 }}>
-								Файл загружен в формате DOCX, предпросмотр недоступен.
-							</Typography>
-						) : (
-							<Typography sx={{ color: '#6E6E73', mb: 2 }}>
-								Формат файла не поддерживается для отображения (только PDF и DOCX).
-							</Typography>
-						)
-					) : (
-						<Typography sx={{ color: '#6E6E73', mb: 2 }}>
-							Файл не прикреплен к этой публикации.
-						</Typography>
-					)}
-					{fileUrl && (
-						<Box sx={{ mb: 2 }}>
-							<AppleButton startIcon={<DownloadIcon />} onClick={handleDownload}>
-								Скачать
-							</AppleButton>
-						</Box>
-					)}
-
-					{isReviewer && publication.status === 'needs_review' && (
-						<Box sx={{ mb: 2, display: 'flex', gap: 2 }}>
-							<GreenButton onClick={handlePublish}>Опубликовать</GreenButton>
-							<RedButton onClick={handleReject} disabled={!hasReviewerComment}>
-								Отправить на доработку
-							</RedButton>
-						</Box>
-					)}
-
-					<Typography variant="h5" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 600 }}>
-						Комментарии
-					</Typography>
-					{publication.comments && (
-						<CommentSection
-							comments={publication.comments}
-							publicationId={publication.id}
-							onCommentAdded={handleCommentAdded}
-						/>
-					)}
-				</CardContent>
-			</AppleCard>
-		</Container>
-	);
-}
-
-export default Publication;
