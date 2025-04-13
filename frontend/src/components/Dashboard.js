@@ -316,6 +316,8 @@ function Dashboard() {
 	const [planDialogError, setPlanDialogError] = useState('');
 	const [planDialogSuccess, setPlanDialogSuccess] = useState('');
 	const [openPlanSnackbar, setOpenPlanSnackbar] = useState(false); // Управление видимостью Snackbar
+	const [loadingPublicationTypes, setLoadingPublicationTypes] = useState(true); // Новое состояние для типов
+	const [initializing, setInitializing] = useState(true);
 
 
 	// Добавляем состояния для управления диалогом удаления типа
@@ -343,16 +345,20 @@ function Dashboard() {
 
 	useEffect(() => {
 		const fetchPublicationTypes = async () => {
+			setLoadingPublicationTypes(true);
 			try {
 				const response = await axios.get('http://localhost:5000/api/publication-types', {
 					withCredentials: true,
 					headers: { 'X-CSRFToken': csrfToken },
 				});
+				console.log('Загруженные типы публикаций:', response.data);
 				setPublicationTypes(response.data);
 			} catch (err) {
 				console.error('Ошибка загрузки типов публикаций:', err);
 				setError('Не удалось загрузить типы публикаций.');
 				setOpenError(true);
+			} finally {
+				setLoadingPublicationTypes(false);
 			}
 		};
 		fetchPublicationTypes();
@@ -439,12 +445,11 @@ function Dashboard() {
 
 	const groupEntriesByType = (entries) => {
 		const grouped = {};
-
 		entries.forEach((entry) => {
-			const type = entry.type || 'unknown';
-			if (!validPublicationTypes.includes(type)) {
-				console.warn(`Обнаружен неподдерживаемый тип публикации: ${type}`);
-			}
+			const type = entry.type && typeof entry.type === 'object' && entry.type.name
+				? entry.type.name
+				: (typeof entry.type === 'string' ? entry.type : 'unknown');
+			console.log('Обработка записи с типом:', type);
 			if (!grouped[type]) {
 				grouped[type] = {
 					type,
@@ -459,7 +464,6 @@ function Dashboard() {
 			}
 			grouped[type].entries.push(entry);
 		});
-
 		const result = Object.values(grouped);
 		console.log('Сгруппированные записи:', result);
 		return result;
@@ -622,9 +626,14 @@ function Dashboard() {
 	};
 
 	useEffect(() => {
-		fetchData(1, searchQuery, filterType, filterStatus);
-		fetchPlans(1);
-		fetchAllPublications(); // Добавляем вызов 
+		const loadAll = async () => {
+			setInitializing(true);
+			await fetchData(1, searchQuery, filterType, filterStatus);
+			await fetchPlans(1);
+			await fetchAllPublications();
+			setInitializing(false);
+		};
+		loadAll();
 	}, [navigate, searchQuery, filterType, filterStatus]);
 
 	const currentPublications = filteredPublications;
@@ -1337,51 +1346,94 @@ function Dashboard() {
 		);
 	};
 	const handleSavePlan = async (plan) => {
+		// Проверяем, что редактируем правильный план
+		if (!tempPlan || tempPlan.id !== plan.id) {
+			setError('Ошибка: несоответствие редактируемого плана.');
+			setOpenError(true);
+			return;
+		}
+
 		try {
+			// Обновляем CSRF-токен
 			await refreshCsrfToken();
+
+			// Формируем данные для сохранения
 			const planData = {
 				year: plan.year,
-				expectedCount: tempPlan.groupedEntries.reduce((sum, group) => sum + (group.isDeleted ? 0 : group.planCount), 0),
+				expectedCount: tempPlan.groupedEntries.reduce(
+					(sum, group) => sum + (group.isDeleted ? 0 : group.planCount),
+					0
+				),
 				fillType: 'manual',
 				entries: tempPlan.groupedEntries
 					.filter((group) => !group.isDeleted)
 					.flatMap((group) =>
 						group.entries.map((entry) => ({
-							id: entry.id || undefined,
-							title: entry.title || '',
-							type: entry.type || 'article',
-							status: entry.status || 'planned',
+							id: typeof entry.id === 'string' && entry.id.startsWith('temp-') ? undefined : entry.id,
+							title: entry.title || `Публикация ${group.type}`,
+							// Передаём строку name вместо объекта
+							type: typeof entry.type === 'string' ? entry.type : entry.type?.name || group.type,
+							status: validPlanStatuses.includes(entry.status)
+								? entry.status
+								: 'planned',
 							publication_id: entry.publication_id || null,
-							isPostApproval: entry.isPostApproval || false,
+							isPostApproval: !!entry.isPostApproval,
 						}))
 					),
 			};
-			console.log('Saving plan with:', planData);
-			const response = await axios.put(`http://localhost:5000/api/plans/${plan.id}`, planData, {
-				withCredentials: true,
-				headers: {
-					'X-CSRFToken': csrfToken,
-					'Content-Type': 'application/json',
-				},
-			});
+
+			// Логируем данные для отладки
+			console.log('Сохранение плана:', planData);
+
+			// Отправляем запрос на сервер
+			const response = await axios.put(
+				`http://localhost:5000/api/plans/${plan.id}`,
+				planData,
+				{
+					withCredentials: true,
+					headers: {
+						'X-CSRFToken': csrfToken,
+						'Content-Type': 'application/json',
+					},
+				}
+			);
+
+			// Обновляем только текущий план в состоянии plans
+			setPlans((prevPlans) =>
+				prevPlans.map((p) =>
+					p.id === plan.id
+						? {
+							...response.data.plan,
+							isSaved: true,
+							entries: response.data.plan.entries.map((entry) => ({
+								...entry,
+								publication_id: entry.publication_id || null,
+								isPostApproval: !!entry.isPostApproval,
+							})),
+						}
+						: p
+				)
+			);
+
+			// Устанавливаем уведомление об успехе
 			setSuccess('План успешно сохранён!');
 			setOpenSuccess(true);
 			setError('');
+
+			// Сбрасываем состояние редактирования, но сохраняем аккордеон открытым
 			setEditingPlanId(null);
 			setTempPlan(null);
-			await fetchPlans(planPage);
 		} catch (err) {
 			console.error('Ошибка сохранения плана:', err.response?.data || err);
-			if (err.response) {
-				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`);
-			} else {
-				setError('Ошибка сети. Проверьте подключение и сервер.');
-			}
+			setError(
+				err.response
+					? `Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`
+					: 'Ошибка сети. Проверьте подключение и сервер.'
+			);
 			setOpenError(true);
 			setSuccess('');
 		}
 	};
-
 	const handleSubmitPlanForReview = async (plan) => {
 		try {
 			await refreshCsrfToken();
@@ -1520,7 +1572,7 @@ function Dashboard() {
 			// Обновляем CSRF-токен перед запросом
 			await refreshCsrfToken();
 
-			// Отправляем запрос с правильными заголовками
+			// Отправляем запрос на привязку
 			const response = await axios.post(
 				`http://localhost:5000/api/plans/${planId}/entries/${entryToLink.id}/link`,
 				{ publication_id: publicationId },
@@ -1533,32 +1585,52 @@ function Dashboard() {
 				}
 			);
 
-			// Обновляем состояние планов
-			const updatedPlans = plans.map((plan) => {
-				if (plan.id === planId) {
-					const updatedEntries = plan.entries.map((entry) => {
-						if (entry.id === entryToLink.id) {
-							return { ...entry, publication_id: publicationId };
-						}
-						return entry;
-					});
-					return { ...plan, entries: updatedEntries, fact_count: plan.fact_count + 1 };
-				}
-				return plan;
-			});
-			setPlans(updatedPlans);
+			// Обновляем состояние plans локально
+			setPlans((prevPlans) =>
+				prevPlans.map((plan) => {
+					if (plan.id === planId) {
+						const updatedEntries = plan.entries.map((entry) =>
+							entry.id === entryToLink.id
+								? { ...entry, publication_id: publicationId }
+								: entry
+						);
+						return { ...plan, entries: updatedEntries, fact_count: plan.fact_count + 1 };
+					}
+					return plan;
+				})
+			);
+
+			// Если план редактируется, обновляем tempPlan
+			if (tempPlan && tempPlan.id === planId) {
+				setTempPlan((prevTempPlan) => ({
+					...prevTempPlan,
+					groupedEntries: prevTempPlan.groupedEntries.map((group) =>
+						group.type === entryGroup.type
+							? {
+								...group,
+								entries: group.entries.map((entry) =>
+									entry.id === entryToLink.id
+										? { ...entry, publication_id: publicationId }
+										: entry
+								),
+								factCount: group.factCount + 1,
+							}
+							: group
+					),
+				}));
+			}
 
 			// Обновляем список доступных публикаций для привязки
 			const linkedPublicationIds = new Set(
-				updatedPlans.flatMap(plan =>
+				plans.flatMap((plan) =>
 					plan.entries
-						.filter(entry => entry.publication_id)
-						.map(entry => entry.publication_id)
+						.filter((entry) => entry.publication_id)
+						.map((entry) => entry.publication_id)
 				)
 			);
 
 			const updatedFilteredPublications = publishedPublications.filter(
-				pub =>
+				(pub) =>
 					pub.type === entryGroup.type &&
 					!linkedPublicationIds.has(pub.id) &&
 					(pub.title.toLowerCase().includes(linkSearchQuery.toLowerCase()) ||
@@ -1567,27 +1639,34 @@ function Dashboard() {
 			setFilteredPublishedPublications(updatedFilteredPublications);
 
 			// Обновляем selectedPlanEntry
-			const updatedEntryGroup = {
+			setSelectedPlanEntry({
 				...entryGroup,
-				entries: entryGroup.entries.map(entry =>
-					entry.id === entryToLink.id ? { ...entry, publication_id: publicationId } : entry
+				planId,
+				entries: entryGroup.entries.map((entry) =>
+					entry.id === entryToLink.id
+						? { ...entry, publication_id: publicationId }
+						: entry
 				),
 				factCount: entryGroup.factCount + 1,
-			};
-			setSelectedPlanEntry({ ...updatedEntryGroup, planId });
+			});
 
 			setSuccess('Публикация успешно привязана!');
 			setOpenSuccess(true);
 		} catch (err) {
 			console.error('Ошибка привязки публикации:', err);
-			setError(err.response?.data?.error || 'Произошла ошибка при привязке публикации.');
+			setError(
+				err.response?.data?.error || 'Произошла ошибка при привязке публикации.'
+			);
 			setOpenError(true);
 		}
 	};
 
 	const handleUnlinkPublication = async (planId, entryId) => {
 		try {
+			// Обновляем CSRF-токен
 			await refreshCsrfToken();
+
+			// Отправляем запрос на отвязку
 			const response = await axios.post(
 				`http://localhost:5000/api/plans/${planId}/entries/${entryId}/unlink`,
 				{},
@@ -1600,43 +1679,64 @@ function Dashboard() {
 				}
 			);
 
-			// Обновляем состояние планов
-			const updatedPlans = plans.map((plan) => {
-				if (plan.id === planId) {
-					const updatedEntries = plan.entries.map((entry) => {
-						if (entry.id === entryId) {
-							return { ...entry, publication_id: null };
-						}
-						return entry;
-					});
-					const updatedFactCount = updatedEntries.filter((entry) => entry.publication_id).length;
-					return { ...plan, entries: updatedEntries, fact_count: updatedFactCount };
-				}
-				return plan;
-			});
-			setPlans(updatedPlans);
+			// Обновляем состояние plans локально
+			setPlans((prevPlans) =>
+				prevPlans.map((plan) => {
+					if (plan.id === planId) {
+						const updatedEntries = plan.entries.map((entry) =>
+							entry.id === entryId ? { ...entry, publication_id: null } : entry
+						);
+						const updatedFactCount = updatedEntries.filter(
+							(entry) => entry.publication_id
+						).length;
+						return { ...plan, entries: updatedEntries, fact_count: updatedFactCount };
+					}
+					return plan;
+				})
+			);
+
+			// Если план редактируется, обновляем tempPlan
+			if (tempPlan && tempPlan.id === planId) {
+				setTempPlan((prevTempPlan) => ({
+					...prevTempPlan,
+					groupedEntries: prevTempPlan.groupedEntries.map((group) =>
+						group.type === selectedGroup.type
+							? {
+								...group,
+								entries: group.entries.map((entry) =>
+									entry.id === entryId ? { ...entry, publication_id: null } : entry
+								),
+								factCount: group.entries.filter(
+									(entry) => entry.publication_id && entry.id !== entryId
+								).length,
+							}
+							: group
+					),
+				}));
+			}
 
 			// Обновляем selectedGroup
-			const updatedGroup = {
+			setSelectedGroup({
 				...selectedGroup,
-				entries: selectedGroup.entries.map(entry =>
+				entries: selectedGroup.entries.map((entry) =>
 					entry.id === entryId ? { ...entry, publication_id: null } : entry
 				),
-				factCount: selectedGroup.entries.filter(entry => entry.publication_id && entry.id !== entryId).length,
-			};
-			setSelectedGroup(updatedGroup);
+				factCount: selectedGroup.entries.filter(
+					(entry) => entry.publication_id && entry.id !== entryId
+				).length,
+			});
 
-			// Обновляем filteredPublishedPublications для диалога привязки
+			// Обновляем filteredPublishedPublications
 			const linkedPublicationIds = new Set(
-				updatedPlans.flatMap(plan =>
+				plans.flatMap((plan) =>
 					plan.entries
-						.filter(entry => entry.publication_id)
-						.map(entry => entry.publication_id)
+						.filter((entry) => entry.publication_id)
+						.map((entry) => entry.publication_id)
 				)
 			);
 
 			const updatedFilteredPublications = publishedPublications.filter(
-				pub =>
+				(pub) =>
 					pub.type === selectedPlanEntry?.type &&
 					!linkedPublicationIds.has(pub.id) &&
 					(pub.title.toLowerCase().includes(linkSearchQuery.toLowerCase()) ||
@@ -1648,7 +1748,9 @@ function Dashboard() {
 			setOpenSuccess(true);
 		} catch (err) {
 			console.error('Ошибка отвязки публикации:', err);
-			setError(err.response?.data?.error || 'Произошла ошибка при отвязке публикации.');
+			setError(
+				err.response?.data?.error || 'Произошла ошибка при отвязке публикации.'
+			);
 			setOpenError(true);
 		}
 	};
@@ -1747,7 +1849,7 @@ function Dashboard() {
 						<Tab label="Экспорт" />
 					</Tabs>
 
-					{loadingInitial ? (
+					{initializing ? (
 						<Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
 							<CircularProgress sx={{ color: '#0071E3' }} />
 						</Box>
@@ -2364,7 +2466,7 @@ function Dashboard() {
 									</Box>
 
 									{plans.map((plan) => {
-										const groupedEntries = groupEntriesByType(plan.entries);
+										const groupedEntries = tempPlan && tempPlan.id === plan.id ? tempPlan.groupedEntries.filter(g => !g.isDeleted) : groupEntriesByType(plan.entries);
 
 										return (
 											<Accordion
@@ -2444,7 +2546,7 @@ function Dashboard() {
 																			return (
 																				<TableRow key={index} sx={{ backgroundColor: group.isDeleted ? '#E5E5EA' : 'inherit' }}>
 																					<TableCell>
-																						{typeData ? typeData.display_name : `Неизвестный тип (${group.type})`}
+																						{typeData ? typeData.display_name : group.type}
 																					</TableCell>
 																					<TableCell>
 																						<AppleTextField
@@ -2592,7 +2694,7 @@ function Dashboard() {
 																				<TableRow key={group.type}>
 																					<TableCell>{`${group.planCount}/${group.factCount}`}</TableCell>
 																					<TableCell>
-																						{typeData ? typeData.display_name : `Неизвестный тип (${group.type})`}
+																						{typeData ? typeData.display_name : group.type}
 																					</TableCell>
 																					<TableCell>
 																						<IconButton
