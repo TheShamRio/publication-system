@@ -438,7 +438,7 @@ function Dashboard() {
 			setError('Произошла ошибка сервера. Попробуйте позже.');
 			setOpenError(true);
 		} finally {
-			setLoadingInitial(false);
+			
 		}
 	};
 

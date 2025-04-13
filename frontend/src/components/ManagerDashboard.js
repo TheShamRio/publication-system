@@ -735,17 +735,14 @@ function ManagerDashboard() {
 
 	const handleCloseHistoryDrawer = () => setOpenHistoryDrawer(false);
 
-	const UserStatisticsChart = ({ user }) => {
+	const UserStatisticsChart = ({ user, publicationTypes }) => {
 		// Шаг 1: Безопасная проверка данных
 		const safeUser = user || { plan: {}, actual: {}, username: '' };
-		const plan = safeUser.plan || { article: 0, monograph: 0, conference: 0 };
-		const actual = safeUser.actual || { article: 0, monograph: 0, conference: 0 };
+		const plan = safeUser.plan || {};
+		const actual = safeUser.actual || {};
 
 		// Шаг 2: Проверка наличия плана
-		const hasPlan =
-			(plan.article || 0) > 0 ||
-			(plan.monograph || 0) > 0 ||
-			(plan.conference || 0) > 0;
+		const hasPlan = Object.values(plan).some((value) => value > 0);
 
 		// Если плана нет, показываем сообщение
 		if (!hasPlan) {
@@ -759,10 +756,7 @@ function ManagerDashboard() {
 		}
 
 		// Шаг 3: Определяем типы, присутствующие в плане
-		const planTypes = [];
-		if (plan.article > 0) planTypes.push('article');
-		if (plan.monograph > 0) planTypes.push('monograph');
-		if (plan.conference > 0) planTypes.push('conference');
+		const planTypes = Object.keys(plan).filter((type) => plan[type] > 0);
 
 		// Шаг 4: Формируем данные для диаграммы и текстового блока
 		const data = [
@@ -771,23 +765,24 @@ function ManagerDashboard() {
 				План: planTypes.reduce((sum, type) => sum + (plan[type] || 0), 0),
 				Факт: planTypes.reduce((sum, type) => sum + (actual[type] || 0), 0),
 				planDetails: planTypes.reduce((obj, type) => {
-					obj[type === 'article' ? 'Статьи' : type === 'monograph' ? 'Монографии' : 'Доклады'] = plan[type] || 0;
+					const typeRecord = publicationTypes.find((t) => t.name === type);
+					obj[typeRecord ? typeRecord.display_name : type] = plan[type] || 0;
 					return obj;
 				}, {}),
 				actualDetails: planTypes.reduce((obj, type) => {
-					obj[type === 'article' ? 'Статьи' : type === 'monograph' ? 'Монографии' : 'Доклады'] = actual[type] || 0;
+					const typeRecord = publicationTypes.find((t) => t.name === type);
+					obj[typeRecord ? typeRecord.display_name : type] = actual[type] || 0;
 					return obj;
 				}, {}),
 			},
 		];
 
 		// Шаг 5: Вычисляем прогресс выполнения плана
-		const totalPlan = data[0].План; // Общее количество по плану
-		const totalActual = data[0].Факт; // Общее количество по факту
-		const progress = totalPlan > 0 ? (totalActual / totalPlan) * 100 : 0; // Прогресс в процентах
+		const totalPlan = data[0].План;
+		const totalActual = data[0].Факт;
+		const progress = totalPlan > 0 ? (totalActual / totalPlan) * 100 : 0;
 
 		return (
-			// Шаг 6: Основной контейнер с flex-лейаутом
 			<Box
 				sx={{
 					mt: 2,
@@ -798,13 +793,7 @@ function ManagerDashboard() {
 				}}
 			>
 				{/* Контейнер для диаграммы */}
-				<Box
-					sx={{
-						width: '40%',
-						height: '100%',
-						minWidth: 200,
-					}}
-				>
+				<Box sx={{ width: '40%', height: '100%', minWidth: 200 }}>
 					<ResponsiveContainer width="100%" height="100%">
 						<BarChart
 							data={data}
@@ -814,7 +803,6 @@ function ManagerDashboard() {
 							<XAxis dataKey="name" />
 							<YAxis allowDecimals={false} />
 							<Legend />
-							{/* Устанавливаем ширину столбцов через barSize */}
 							<Bar dataKey="План" fill="#0071E3" barSize={20} />
 							<Bar dataKey="Факт" fill="#00A94F" barSize={20} />
 						</BarChart>
@@ -823,21 +811,20 @@ function ManagerDashboard() {
 
 				{/* Контейнер для прогресса и текстового блока */}
 				<Box sx={{ width: '60%' }}>
-					{/* Прогресс выполнения */}
 					<Typography sx={{ mb: 1, color: '#1D1D1F' }}>
 						Прогресс выполнения:
 					</Typography>
 					<Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
 						<LinearProgress
 							variant="determinate"
-							value={Math.min(progress, 100)} // Ограничиваем прогресс 100%
+							value={Math.min(progress, 100)}
 							sx={{
-								height: 8, // Высота прогресс-бара
-								borderRadius: 4, // Закругление углов
-								flexGrow: 1, // Занимает доступное пространство
-								backgroundColor: '#E5E5EA', // Цвет фона (незаполненная часть)
+								height: 8,
+								borderRadius: 4,
+								flexGrow: 1,
+								backgroundColor: '#E5E5EA',
 								'& .MuiLinearProgress-bar': {
-									backgroundColor: progress > 100 ? '#FF9500' : '#34C759', // Цвет заполненной части (зелёный или оранжевый при превышении)
+									backgroundColor: progress > 100 ? '#FF9500' : '#34C759',
 								},
 							}}
 						/>
@@ -846,14 +833,13 @@ function ManagerDashboard() {
 							sx={{
 								minWidth: '50px',
 								textAlign: 'right',
-								color: progress > 100 ? '#FF9500' : '#1D1D1F', // Оранжевый цвет текста, если прогресс > 100%
+								color: progress > 100 ? '#FF9500' : '#1D1D1F',
 							}}
 						>
 							{Math.round(progress)}%
 						</Typography>
 					</Box>
 
-					{/* Текстовый блок с данными */}
 					<Box
 						sx={{
 							display: 'flex',
@@ -863,10 +849,9 @@ function ManagerDashboard() {
 							borderRadius: '8px',
 							p: 2,
 							boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-							transform: 'translateY(-2px)', // Смещение вверх на 2 пикселя (из предыдущего запроса)
+							transform: 'translateY(-2px)',
 						}}
 					>
-						{/* Колонка для Плана */}
 						<Box sx={{ flex: 1 }}>
 							<Typography sx={{ fontWeight: 600, color: '#0071E3', mb: 1 }}>
 								План
@@ -877,8 +862,6 @@ function ManagerDashboard() {
 								</Typography>
 							))}
 						</Box>
-
-						{/* Колонка для Факта */}
 						<Box sx={{ flex: 1 }}>
 							<Typography sx={{ fontWeight: 600, color: '#00A94F', mb: 1 }}>
 								Факт
@@ -1001,13 +984,7 @@ function ManagerDashboard() {
 															<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>
-																{pub.type === 'article'
-																	? 'Статья'
-																	: pub.type === 'monograph'
-																		? 'Монография'
-																		: pub.type === 'conference'
-																			? 'Доклад/конференция'
-																			: 'Неизвестный тип'}
+																{publicationTypes.find(t => t.name === pub.type.name)?.display_name || 'Неизвестный тип'}
 															</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>
 																<StatusChip status={pub.status} role={user.role} />
@@ -1204,25 +1181,22 @@ function ManagerDashboard() {
 												const numValue = parseInt(value, 10);
 												if (!isNaN(numValue) && numValue >= 1900 && numValue <= new Date().getFullYear() + 1) {
 													setSelectedYear(numValue);
-													console.log(`Год изменён: ${numValue}`); // Обновляем лог
 												}
 											}}
 											onBlur={() => {
 												if (!selectedYear || selectedYear < 1900 || selectedYear > new Date().getFullYear() + 1) {
 													setSelectedYear(new Date().getFullYear());
-													console.log(`Год сброшен на текущий: ${new Date().getFullYear()}`);
 												}
 											}}
 											InputProps={{
-												inputProps: { min: 1900, max: new Date().getFullYear() + 1 }, // Оставляем ограничения для стандартных стрелок
+												inputProps: { min: 1900, max: new Date().getFullYear() + 1 },
 											}}
 											sx={{
-												width: 200, '& .MuiOutlinedInput-root': {
+												width: 200,
+												'& .MuiOutlinedInput-root': {
 													height: '40px',
 													padding: '0 14px',
-													'& input': {
-														padding: '12px 0',
-													},
+													'& input': { padding: '12px 0' },
 												},
 											}}
 										/>
@@ -1235,9 +1209,7 @@ function ManagerDashboard() {
 												'& .MuiOutlinedInput-root': {
 													height: '40px',
 													padding: '0 14px',
-													'& input': {
-														padding: '12px 0',
-													},
+													'& input': { padding: '12px 0' },
 												},
 												'& .MuiInputLabel-outlined': {
 													transform: 'translate(14px, 9px) scale(1)',
@@ -1288,7 +1260,7 @@ function ManagerDashboard() {
 															</Box>
 														</AccordionSummary>
 														<AccordionDetails sx={{ backgroundColor: '#FFFFFF', borderRadius: '0 0 16px 16px' }}>
-															<UserStatisticsChart user={user} />
+															<UserStatisticsChart user={user} publicationTypes={publicationTypes} />
 														</AccordionDetails>
 													</Accordion>
 												</CSSTransition>
@@ -1556,11 +1528,11 @@ function ManagerDashboard() {
 									{plans.length > 0 ? (
 										plans.map((plan) => {
 											const entriesByType = plan.entries.reduce((acc, entry) => {
-												const type = entry.type || 'unknown';
-												if (!acc[type]) {
-													acc[type] = { count: 0, type };
+												const typeName = entry.type?.name || 'unknown';
+												if (!acc[typeName]) {
+													acc[typeName] = { count: 0, type: entry.type };
 												}
-												acc[type].count += 1;
+												acc[typeName].count += 1;
 												return acc;
 											}, {});
 											const groupedEntries = Object.values(entriesByType);
@@ -1599,14 +1571,8 @@ function ManagerDashboard() {
 																		groupedEntries.map((group, index) => (
 																			<TableRow key={index}>
 																				<TableCell sx={{ padding: '16px' }}>{group.count}</TableCell>
-																				<TableCell>
-																					{group.type === 'article'
-																						? 'Статья'
-																						: group.type === 'monograph'
-																							? 'Монография'
-																							: group.type === 'conference'
-																								? 'Доклад/конференция'
-																								: 'Не указано'}
+																				<TableCell sx={{ color: '#1D1D1F' }}>
+																					{group.type?.display_name || 'Не указано'}
 																				</TableCell>
 																			</TableRow>
 																		))

@@ -659,59 +659,66 @@ def get_publication_action_history():
 @bp.route('/admin/statistics', methods=['GET'])
 @admin_or_manager_required
 def get_statistics():
-    # Получаем год из параметров запроса, по умолчанию текущий
     year = request.args.get('year', type=int, default=datetime.utcnow().year)
     logger.debug(f"Получен GET запрос для /admin_api/admin/statistics?year={year}")
 
-    # Получаем всех пользователей с ролью 'user'
-    users = User.query.filter_by(role='user').all()
-    result = []
+    try:
+        # Получаем все типы публикаций из базы данных
+        publication_types = PublicationType.query.all()
+        type_names = [t.name for t in publication_types]
 
-    for user in users:
-        # Находим утверждённый план пользователя за указанный год
-        plan = Plan.query.filter_by(user_id=user.id, year=year, status='approved').first()
-        plan_data = {'article': 0, 'monograph': 0, 'conference': 0}
-        actual_data = {'article': 0, 'monograph': 0, 'conference': 0}
+        # Получаем всех пользователей с ролью 'user'
+        users = User.query.filter_by(role='user').all()
+        result = []
 
-        if plan:
-            # Подсчитываем записи плана по типам (plan_count)
-            for entry in plan.entries:
-                if entry.type in plan_data:
-                    plan_data[entry.type] += 1
+        for user in users:
+            # Инициализируем словари для плана и факта с динамическими типами
+            plan_data = {type_name: 0 for type_name in type_names}
+            actual_data = {type_name: 0 for type_name in type_names}
 
-            # Подсчитываем привязанные опубликованные публикации (plan_fact)
-            # Используем JOIN для связи PlanEntry и Publication
-            entries_with_publications = (
-                db.session.query(PlanEntry.type, func.count().label('count'))
-                .join(Publication, PlanEntry.publication_id == Publication.id)
-                .filter(
-                    PlanEntry.plan_id == plan.id,
-                    Publication.status == 'published'
+            # Находим утверждённый план пользователя за указанный год
+            plan = Plan.query.filter_by(user_id=user.id, year=year, status='approved').first()
+
+            if plan:
+                # Подсчитываем записи плана по типам
+                for entry in plan.entries:
+                    if entry.type and entry.type.name in plan_data:
+                        plan_data[entry.type.name] += 1
+
+                # Подсчитываем привязанные опубликованные публикации
+                entries_with_publications = (
+                    db.session.query(PlanEntry.type_id, func.count().label('count'))
+                    .join(Publication, PlanEntry.publication_id == Publication.id)
+                    .join(PublicationType, PlanEntry.type_id == PublicationType.id)
+                    .filter(
+                        PlanEntry.plan_id == plan.id,
+                        Publication.status == 'published'
+                    )
+                    .group_by(PlanEntry.type_id)
+                    .all()
                 )
-                .group_by(PlanEntry.type)
-                .all()
-            )
 
-            # Логируем найденные записи
-            logger.debug(f"Пользователь {user.username} (ID: {user.id}): найдено {len(entries_with_publications)} привязанных публикаций за {year} год")
-            for entry_type, count in entries_with_publications:
-                logger.debug(f"Тип: {entry_type}, количество: {count}")
-                if entry_type in actual_data:
-                    actual_data[entry_type] = count
+                # Обновляем actual_data на основе типа публикации
+                for type_id, count in entries_with_publications:
+                    type_record = PublicationType.query.get(type_id)
+                    if type_record and type_record.name in actual_data:
+                        actual_data[type_record.name] = count
 
-        # Формируем результат для пользователя
-        result.append({
-            'user_id': user.id,
-            'full_name': user.full_name or user.username,
-            'username': user.username,
-            'plan': plan_data,
-            'actual': actual_data
-        })
+            # Формируем результат для пользователя
+            result.append({
+                'user_id': user.id,
+                'full_name': user.full_name or user.username,
+                'username': user.username,
+                'plan': plan_data,
+                'actual': actual_data
+            })
 
-    # Логируем итоговый результат
-    logger.debug(f"Возвращаем статистику: {result}")
-    return jsonify(result), 200
+        logger.debug(f"Возвращаем статистику: {result}")
+        return jsonify(result), 200
 
+    except Exception as e:
+        logger.error(f"Ошибка в get_statistics: {str(e)}")
+        return jsonify({"error": "Ошибка сервера при получении статистики. Попробуйте позже."}), 500
 @bp.route('/admin/publication-types', methods=['GET'])
 @admin_or_manager_required
 def get_publication_types():
