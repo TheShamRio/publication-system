@@ -3,7 +3,7 @@ from werkzeug.utils import secure_filename
 from flask_login import login_required, current_user
 from flask import current_app
 from app.extensions import db
-from app.models import Publication, User, Plan, PlanEntry, PlanActionHistory, PublicationActionHistory
+from app.models import Publication, User, Plan, PlanEntry, PlanActionHistory, PublicationActionHistory, PublicationType
 import os
 import logging
 from io import BytesIO
@@ -122,23 +122,17 @@ def delete_user(user_id):
 @bp.route('/admin/publications', methods=['GET'])
 @admin_or_manager_required
 def get_publications():
-    # Получаем параметры запроса
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
     search = request.args.get('search', '', type=str)
     pub_type = request.args.get('type', 'all', type=str)
     status = request.args.get('status', 'all', type=str)
     sort_status = request.args.get('sort_status', None, type=str)
-    sort_by = request.args.get('sort_by', 'updated_at', type=str)  # По умолчанию updated_at
-    sort_order = request.args.get('sort_order', 'desc', type=str)  # По умолчанию desc
+    sort_by = request.args.get('sort_by', 'updated_at', type=str)
+    sort_order = request.args.get('sort_order', 'desc', type=str)
 
-    # Логируем параметры для отладки
-    logger.debug(f"Параметры запроса: page={page}, per_page={per_page}, search={search}, type={pub_type}, status={status}, sort_status={sort_status}, sort_by={sort_by}, sort_order={sort_order}")
-
-    # Базовый запрос
     query = Publication.query
 
-    # Применяем фильтр поиска
     if search:
         search_pattern = f'%{search}%'
         query = query.filter(
@@ -147,10 +141,13 @@ def get_publications():
             (db.cast(Publication.year, db.String).ilike(search_pattern))
         )
 
-    # Фильтры по типу и статусу
     if pub_type != 'all':
-        query = query.filter_by(type=pub_type)
-    
+        type_ = PublicationType.query.filter_by(name=pub_type).first()
+        if type_:
+            query = query.filter_by(type_id=type_.id)
+        else:
+            return jsonify({'error': 'Invalid publication type'}), 400
+
     valid_statuses = ['draft', 'needs_review', 'returned_for_revision', 'published']
     if status != 'all':
         status_list = status.split(',')
@@ -161,25 +158,21 @@ def get_publications():
     else:
         filtered_statuses = valid_statuses
 
-    # Ограничение для менеджеров
     if current_user.role == 'manager':
         allowed_statuses = ['needs_review', 'returned_for_revision', 'published']
         query = query.filter(Publication.status.in_(allowed_statuses))
         filtered_statuses = allowed_statuses
 
-    # Определяем поле для сортировки
     valid_sort_fields = ['id', 'title', 'year', 'updated_at', 'published_at']
     if sort_by not in valid_sort_fields:
-        sort_by = 'updated_at'  # По умолчанию
+        sort_by = 'updated_at'
     sort_column = getattr(Publication, sort_by)
 
-    # Определяем направление сортировки
     if sort_order == 'desc':
         sort_column = sort_column.desc()
     else:
         sort_column = sort_column.asc()
 
-    # Применяем сортировку
     if sort_status and sort_status in filtered_statuses:
         sort_case = db.case(
             {sort_status: 0},
@@ -190,20 +183,22 @@ def get_publications():
     else:
         query = query.order_by(sort_column)
 
-    # Пагинация
     try:
         paginated_publications = query.paginate(page=page, per_page=per_page, error_out=False)
     except Exception as e:
         logger.error(f"Ошибка пагинации: {str(e)}")
         return jsonify({"error": "Ошибка сервера при загрузке публикаций"}), 500
 
-    # Формируем ответ
     publications = [{
         'id': pub.id,
         'title': pub.title,
         'authors': pub.authors,
         'year': pub.year,
-        'type': pub.type,
+        'type': {
+            'id': pub.type.id,
+            'name': pub.type.name,
+            'display_name': pub.type.display_name
+        } if pub.type else None,
         'status': pub.status,
         'file_url': pub.file_url,
         'user': {
@@ -212,7 +207,7 @@ def get_publications():
         },
         'returned_for_revision': pub.returned_for_revision,
         'published_at': pub.published_at.isoformat() if pub.published_at else None,
-        'updated_at': pub.updated_at.isoformat() if pub.updated_at else None  # Добавляем updated_at в ответ
+        'updated_at': pub.updated_at.isoformat() if pub.updated_at else None
     } for pub in paginated_publications.items]
 
     return jsonify({
@@ -223,10 +218,8 @@ def get_publications():
 @bp.route('/admin/publications/<int:pub_id>', methods=['PUT'])
 @admin_or_manager_required
 def update_publication(pub_id):
-    # Получаем публикацию или возвращаем 404
     publication = Publication.query.get_or_404(pub_id)
 
-    # Обрабатываем загрузку файла, если есть
     if 'file' in request.files:
         file = request.files['file']
         if file and allowed_file(file.filename):
@@ -250,45 +243,47 @@ def update_publication(pub_id):
                 logger.error(f"Ошибка при сохранении файла: {str(e)}")
                 return jsonify({"error": "Ошибка при сохранении файла. Попробуйте снова."}), 500
 
-    # Получаем данные
     data = request.form if 'file' in request.files else request.get_json()
     publication.title = data.get('title', publication.title)
     publication.authors = data.get('authors', publication.authors)
     publication.year = int(data.get('year', publication.year))
-    publication.type = data.get('type', publication.type)
+    type_name = data.get('type')  # Ожидаем name типа
+    if type_name:
+        type_ = PublicationType.query.filter_by(name=type_name).first()
+        if type_:
+            publication.type_id = type_.id
+        else:
+            return jsonify({'error': 'Invalid publication type'}), 400
     new_status = data.get('status', publication.status)
-    comment = data.get('return_comment', '')  # Комментарий для любого действия
+    comment = data.get('return_comment', '')
 
-    # Записываем действие в историю при смене статуса
     if new_status != publication.status:
-        timestamp = datetime.utcnow()  # Время действия
+        timestamp = datetime.utcnow()
         if new_status == 'published':
             publication.published_at = timestamp
             publication.returned_for_revision = False
             publication.returned_at = None
             publication.return_comment = None
-            action_type = 'published'  # Исправляем на логичное значение
+            action_type = 'published'
         elif new_status == 'returned_for_revision':
             publication.returned_for_revision = True
             publication.returned_at = timestamp
             publication.return_comment = comment
             action_type = 'returned'
         else:
-            # Для других статусов (например, 'needs_review')
-            action_type = new_status  # Используем новый статус как тип действия
+            action_type = new_status
             if publication.status in ['published', 'returned_for_revision']:
                 publication.published_at = None
                 publication.returned_at = None
                 publication.return_comment = None
                 publication.returned_for_revision = False
 
-        # Создаем запись в истории
         action = PublicationActionHistory(
             publication_id=publication.id,
             user_id=current_user.id,
             action_type=action_type,
             timestamp=timestamp,
-            comment=comment if comment.strip() else None  # Записываем комментарий, если он не пустой
+            comment=comment if comment.strip() else None
         )
         db.session.add(action)
 
@@ -716,3 +711,58 @@ def get_statistics():
     # Логируем итоговый результат
     logger.debug(f"Возвращаем статистику: {result}")
     return jsonify(result), 200
+
+@bp.route('/admin/publication-types', methods=['GET'])
+@admin_or_manager_required
+def get_publication_types():
+    types = PublicationType.query.all()
+    return jsonify([{
+        'id': t.id,
+        'name': t.name,
+        'display_name': t.display_name
+    } for t in types]), 200
+
+@bp.route('/admin/publication-types', methods=['POST'])
+@admin_or_manager_required
+def create_publication_type():
+    data = request.get_json()
+    name = data.get('name')
+    display_name = data.get('display_name')
+    if not name or not display_name:
+        return jsonify({'error': 'Name and display_name are required'}), 400
+    if PublicationType.query.filter_by(name=name).first():
+        return jsonify({'error': 'Type with this name already exists'}), 400
+    new_type = PublicationType(name=name, display_name=display_name)
+    db.session.add(new_type)
+    db.session.commit()
+    return jsonify({
+        'message': 'Type created',
+        'type': {'id': new_type.id, 'name': new_type.name, 'display_name': new_type.display_name}
+    }), 201
+
+@bp.route('/admin/publication-types/<int:type_id>', methods=['PUT'])
+@admin_or_manager_required
+def update_publication_type(type_id):
+    type_ = PublicationType.query.get_or_404(type_id)
+    data = request.get_json()
+    name = data.get('name')
+    display_name = data.get('display_name')
+    if name and name != type_.name and PublicationType.query.filter_by(name=name).first():
+        return jsonify({'error': 'Type with this name already exists'}), 400
+    type_.name = name or type_.name
+    type_.display_name = display_name or type_.display_name
+    db.session.commit()
+    return jsonify({
+        'message': 'Type updated',
+        'type': {'id': type_.id, 'name': type_.name, 'display_name': type_.display_name}
+    }), 200
+
+@bp.route('/admin/publication-types/<int:type_id>', methods=['DELETE'])
+@admin_or_manager_required
+def delete_publication_type(type_id):
+    type_ = PublicationType.query.get_or_404(type_id)
+    if Publication.query.filter_by(type_id=type_id).first() or PlanEntry.query.filter_by(type_id=type_id).first():
+        return jsonify({'error': 'Cannot delete type that is in use'}), 400
+    db.session.delete(type_)
+    db.session.commit()
+    return jsonify({'message': 'Type deleted'}), 200

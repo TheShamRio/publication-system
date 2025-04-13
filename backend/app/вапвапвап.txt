@@ -1,1516 +1,1136 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import {
-	Container,
-	Typography,
-	Card,
-	Button,
-	CardContent,
-	Box,
-	Pagination,
-} from '@mui/material';
-import { styled } from '@mui/system';
-import { Document, Page, pdfjs } from 'react-pdf';
-import 'react-pdf/dist/Page/AnnotationLayer.css';
-import 'react-pdf/dist/Page/TextLayer.css';
-import axios from 'axios';
-import DownloadIcon from '@mui/icons-material/Download';
-import { useAuth } from '../contexts/AuthContext';
-import CommentSection from './CommentSection';
-
-pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
-
-const AppleButton = styled(Button)({
-	borderRadius: '12px',
-	textTransform: 'none',
-	backgroundColor: '#0071E3',
-	color: '#FFFFFF',
-	padding: '8px 16px',
-	fontSize: '14px',
-	fontWeight: 600,
-	boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-	'&:hover': { backgroundColor: '#0066CC', boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)' },
-});
-
-const GreenButton = styled(Button)({
-	borderRadius: '12px',
-	textTransform: 'none',
-	backgroundColor: 'green',
-	color: '#FFFFFF',
-	padding: '8px 16px',
-	fontSize: '14px',
-	fontWeight: 600,
-	boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-	'&:hover': {
-		backgroundColor: '#2EBB4A',
-		boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
-	},
-	'&:disabled': {
-		backgroundColor: '#D1D1D6',
-		color: '#FFFFFF',
-	},
-});
-
-const RedButton = styled(Button)({
-	borderRadius: '12px',
-	textTransform: 'none',
-	backgroundColor: '#FF3B30',
-	color: '#FFFFFF',
-	padding: '8px 16px',
-	fontSize: '14px',
-	fontWeight: 600,
-	boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-	'&:hover': {
-		backgroundColor: '#E63935',
-		boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)',
-	},
-	'&:disabled': {
-		backgroundColor: '#D1D1D6',
-		color: '#FFFFFF',
-	},
-});
-
-const AppleCard = styled(Card)({
-	borderRadius: '16px',
-	boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-	backgroundColor: '#FFFFFF',
-});
-
-const DocumentViewer = styled(Box)({
-	mb: 4,
-	border: '1px solid #E5E5EA',
-	borderRadius: '12px',
-	overflow: 'hidden',
-	backgroundColor: '#FFFFFF',
-	boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-	width: '100%',
-	height: '850px',
-	display: 'flex',
-	justifyContent: 'center',
-	alignItems: 'flex-start',
-	'&::-webkit-scrollbar': { display: 'none' },
-	'-ms-overflow-style': 'none',
-	'scrollbar-width': 'none',
-});
-
-function Publication() {
-	const { id } = useParams();
-	const [publication, setPublication] = useState(null);
-	const [error, setError] = useState('');
-	const [numPages, setNumPages] = useState(null);
-	const [pageNumber, setPageNumber] = useState(1);
-	const { user, isAuthenticated, csrfToken } = useAuth();
-	const [hasReviewerComment, setHasReviewerComment] = useState(false);
-	const [loadingUser, setLoadingUser] = useState(true);
-
-	const fetchPublication = useCallback(async () => {
-		try {
-			const response = await axios.get(`http://localhost:5000/api/publications/${id}`, { withCredentials: true });
-			setPublication(response.data);
-			const reviewerComment = response.data.comments.some(
-				(comment) =>
-					['admin', 'manager'].includes(comment.user.role) ||
-					comment.replies.some((reply) => ['admin', 'manager'].includes(reply.user.role))
-			);
-			setHasReviewerComment(reviewerComment);
-		} catch (err) {
-			console.error('Ошибка загрузки публикации:', err);
-			setError('Не удалось загрузить публикацию. Попробуйте позже.');
-		}
-	}, [id]);
-
-	useEffect(() => {
-		fetchPublication();
-	}, [fetchPublication]);
-
-	useEffect(() => {
-		if (user !== null) {
-			setLoadingUser(false);
-		}
-	}, [user]);
-
-	const onDocumentLoadSuccess = ({ numPages }) => {
-		setNumPages(numPages);
-	};
-
-	const handleDownload = () => {
-		if (publication && publication.file_url) {
-			const fileUrl = `http://localhost:5000${publication.file_url}`;
-			const link = document.createElement('a');
-			link.href = fileUrl;
-			link.download = publication.file_url.split('/').pop();
-			document.body.appendChild(link);
-			link.click();
-			document.body.removeChild(link);
-		}
-	};
-
-	const handlePublish = async () => {
-		try {
-			const response = await axios.post(
-				`http://localhost:5000/api/publications/${id}/publish`,
-				{},
-				{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
-			);
-			console.log('Publication response:', response.data);
-			fetchPublication();
-		} catch (err) {
-			console.error('Ошибка при публикации:', err);
-			setError('Не удалось опубликовать публикацию.');
-		}
-	};
-
-	const handleReject = async () => {
-		try {
-			const response = await axios.post(
-				`http://localhost:5000/api/publications/${id}/return-for-revision`,
-				{},
-				{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
-			);
-			console.log('Return for revision response:', response.data);
-			fetchPublication();
-		} catch (err) {
-			console.error('Ошибка при отправке на доработку:', err);
-			setError('Не удалось отправить на доработку. Убедитесь, что был добавлен комментарий.');
-		}
-	};
-
-	const handleCommentAdded = (newComment) => {
-		setPublication((prev) => {
-			if (newComment.parent_id) {
-				const updatedComments = prev.comments.map((comment) =>
-					comment.id === newComment.parent_id
-						? { ...comment, replies: [...comment.replies, newComment] }
-						: comment
-				);
-				return { ...prev, comments: updatedComments };
-			}
-			return { ...prev, comments: [...prev.comments, newComment] };
-		});
-		if (['admin', 'manager'].includes(newComment.user.role)) {
-			setHasReviewerComment(true);
-		}
-	};
-
-	if (error) return <Typography color="error">{error}</Typography>;
-	if (!publication || loadingUser) return <Typography sx={{ color: '#212121' }}>Загрузка...</Typography>;
-
-	const fileUrl = publication.file_url ? `http://localhost:5000${publication.file_url}` : null;
-
-	// Функция для отображения статуса с учётом локализации и цвета
-	const renderStatus = (status, returnedForRevision, isReviewer) => {
-		let statusText = '';
-		let statusColor = '#757575'; // Цвет по умолчанию (серый)
-
-		if (isReviewer) {
-			// Для admin или manager
-			switch (status) {
-				case 'draft':
-					statusText = 'Черновик';
-					break;
-				case 'needs_review':
-					statusText = 'Нуждается в проверке';
-					statusColor = '#FF3B30'; // Красный
-					break;
-				case 'published':
-					statusText = 'Опубликованные';
-					break;
-				default:
-					statusText = status;
-			}
-		} else {
-			// Для пользователя
-			if (status === 'needs_review' && !returnedForRevision) {
-				statusText = 'На проверке';
-			} else if (status === 'draft' && returnedForRevision) {
-				statusText = 'Требуется доработка';
-				statusColor = '#FF3B30'; // Красный
-			} else if (status === 'draft' && !returnedForRevision) {
-				statusText = 'Черновик';
-			} else if (status === 'published') {
-				statusText = 'Опубликованные';
-			} else {
-				statusText = status;
-			}
-		}
-
-		return <Typography variant="body1" sx={{ color: statusColor, mb: 1 }}>{`Статус: ${statusText}`}</Typography>;
-	};
-
-	const isReviewer = ['admin', 'manager'].includes(user?.role);
-
-	console.log('User:', user);
-	console.log('User role:', user?.role);
-	console.log('Publication status:', publication.status);
-	console.log('Is reviewer and needs_review:', isReviewer && publication.status === 'needs_review');
-
-	return (
-		<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
-			<AppleCard elevation={4}>
-				<CardContent sx={{ pt: 4, pb: 4 }}>
-					<Typography variant="h4" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 600 }}>
-						{publication.title}
-					</Typography>
-					<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
-						Авторы: {publication.authors}
-					</Typography>
-					<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
-						Год: {publication.year}
-					</Typography>
-					<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
-						Тип: {publication.type === 'article' ? 'Статья' : publication.type === 'monograph' ? 'Монография' : publication.type === 'conference' ? 'Доклад/конференция' : publication.type}
-					</Typography>
-					{renderStatus(publication.status, publication.returned_for_revision, isReviewer)}
-					<Typography variant="body1" sx={{ color: '#757575', mb: 2 }}>
-						Опубликовал: {publication.user.full_name}
-					</Typography>
-
-					<Typography variant="h6" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 500 }}>
-						Предпросмотр:
-					</Typography>
-					{fileUrl ? (
-						fileUrl.endsWith('.pdf') ? (
-							<>
-								<DocumentViewer>
-									<Document
-										file={fileUrl}
-										onLoadSuccess={onDocumentLoadSuccess}
-										onLoadError={(err) => setError(`Ошибка загрузки PDF: ${err.message}`)}
-									>
-										<Page
-											pageNumber={pageNumber}
-											scale={1}
-											renderTextLayer={false}
-											renderAnnotationLayer={false}
-										/>
-									</Document>
-								</DocumentViewer>
-								{numPages > 1 && (
-									<Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, mb: 4 }}>
-										<Pagination
-											count={numPages}
-											page={pageNumber}
-											onChange={(event, newPage) => setPageNumber(newPage)}
-											color="primary"
-											sx={{
-												'& .MuiPaginationItem-root': {
-													borderRadius: 20,
-													transition: 'all 0.3s ease',
-													'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
-													'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
-												},
-											}}
-										/>
-									</Box>
-								)}
-							</>
-						) : fileUrl.endsWith('.docx') ? (
-							<Typography sx={{ color: '#6E6E73', mb: 2 }}>
-								Файл загружен в формате DOCX, предпросмотр недоступен.
-							</Typography>
-						) : (
-							<Typography sx={{ color: '#6E6E73', mb: 2 }}>
-								Формат файла не поддерживается для отображения (только PDF и DOCX).
-							</Typography>
-						)
-					) : (
-						<Typography sx={{ color: '#6E6E73', mb: 2 }}>
-							Файл не прикреплен к этой публикации.
-						</Typography>
-					)}
-					{fileUrl && (
-						<Box sx={{ mb: 2 }}>
-							<AppleButton startIcon={<DownloadIcon />} onClick={handleDownload}>
-								Скачать
-							</AppleButton>
-						</Box>
-					)}
-
-					{isReviewer && publication.status === 'needs_review' && (
-						<Box sx={{ mb: 2, display: 'flex', gap: 2 }}>
-							<GreenButton onClick={handlePublish}>Опубликовать</GreenButton>
-							<RedButton onClick={handleReject} disabled={!hasReviewerComment}>
-								Отправить на доработку
-							</RedButton>
-						</Box>
-					)}
-
-					<Typography variant="h5" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 600 }}>
-						Комментарии
-					</Typography>
-					{publication.comments && (
-						<CommentSection
-							comments={publication.comments}
-							publicationId={publication.id}
-							onCommentAdded={handleCommentAdded}
-						/>
-					)}
-				</CardContent>
-			</AppleCard>
-		</Container>
-	);
-}
-
-export default Publication;
-
-import React, { useState, useEffect } from 'react';
-import { useNavigate } from 'react-router-dom';
-import {
-	Container,
-	Typography,
-	Card as AppleCard,
-	Tabs,
-	Tab,
-	Box,
-	CircularProgress,
-	Table,
-	TableBody,
-	TableCell,
-	TableHead,
-	TableRow,
-	IconButton,
-	Dialog,
-	DialogTitle,
-	DialogContent,
-	DialogActions,
-	TextField,
-	Collapse,
-	Alert,
-	Pagination,
-	Fade,
-	MenuItem,
-	Button,
-	Accordion,
-	AccordionSummary,
-	AccordionDetails,
-	LinearProgress,
-} from '@mui/material';
-import { styled } from '@mui/system';
-import DeleteIcon from '@mui/icons-material/Delete';
-import DownloadIcon from '@mui/icons-material/Download';
-import CheckIcon from '@mui/icons-material/Check';
-import ReplayIcon from '@mui/icons-material/Replay';
-import RefreshIcon from '@mui/icons-material/Refresh';
-import ContentCopyIcon from '@mui/icons-material/ContentCopy';
-import Visibility from '@mui/icons-material/Visibility';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import VisibilityOff from '@mui/icons-material/VisibilityOff';
-import axios from 'axios';
-import { useAuth } from '../contexts/AuthContext';
-import StatusChip from './StatusChip';
-
-// Стили остаются без изменений
-const AppleTextField = styled(TextField)({
-	'& .MuiOutlinedInput-root': {
-		borderRadius: '12px',
-		backgroundColor: '#F5F5F7',
-		'& fieldset': { borderColor: '#D1D1D6' },
-		'&:hover fieldset': { borderColor: '#0071E3' },
-		'&.Mui-focused fieldset': { borderColor: '#0071E3' },
-	},
-	'& .MuiInputLabel-root': { color: '#6E6E73' },
-	'& .MuiInputLabel-root.Mui-focused': { color: '#0071E3' },
-});
-
-const AppleTable = styled(Table)({
-	borderCollapse: 'separate',
-	borderSpacing: '0 8px',
-});
-
-const PlanTable = styled(Table)(({ theme }) => ({
-	borderRadius: '16px',
-	overflow: 'hidden',
-	backgroundColor: '#FFFFFF',
-	boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-	marginBottom: '16px',
-}));
-
-const AppleButton = styled(Button)({
-	borderRadius: '12px',
-	textTransform: 'none',
-	backgroundColor: '#0071E3',
-	color: '#FFFFFF',
-	padding: '8px 16px',
-	fontSize: '14px',
-	fontWeight: 600,
-	boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-	'&:hover': { backgroundColor: '#0066CC', boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)' },
-});
-
-const GreenButton = styled(Button)({
-	borderRadius: '12px',
-	textTransform: 'none',
-	backgroundColor: 'green',
-	color: '#FFFFFF',
-	padding: '8px 16px',
-	fontSize: '14px',
-	fontWeight: 600,
-	boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-	'&:hover': { backgroundColor: '#2EBB4A', boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)' },
-});
-
-const CancelButton = styled(Button)({
-	borderRadius: '12px',
-	textTransform: 'none',
-	backgroundColor: '#D1D1D6',
-	color: '#1D1D1F',
-	padding: '8px 16px',
-	fontSize: '14px',
-	fontWeight: 600,
-	boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-	'&:hover': { backgroundColor: '#C7C7CC', boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)' },
-});
-
-// Регулярные выражения для проверки ФИО
-const namePartRegex = /^[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?$/;
-const fullNameRegex = /^[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?\s[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?\s[А-ЯЁ][а-яё]+(?:-[А-ЯЁ][а-яё]+)?$/;
-
-function ManagerDashboard() {
-	const { user, csrfToken, isAuthenticated } = useAuth();
-	const navigate = useNavigate();
-	const [value, setValue] = useState(0);
-	const [publications, setPublications] = useState([]); // Все публикации
-	const [plans, setPlans] = useState([]);
-	const [currentPagePublications, setCurrentPagePublications] = useState(1);
-	const [currentPagePlans, setCurrentPagePlans] = useState(1);
-	const [totalPagesPublications, setTotalPagesPublications] = useState(1);
-	const [totalPagesPlans, setTotalPagesPlans] = useState(1);
-	const [searchQuery, setSearchQuery] = useState('');
-	const [statusFilter, setStatusFilter] = useState('needs_review'); // Фильтр по статусу
-	const [loadingInitial, setLoadingInitial] = useState(true);
-	const [openEditDialog, setOpenEditDialog] = useState(false);
-	const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
-	const [publicationToDelete, setPublicationToDelete] = useState(null);
-	const [editPublication, setEditPublication] = useState(null);
-	const [editTitle, setEditTitle] = useState('');
-	const [editAuthors, setEditAuthors] = useState('');
-	const [editYear, setEditYear] = useState('');
-	const [editType, setEditType] = useState('article');
-	const [editStatus, setEditStatus] = useState('needs_review');
-	const [editFile, setEditFile] = useState(null);
-	const [error, setError] = useState('');
-	const [success, setSuccess] = useState('');
-	const [openError, setOpenError] = useState(false);
-	const [openSuccess, setOpenSuccess] = useState(false);
-	const [newLastName, setNewLastName] = useState('');
-	const [newFirstName, setNewFirstName] = useState('');
-	const [newMiddleName, setNewMiddleName] = useState('');
-	const [newUsername, setNewUsername] = useState('');
-	const [newPassword, setNewPassword] = useState('');
-	const [showPassword, setShowPassword] = useState(false);
-	const [openReturnDialog, setOpenReturnDialog] = useState(false);
-	const [selectedPlan, setSelectedPlan] = useState(null);
-	const [returnComment, setReturnComment] = useState('');
-	const [lastNameError, setLastNameError] = useState('');
-	const [firstNameError, setFirstNameError] = useState('');
-	const [middleNameError, setMiddleNameError] = useState('');
-
-	// Эффект для автоматического закрытия уведомлений
-	useEffect(() => {
-		let errorTimer, successTimer;
-		if (openError) {
-			errorTimer = setTimeout(() => setOpenError(false), 3000);
-		}
-		if (openSuccess) {
-			successTimer = setTimeout(() => setOpenSuccess(false), 3000);
-		}
-		return () => {
-			if (errorTimer) clearTimeout(errorTimer);
-			if (successTimer) clearTimeout(successTimer);
-		};
-	}, [openError, openSuccess]);
-
-	// Валидация ФИО
-	const validateNamePart = (value, fieldName) => {
-		if (!value.trim()) return `${fieldName} обязательно для заполнения.`;
-		if (!namePartRegex.test(value))
-			return `${fieldName} должно начинаться с заглавной буквы, содержать только кириллицу и быть длиной не менее 2 символов.`;
-		return '';
-	};
-
-	const validateFullName = (lastName, firstName, middleName) => {
-		const fullName = `${lastName} ${firstName} ${middleName}`;
-		if (!fullNameRegex.test(fullName))
-			return 'ФИО должно быть в формате "Иванов Иван Иванович" (три слова с заглавной буквы, разделённые пробелами).';
-		return '';
-	};
-
-	// Обработчики изменения полей ФИО
-	const handleLastNameChange = (e) => {
-		const value = e.target.value;
-		setNewLastName(value);
-		setLastNameError(validateNamePart(value, 'Фамилия'));
-	};
-
-	const handleFirstNameChange = (e) => {
-		const value = e.target.value;
-		setNewFirstName(value);
-		setFirstNameError(validateNamePart(value, 'Имя'));
-	};
-
-	const handleMiddleNameChange = (e) => {
-		const value = e.target.value;
-		setNewMiddleName(value);
-		setMiddleNameError(validateNamePart(value, 'Отчество'));
-	};
-
-	// Загрузка публикаций с учётом фильтра по статусу
-	const fetchPublications = async (page) => {
-		try {
-			const response = await axios.get(`http://localhost:5000/admin_api/admin/publications`, {
-				withCredentials: true,
-				headers: { 'X-CSRFToken': csrfToken },
-				params: {
-					page,
-					per_page: 10,
-					search: searchQuery,
-					status: ['needs_review', 'returned_for_revision', 'published'].join(','), // Фильтр по допустимым статусам
-					sort_status: statusFilter, // Передаём приоритетный статус для сортировки
-				},
-			});
-			// Больше не сортируем на клиенте, сервер вернёт уже отсортированные данные
-			setPublications(response.data.publications);
-			setTotalPagesPublications(response.data.pages);
-		} catch (err) {
-			console.error('Ошибка загрузки публикаций:', err);
-			setError('Не удалось загрузить публикации. Попробуйте позже.');
-			setOpenError(true);
-		}
-	};
-
-	const fetchPlans = async (page) => {
-		try {
-			const response = await axios.get(`http://localhost:5000/admin_api/admin/plans/needs-review?page=${page}&per_page=10`, {
-				withCredentials: true,
-				headers: { 'X-CSRFToken': csrfToken },
-			});
-			setPlans(response.data.plans);
-			setTotalPagesPlans(response.data.pages);
-		} catch (err) {
-			console.error('Ошибка загрузки планов:', err);
-			setError('Не удалось загрузить планы. Попробуйте позже.');
-			setOpenError(true);
-		}
-	};
-
-	// Загрузка данных при изменении страницы, статуса или поиска
-	useEffect(() => {
-		if (!isAuthenticated || user.role !== 'manager') navigate('/login');
-		setLoadingInitial(true);
-		fetchPublications(currentPagePublications);
-		fetchPlans(currentPagePlans);
-		setLoadingInitial(false);
-	}, [isAuthenticated, user, navigate, currentPagePublications, currentPagePlans, statusFilter, searchQuery]);
-
-	const handleTabChange = (event, newValue) => {
-		setValue(newValue);
-	};
-
-	const handleSearchChange = (e) => {
-		setSearchQuery(e.target.value);
-		setCurrentPagePublications(1); // Сбрасываем страницу при новом поиске
-	};
-
-	const handleStatusFilterChange = (e) => {
-		setStatusFilter(e.target.value);
-		setCurrentPagePublications(1); // Сбрасываем страницу при смене статуса
-	};
-
-	const handlePageChangePublications = (event, value) => {
-		setCurrentPagePublications(value);
-	};
-
-	const handlePageChangePlans = (event, value) => {
-		setCurrentPagePlans(value);
-	};
-
-	const handleDownload = async (fileUrl, fileName) => {
-		if (!fileUrl || typeof fileUrl !== 'string' || fileUrl.trim() === '') {
-			setError('Некорректный URL файла. Обратитесь к администратору.');
-			setOpenError(true);
-			return;
-		}
-		const normalizedFileUrl = fileUrl.startsWith('/') ? fileUrl : `/${fileUrl}`;
-		const fullUrl = `http://localhost:5000${normalizedFileUrl}`;
-		try {
-			const response = await axios.get(fullUrl, {
-				responseType: 'blob',
-				withCredentials: true,
-				headers: { 'X-CSRFToken': csrfToken },
-			});
-			const blob = new Blob([response.data]);
-			const url = window.URL.createObjectURL(blob);
-			const link = document.createElement('a');
-			link.href = url;
-			link.download = fileName || normalizedFileUrl.split('/').pop();
-			document.body.appendChild(link);
-			link.click();
-			document.body.removeChild(link);
-			window.URL.revokeObjectURL(url);
-		} catch (err) {
-			setError(err.response ? `Ошибка сервера: ${err.response.status}` : 'Не удалось скачать файл.');
-			setOpenError(true);
-		}
-	};
-
-	const handleEditClick = (publication) => {
-		setEditPublication(publication);
-		setEditTitle(publication.title);
-		setEditAuthors(publication.authors);
-		setEditYear(publication.year);
-		setEditType(publication.type);
-		setEditStatus(publication.status);
-		setEditFile(null);
-		setOpenEditDialog(true);
-	};
-
-	const handleEditCancel = () => {
-		setOpenEditDialog(false);
-		setEditPublication(null);
-		setEditTitle('');
-		setEditAuthors('');
-		setEditYear('');
-		setEditType('article');
-		setEditStatus('needs_review');
-		setEditFile(null);
-		setError('');
-		setSuccess('');
-	};
-
-	const handleEditSubmit = async (event) => {
-		event.preventDefault();
-		if (!editTitle.trim() || !editAuthors.trim() || !editYear || editYear < 1900 || editYear > new Date().getFullYear()) {
-			setError('Проверьте поля: название, авторы и год должны быть заполнены корректно.');
-			setOpenError(true);
-			return;
-		}
-		const formData = new FormData();
-		formData.append('title', editTitle);
-		formData.append('authors', editAuthors);
-		formData.append('year', editYear);
-		formData.append('type', editType);
-		formData.append('status', editStatus);
-		if (editFile) formData.append('file', editFile);
-
-		try {
-			await axios.put(`http://localhost:5000/admin_api/admin/publications/${editPublication.id}`, formData, {
-				withCredentials: true,
-				headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'multipart/form-data' },
-			});
-			setSuccess('Публикация успешно обновлена!');
-			setOpenSuccess(true);
-			fetchPublications(currentPagePublications);
-			handleEditCancel();
-		} catch (err) {
-			setError('Не удалось обновить публикацию. Попробуйте позже.');
-			setOpenError(true);
-		}
-	};
-
-	const handleDeletePlanClick = (publication) => {
-		setPublicationToDelete(publication);
-		setOpenDeleteDialog(true);
-	};
-
-	const handleDeletePlanConfirm = async () => {
-		if (publicationToDelete) {
-			try {
-				await axios.delete(`http://localhost:5000/admin_api/admin/publications/${publicationToDelete.id}`, {
-					withCredentials: true,
-					headers: { 'X-CSRFToken': csrfToken },
-				});
-				setSuccess('Публикация успешно удалена!');
-				setOpenSuccess(true);
-				fetchPublications(currentPagePublications);
-				setOpenDeleteDialog(false);
-				setPublicationToDelete(null);
-			} catch (err) {
-				setError('Не удалось удалить публикацию. Попробуйте позже.');
-				setOpenError(true);
-			}
-		}
-	};
-
-	const handleApprovePlan = async (plan) => {
-		try {
-			await axios.post(`http://localhost:5000/admin_api/admin/plans/${plan.id}/approve`, {}, {
-				withCredentials: true,
-				headers: { 'X-CSRFToken': csrfToken },
-			});
-			setSuccess('План утверждён!');
-			setOpenSuccess(true);
-			fetchPlans(currentPagePlans);
-		} catch (err) {
-			setError('Не удалось утвердить план. Попробуйте позже.');
-			setOpenError(true);
-		}
-	};
-
-	const handleOpenReturnDialog = (plan) => {
-		setSelectedPlan(plan);
-		setReturnComment('');
-		setOpenReturnDialog(true);
-	};
-
-	const handleReturnForRevision = async () => {
-		if (!returnComment.trim()) {
-			setError('Комментарий обязателен.');
-			setOpenError(true);
-			return;
-		}
-		try {
-			await axios.post(
-				`http://localhost:5000/admin_api/admin/plans/${selectedPlan.id}/return-for-revision`,
-				{ comment: returnComment },
-				{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
-			);
-			setSuccess('План возвращён на доработку!');
-			setOpenSuccess(true);
-			fetchPlans(currentPagePlans);
-			setOpenReturnDialog(false);
-		} catch (err) {
-			setError('Не удалось вернуть план. Попробуйте позже.');
-			setOpenError(true);
-		}
-	};
-
-	return (
-		<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
-			<AppleCard elevation={4} sx={{ p: 4, borderRadius: '16px', backgroundColor: '#FFFFFF' }}>
-				<Typography variant="h4" sx={{ color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
-					Панель управляющего
-				</Typography>
-				<Tabs
-					value={value}
-					onChange={handleTabChange}
-					centered
-					sx={{
-						mb: 4,
-						'& .MuiTab-root': { color: '#6E6E73', fontWeight: 600 },
-						'& .MuiTab-root.Mui-selected': { color: '#0071E3' },
-						'& .MuiTabs-indicator': { backgroundColor: '#0071E3' },
-					}}
-				>
-					<Tab label="Работы на проверке" />
-					<Tab label="Статистика по кафедре" />
-					<Tab label="Регистрация пользователей" />
-					<Tab label="Работа с планами" />
-				</Tabs>
-
-				{loadingInitial ? (
-					<Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-						<CircularProgress sx={{ color: '#0071E3' }} />
-					</Box>
-				) : (
-					<>
-						{value === 0 && (
-							<>
-								<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
-									Работы на проверке
-								</Typography>
-								<AppleCard sx={{ mt: 2, mb: 2, p: 2, backgroundColor: '#F5F5F7', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
-									<AppleTextField
-										fullWidth
-										label="Поиск по названию, авторам или году"
-										value={searchQuery}
-										onChange={handleSearchChange}
-										margin="normal"
-										variant="outlined"
-									/>
-									<AppleTextField
-										select
-										label="Фильтр по статусу"
-										value={statusFilter}
-										onChange={handleStatusFilterChange}
-										margin="normal"
-										variant="outlined"
-										sx={{ mt: 2, width: '200px' }}
-									>
-										<MenuItem value="needs_review">На проверке</MenuItem>
-										<MenuItem value="returned_for_revision">Отправлено на доработку</MenuItem>
-										<MenuItem value="published">Опубликовано</MenuItem>
-									</AppleTextField>
-								</AppleCard>
-								<AppleTable sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
-									<TableHead>
-										<TableRow sx={{ backgroundColor: '#0071E3' }}>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Название</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Авторы</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Тип</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Пользователь</TableCell>
-											<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>
-												Действия
-											</TableCell>
-										</TableRow>
-									</TableHead>
-									<Fade in={true} timeout={500}>
-										<TableBody>
-											{publications.length > 0 ? (
-												publications.map((pub) => (
-													<TableRow
-														key={pub.id}
-														sx={{
-															'&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' },
-														}}
-													>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.id}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															<Typography
-																sx={{
-																	color: '#0071E3',
-																	textDecoration: 'underline',
-																	cursor: 'pointer',
-																	'&:hover': { textDecoration: 'none' },
-																}}
-																onClick={() => navigate(`/publication/${pub.id}`)}
-															>
-																{pub.title}
-															</Typography>
-														</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															{pub.type === 'article'
-																? 'Статья'
-																: pub.type === 'monograph'
-																	? 'Монография'
-																	: pub.type === 'conference'
-																		? 'Доклад/конференция'
-																		: 'Неизвестный тип'}
-														</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															<StatusChip status={pub.status} />
-														</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.user?.full_name || 'Не указан'}</TableCell>
-														<TableCell sx={{ textAlign: 'center' }}>
-															<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-																{pub.file_url && pub.file_url.trim() !== '' && (
-																	<IconButton
-																		aria-label="download"
-																		onClick={() => handleDownload(pub.file_url, pub.file_url.split('/').pop())}
-																		sx={{
-																			color: '#0071E3',
-																			borderRadius: '8px',
-																			'&:hover': {
-																				color: '#FFFFFF',
-																				backgroundColor: '#0071E3',
-																				boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																			},
-																		}}
-																	>
-																		<DownloadIcon />
-																	</IconButton>
-																)}
-															</Box>
-														</TableCell>
-													</TableRow>
-												))
-											) : (
-												<TableRow>
-													<TableCell colSpan={8} sx={{ textAlign: 'center', color: '#6E6E73' }}>
-														Нет публикаций с указанными статусами.
-													</TableCell>
-												</TableRow>
-											)}
-										</TableBody>
-									</Fade>
-								</AppleTable>
-								<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-									<Pagination
-										count={totalPagesPublications}
-										page={currentPagePublications}
-										onChange={handlePageChangePublications}
-										color="primary"
-										sx={{
-											'& .MuiPaginationItem-root': {
-												borderRadius: 20,
-												transition: 'all 0.3s ease',
-												'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
-												'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
-											},
-										}}
-									/>
-								</Box>
-							</>
-						)}
-
-						{value === 1 && (
-							<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
-								Статистика по кафедре
-							</Typography>
-						)}
-
-						{value === 2 && (
-							<>
-								<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
-									Регистрация нового пользователя
-								</Typography>
-								<AppleCard sx={{ maxWidth: 'none', mx: 'auto', mt: 2, p: 4 }}>
-									<form onSubmit={(e) => e.preventDefault()}>
-										<AppleTextField
-											fullWidth
-											label="Фамилия"
-											value={newLastName}
-											onChange={handleLastNameChange}
-											margin="normal"
-											variant="outlined"
-											autoComplete="family-name"
-											error={!!lastNameError}
-											helperText={lastNameError}
-										/>
-										<AppleTextField
-											fullWidth
-											label="Имя"
-											value={newFirstName}
-											onChange={handleFirstNameChange}
-											margin="normal"
-											variant="outlined"
-											autoComplete="given-name"
-											error={!!firstNameError}
-											helperText={firstNameError}
-										/>
-										<AppleTextField
-											fullWidth
-											label="Отчество"
-											value={newMiddleName}
-											onChange={handleMiddleNameChange}
-											margin="normal"
-											variant="outlined"
-											autoComplete="additional-name"
-											error={!!middleNameError}
-											helperText={middleNameError}
-										/>
-										<AppleTextField
-											fullWidth
-											label="Логин"
-											value={newUsername}
-											onChange={(e) => setNewUsername(e.target.value)}
-											margin="normal"
-											variant="outlined"
-											autoComplete="username"
-										/>
-										<AppleTextField
-											fullWidth
-											label="Пароль"
-											type={showPassword ? 'text' : 'password'}
-											value={newPassword}
-											onChange={(e) => setNewPassword(e.target.value)}
-											margin="normal"
-											variant="outlined"
-											autoComplete="new-password"
-											InputProps={{
-												endAdornment: (
-													<IconButton onClick={() => setShowPassword(!showPassword)}>
-														{showPassword ? <VisibilityOff /> : <Visibility />}
-													</IconButton>
-												),
-											}}
-										/>
-										<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-											<AppleButton
-												startIcon={<RefreshIcon />}
-												onClick={async () => {
-													const lastNameErr = validateNamePart(newLastName, 'Фамилия');
-													const firstNameErr = validateNamePart(newFirstName, 'Имя');
-													const middleNameErr = validateNamePart(newMiddleName, 'Отчество');
-													const fullNameErr = validateFullName(newLastName, newFirstName, newMiddleName);
-
-													if (lastNameErr || firstNameErr || middleNameErr || fullNameErr) {
-														setLastNameError(lastNameErr);
-														setFirstNameError(firstNameErr);
-														setMiddleNameError(middleNameErr);
-														if (fullNameErr) {
-															setError(fullNameErr);
-															setOpenError(true);
-														}
-														return;
-													}
-
-													const generateUsername = async () => {
-														const transliterate = (text) => {
-															const ruToEn = {
-																'а': 'a', 'б': 'b', 'в': 'v', 'г': 'g', 'д': 'd',
-																'е': 'e', 'ё': 'e', 'ж': 'zh', 'з': 'z', 'и': 'i',
-																'й': 'y', 'к': 'k', 'л': 'l', 'м': 'm', 'н': 'n',
-																'о': 'o', 'п': 'p', 'р': 'r', 'с': 's', 'т': 't',
-																'у': 'u', 'ф': 'f', 'х': 'kh', 'ц': 'ts', 'ч': 'ch',
-																'ш': 'sh', 'щ': 'sch', 'ъ': '', 'ы': 'y', 'ь': '',
-																'э': 'e', 'ю': 'yu', 'я': 'ya'
-															};
-															return text.toLowerCase().split('').map(char => ruToEn[char] || char).join('');
-														};
-														const capitalizeFirstLetter = (string) =>
-															string ? string.charAt(0).toUpperCase() + string.slice(1) : '';
-														const baseUsername = `${capitalizeFirstLetter(transliterate(newLastName))}${capitalizeFirstLetter(transliterate(newFirstName[0]))}${capitalizeFirstLetter(transliterate(newMiddleName[0]))}`;
-														let generatedUsername = baseUsername;
-														let suffix = 1;
-
-														while (true) {
-															try {
-																const response = await axios.post(
-																	'http://localhost:5000/admin_api/admin/check-username',
-																	{ username: generatedUsername },
-																	{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
-																);
-																if (!response.data.exists) break;
-																generatedUsername = `${baseUsername}${suffix}`;
-																suffix++;
-															} catch (err) {
-																setError('Ошибка проверки логина.');
-																setOpenError(true);
-																return null;
-															}
-														}
-														return generatedUsername;
-													};
-
-													const generatedUsername = await generateUsername();
-													if (!generatedUsername) return;
-
-													try {
-														const response = await axios.get('http://localhost:5000/admin_api/admin/generate-password', {
-															withCredentials: true,
-															headers: { 'X-CSRFToken': csrfToken },
-														});
-														setNewUsername(generatedUsername);
-														setNewPassword(response.data.password);
-														setSuccess('Логин и пароль успешно сгенерированы.');
-														setOpenSuccess(true);
-													} catch (err) {
-														setError('Ошибка генерации пароля.');
-														setOpenError(true);
-													}
-												}}
-											>
-												Сгенерировать логин и пароль
-											</AppleButton>
-											<AppleButton
-												startIcon={<ContentCopyIcon />}
-												onClick={() => {
-													navigator.clipboard.writeText(`Логин: ${newUsername}\nПароль: ${newPassword}`);
-													setSuccess('Данные скопированы в буфер обмена!');
-													setOpenSuccess(true);
-												}}
-											>
-												Скопировать в буфер обмена
-											</AppleButton>
-											<AppleButton
-												type="submit"
-												onClick={async () => {
-													const lastNameErr = validateNamePart(newLastName, 'Фамилия');
-													const firstNameErr = validateNamePart(newFirstName, 'Имя');
-													const middleNameErr = validateNamePart(newMiddleName, 'Отчество');
-													const fullNameErr = validateFullName(newLastName, newFirstName, newMiddleName);
-
-													if (lastNameErr || firstNameErr || middleNameErr || fullNameErr) {
-														setLastNameError(lastNameErr);
-														setFirstNameError(firstNameErr);
-														setMiddleNameError(middleNameErr);
-														if (fullNameErr) {
-															setError(fullNameErr);
-															setOpenError(true);
-														}
-														return;
-													}
-
-													if (!newUsername.trim() || !newPassword.trim()) {
-														setError('Логин и пароль обязательны.');
-														setOpenError(true);
-														return;
-													}
-
-													try {
-														await axios.post(
-															'http://localhost:5000/admin_api/admin/register',
-															{
-																username: newUsername,
-																password: newPassword,
-																last_name: newLastName,
-																first_name: newFirstName,
-																middle_name: newMiddleName,
-															},
-															{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
-														);
-														setSuccess('Пользователь успешно зарегистрирован!');
-														setOpenSuccess(true);
-														setNewLastName('');
-														setNewFirstName('');
-														setNewMiddleName('');
-														setNewUsername('');
-														setNewPassword('');
-														setLastNameError('');
-														setFirstNameError('');
-														setMiddleNameError('');
-													} catch (err) {
-														setError(err.response?.data?.error || 'Не удалось зарегистрировать пользователя.');
-														setOpenError(true);
-													}
-												}}
-											>
-												Создать
-											</AppleButton>
-										</Box>
-										<Collapse in={openError}>
-											{error && (
-												<Alert
-													severity="error"
-													sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#FFF1F0', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
-													onClose={() => setOpenError(false)}
-												>
-													{error}
-												</Alert>
-											)}
-										</Collapse>
-										<Collapse in={openSuccess}>
-											{success && (
-												<Alert
-													severity="success"
-													sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#E7F8E7', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
-													onClose={() => setOpenSuccess(false)}
-												>
-													{success}
-												</Alert>
-											)}
-										</Collapse>
-									</form>
-								</AppleCard>
-							</>
-						)}
-
-						{value === 3 && (
-							<Box sx={{ mt: 4 }}>
-								<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
-									Работа с планами
-								</Typography>
-								{plans.length > 0 ? (
-									plans.map((plan) => (
-										<Accordion
-											key={plan.id}
-											sx={{ mb: 2, borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}
-										>
-											<AccordionSummary expandIcon={<ExpandMoreIcon />}>
-												<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-													<Box>
-														<Typography variant="h6" sx={{ color: '#1D1D1F' }}>
-															План на {plan.year} год (Ожидаемое количество: {plan.expectedCount} | Текущее количество: {plan.entries.length})
-														</Typography>
-														<Typography variant="body2" sx={{ color: '#6E6E73', mt: 0.5 }}>
-															{plan.user && plan.user.full_name
-																? `${plan.user.full_name} (${plan.user.username || 'логин отсутствует'})`
-																: 'Пользователь не указан'}
-														</Typography>
-													</Box>
-													<StatusChip status={plan.status} />
-												</Box>
-											</AccordionSummary>
-											<AccordionDetails>
-												<PlanTable>
-													<TableHead>
-														<TableRow>
-															<TableCell>Название</TableCell>
-															<TableCell>Тип</TableCell>
-															<TableCell>Статус</TableCell>
-														</TableRow>
-													</TableHead>
-													<TableBody>
-														{plan.entries.map((entry) => (
-															<TableRow key={entry.id}>
-																<TableCell>{entry.title || 'Не указано'}</TableCell>
-																<TableCell>
-																	{entry.type === 'article'
-																		? 'Статья'
-																		: entry.type === 'monograph'
-																			? 'Монография'
-																			: entry.type === 'conference'
-																				? 'Доклад/конференция'
-																				: entry.type || 'Не указано'}
-																</TableCell>
-																<TableCell>
-																	<StatusChip status={entry.status} />
-																</TableCell>
-															</TableRow>
-														))}
-													</TableBody>
-												</PlanTable>
-												{plan.return_comment && (
-													<Typography
-														sx={{ mt: 2, color: '#000000', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}
-													>
-														<WarningAmberIcon sx={{ color: '#FF3B30' }} />
-														Комментарий при возврате: {plan.return_comment}
-													</Typography>
-												)}
-												{plan.status === 'needs_review' && (
-													<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-														<GreenButton startIcon={<CheckIcon />} onClick={() => handleApprovePlan(plan)}>
-															Утвердить
-														</GreenButton>
-														<AppleButton startIcon={<ReplayIcon />} onClick={() => handleOpenReturnDialog(plan)}>
-															На доработку
-														</AppleButton>
-													</Box>
-												)}
-											</AccordionDetails>
-										</Accordion>
-									))
-								) : (
-									<Typography sx={{ textAlign: 'center', color: '#6E6E73', mt: 2 }}>
-										Нет планов для проверки.
-									</Typography>
-								)}
-								<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-									<Pagination
-										count={totalPagesPlans}
-										page={currentPagePlans}
-										onChange={handlePageChangePlans}
-										color="primary"
-										sx={{
-											'& .MuiPaginationItem-root': {
-												borderRadius: 20,
-												'&:hover': { backgroundColor: 'grey.100' },
-												'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white' },
-											},
-										}}
-									/>
-								</Box>
-							</Box>
-						)}
-
-						<Dialog
-							open={openDeleteDialog}
-							onClose={() => {
-								setOpenDeleteDialog(false);
-								setPublicationToDelete(null);
-							}}
-							sx={{
-								'& .MuiDialog-paper': {
-									backgroundColor: '#FFFFFF',
-									boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-									borderRadius: '16px',
-									fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif",
-								},
-							}}
-						>
-							<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
-								Подтвердите удаление
-							</DialogTitle>
-							<DialogContent sx={{ padding: '24px' }}>
-								<Typography sx={{ color: '#6E6E73' }}>
-									Вы уверены, что хотите удалить публикацию "{publicationToDelete?.title}"?
-								</Typography>
-							</DialogContent>
-							<DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5EA' }}>
-								<CancelButton
-									onClick={() => {
-										setOpenDeleteDialog(false);
-										setPublicationToDelete(null);
-									}}
-								>
-									Отмена
-								</CancelButton>
-								<AppleButton onClick={handleDeletePlanConfirm}>Удалить</AppleButton>
-							</DialogActions>
-						</Dialog>
-
-						<Dialog
-							open={openEditDialog}
-							onClose={handleEditCancel}
-							sx={{
-								'& .MuiDialog-paper': {
-									backgroundColor: '#FFFFFF',
-									boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-									borderRadius: '16px',
-									fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif",
-								},
-							}}
-						>
-							<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
-								Редактировать публикацию
-							</DialogTitle>
-							<DialogContent sx={{ padding: '24px' }}>
-								<form onSubmit={handleEditSubmit}>
-									<AppleTextField
-										fullWidth
-										label="Название"
-										value={editTitle}
-										onChange={(e) => setEditTitle(e.target.value)}
-										margin="normal"
-										variant="outlined"
-									/>
-									<AppleTextField
-										fullWidth
-										label="Авторы"
-										value={editAuthors}
-										onChange={(e) => setEditAuthors(e.target.value)}
-										margin="normal"
-										variant="outlined"
-									/>
-									<AppleTextField
-										fullWidth
-										label="Год"
-										type="number"
-										value={editYear}
-										onChange={(e) => setEditYear(e.target.value)}
-										margin="normal"
-										variant="outlined"
-									/>
-									<AppleTextField
-										fullWidth
-										select
-										label="Тип публикации"
-										value={editType}
-										onChange={(e) => setEditType(e.target.value)}
-										margin="normal"
-										variant="outlined"
-									>
-										<MenuItem value="article">Статья</MenuItem>
-										<MenuItem value="monograph">Монография</MenuItem>
-										<MenuItem value="conference">Доклад/конференция</MenuItem>
-									</AppleTextField>
-									<AppleTextField
-										fullWidth
-										select
-										label="Статус"
-										value={editStatus}
-										onChange={(e) => setEditStatus(e.target.value)}
-										margin="normal"
-										variant="outlined"
-										disabled={!editPublication?.file_url && !editFile}
-									>
-										<MenuItem value="draft">Черновик</MenuItem>
-										<MenuItem value="needs_review">Нуждается в проверке</MenuItem>
-										<MenuItem value="published" disabled={!editPublication?.file_url && !editFile}>
-											Опубликовано
-										</MenuItem>
-									</AppleTextField>
-									<Box sx={{ mt: 2 }}>
-										<Typography variant="body2" sx={{ color: '#6E6E73', mb: 1 }}>
-											Текущий файл: {editPublication?.file_url || 'Нет файла'}
-										</Typography>
-										<input
-											type="file"
-											accept=".pdf,.docx"
-											onChange={(e) => setEditFile(e.target.files[0])}
-											style={{ display: 'none' }}
-											id="edit-upload-file"
-										/>
-										<label htmlFor="edit-upload-file">
-											<AppleButton sx={{ border: '1px solid #D1D1D6', backgroundColor: '#F5F5F7', color: '#1D1D1F' }} component="span">
-												Выбрать файл
-											</AppleButton>
-										</label>
-										{editFile && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{editFile.name}</Typography>}
-									</Box>
-									<Collapse in={openError}>
-										{error && (
-											<Alert
-												severity="error"
-												sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#FFF1F0', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
-												onClose={() => setOpenError(false)}
-											>
-												{error}
-											</Alert>
-										)}
-									</Collapse>
-									<Collapse in={openSuccess}>
-										{success && (
-											<Alert
-												severity="success"
-												sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#E7F8E7', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
-												onClose={() => setOpenSuccess(false)}
-											>
-												{success}
-											</Alert>
-										)}
-									</Collapse>
-									<DialogActions sx={{ padding: '16px 0', borderTop: '1px solid #E5E5EA' }}>
-										<CancelButton onClick={handleEditCancel}>Отмена</CancelButton>
-										<AppleButton type="submit">Сохранить</AppleButton>
-									</DialogActions>
-								</form>
-							</DialogContent>
-						</Dialog>
-
-						<Dialog
-							open={openReturnDialog}
-							onClose={() => setOpenReturnDialog(false)}
-							sx={{
-								'& .MuiDialog-paper': {
-									backgroundColor: '#FFFFFF',
-									boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-									borderRadius: '16px',
-									fontFamily: "'SF Pro Display', 'Helvetica Neue', Arial, sans-serif",
-									maxWidth: '400px',
-								},
-							}}
-						>
-							<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600, borderBottom: '1px solid #E5E5EA' }}>
-								Вернуть план на доработку
-							</DialogTitle>
-							<DialogContent sx={{ padding: '24px' }}>
-								<Typography sx={{ color: '#6E6E73', mb: 2 }}>
-									Пожалуйста, укажите комментарий для пользователя:
-								</Typography>
-								<TextField
-									autoFocus
-									margin="dense"
-									label="Комментарий"
-									type="text"
-									fullWidth
-									multiline
-									rows={3}
-									value={returnComment}
-									onChange={(e) => setReturnComment(e.target.value)}
-									variant="outlined"
-								/>
-							</DialogContent>
-							<DialogActions sx={{ padding: '16px 24px', borderTop: '1px solid #E5E5EA' }}>
-								<CancelButton onClick={() => setOpenReturnDialog(false)}>Отмена</CancelButton>
-								<AppleButton onClick={handleReturnForRevision}>Отправить</AppleButton>
-							</DialogActions>
-						</Dialog>
-
-						{value !== 2 && (
-							<>
-								<Collapse in={openError}>
-									{error && (
-										<Alert
-											severity="error"
-											sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#FFF1F0', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
-											onClose={() => setOpenError(false)}
-										>
-											{error}
-										</Alert>
-									)}
-								</Collapse>
-								<Collapse in={openSuccess}>
-									{success && (
-										<Alert
-											severity="success"
-											sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#E7F8E7', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
-											onClose={() => setOpenSuccess(false)}
-										>
-											{success}
-										</Alert>
-									)}
-								</Collapse>
-							</>
-						)}
-					</>
-				)}
-			</AppleCard>
-		</Container>
-	);
-}
-
-export default ManagerDashboard;
+Сохранение плана с данными: {year: 2026, expectedCount: 3, fillType: 'manual', entries: Array(3)}
+App.js:20 App.js: isAuthenticated: true Role: user
+App.js:49 App.js: Перенаправление на /dashboard: role is user
+App.js:66 App.js: Перенаправление на /dashboard: role is user
+Layout.js:13 Layout.js: Рендеринг, isAuthenticated: true isLoading: false
+Header.js:35 Header.js: isAuthenticated: true Role: user Effective Role: user isLoading: false
+7StatusChip.js:7 StatusChip: status= approved role= undefined
+Dashboard.js:1407 Ответ сервера: {message: 'План успешно обновлён', plan: {…}}
+Dashboard.js:1449 Ошибка сохранения плана: Error: Ответ сервера не содержит данных о записях плана или они не в формате массива.
+    at handleSavePlan (Dashboard.js:1416:1)
+handleSavePlan @ Dashboard.js:1449
+await in handleSavePlan
+onClick @ Dashboard.js:2642
+callCallback @ react-dom.development.js:4164
+invokeGuardedCallbackDev @ react-dom.development.js:4213
+invokeGuardedCallback @ react-dom.development.js:4277
+invokeGuardedCallbackAndCatchFirstError @ react-dom.development.js:4291
+executeDispatch @ react-dom.development.js:9041
+processDispatchQueueItemsInOrder @ react-dom.development.js:9073
+processDispatchQueue @ react-dom.development.js:9086
+dispatchEventsForPlugins @ react-dom.development.js:9097
+(anonymous) @ react-dom.development.js:9288
+batchedUpdates$1 @ react-dom.development.js:26179
+batchedUpdates @ react-dom.development.js:3991
+dispatchEventForPluginEventSystem @ react-dom.development.js:9287
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ react-dom.development.js:6465
+dispatchEvent @ react-dom.development.js:6457
+dispatchDiscreteEvent @ react-dom.development.js:6430
+7StatusChip.js:7 StatusChip: status= approved role= undefined
+AuthContext.js:124 AuthContext: Установка CSRF Token: ImMyZWM4OTVmZTk2OWIxYTU5ZDlkMzIwOWI2YmM5Mjg5MWI2NGQ2NzEi.Z_vaxA._A3EbCQ_z-13T3UJP4sLa8rmyPg
+Dashboard.js:1777 CSRF Token обновлён: ImMyZWM4OTVmZTk2OWIxYTU5ZDlkMzIwOWI2YmM5Mjg5MWI2NGQ2NzEi.Z_vaxA._A3EbCQ_z-13T3UJP4sLa8rmyPg
+Dashboard.js:1393 Сохранение плана с данными: {year: 2026, expectedCount: 3, fillType: 'manual', entries: Array(3)}
+App.js:20 App.js: isAuthenticated: true Role: user
+App.js:49 App.js: Перенаправление на /dashboard: role is user
+App.js:66 App.js: Перенаправление на /dashboard: role is user
+Layout.js:13 Layout.js: Рендеринг, isAuthenticated: true isLoading: false
+Header.js:35 Header.js: isAuthenticated: true Role: user Effective Role: user isLoading: false
+7StatusChip.js:7 StatusChip: status= approved role= undefined
+Dashboard.js:1407 Ответ сервера: {message: 'План успешно обновлён', plan: {…}}message: "План успешно обновлён"plan: {approved_at: '2025-04-13T13:05:39.368017', entries: Array(6), fact_count: 0, fillType: 'manual', id: 1, …}[[Prototype]]: Object
+Dashboard.js:1449 Ошибка сохранения плана: Error: Ответ сервера не содержит данных о записях плана или они не в формате массива.
+    at handleSavePlan (Dashboard.js:1416:1)
+handleSavePlan @ Dashboard.js:1449
+await in handleSavePlan
+onClick @ Dashboard.js:2642
+callCallback @ react-dom.development.js:4164
+invokeGuardedCallbackDev @ react-dom.development.js:4213
+invokeGuardedCallback @ react-dom.development.js:4277
+invokeGuardedCallbackAndCatchFirstError @ react-dom.development.js:4291
+executeDispatch @ react-dom.development.js:9041
+processDispatchQueueItemsInOrder @ react-dom.development.js:9073
+processDispatchQueue @ react-dom.development.js:9086
+dispatchEventsForPlugins @ react-dom.development.js:9097
+(anonymous) @ react-dom.development.js:9288
+batchedUpdates$1 @ react-dom.development.js:26179
+batchedUpdates @ react-dom.development.js:3991
+dispatchEventForPluginEventSystem @ react-dom.development.js:9287
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ react-dom.development.js:6465
+dispatchEvent @ react-dom.development.js:6457
+dispatchDiscreteEvent @ react-dom.development.js:6430
+14StatusChip.js:7 StatusChip: status= approved role= undefined
+7StatusChip.js:7 StatusChip: status= approved role= undefined
+AuthContext.js:124 AuthContext: Установка CSRF Token: ImMyZWM4OTVmZTk2OWIxYTU5ZDlkMzIwOWI2YmM5Mjg5MWI2NGQ2NzEi.Z_vazg.QhVkWxIFECeCGvEGaFvqiBKgJC4
+Dashboard.js:1777 CSRF Token обновлён: ImMyZWM4OTVmZTk2OWIxYTU5ZDlkMzIwOWI2YmM5Mjg5MWI2NGQ2NzEi.Z_vazg.QhVkWxIFECeCGvEGaFvqiBKgJC4
+Dashboard.js:1393 Сохранение плана с данными: {year: 2026, expectedCount: 6, fillType: 'manual', entries: Array(6)}
+App.js:20 App.js: isAuthenticated: true Role: user
+App.js:49 App.js: Перенаправление на /dashboard: role is user
+App.js:66 App.js: Перенаправление на /dashboard: role is user
+Layout.js:13 Layout.js: Рендеринг, isAuthenticated: true isLoading: false
+Header.js:35 Header.js: isAuthenticated: true Role: user Effective Role: user isLoading: false
+7StatusChip.js:7 StatusChip: status= approved role= undefined
+Dashboard.js:1407 Ответ сервера: {message: 'План успешно обновлён', plan: {…}}message: "План успешно обновлён"plan: approved_at: "2025-04-13T13:05:39.368017"entries: (6) [{…}, {…}, {…}, {…}, {…}, {…}]fact_count: 0fillType: "manual"id: 1plan_count: 6return_comment: nullreturned_at: nullstatus: "approved"user: {full_name: 'Хасаншин Шамиль Равгатович', username: 'Sham'}year: 2026[[Prototype]]: Object[[Prototype]]: Object
+Dashboard.js:1449 Ошибка сохранения плана: Error: Ответ сервера не содержит данных о записях плана или они не в формате массива.
+    at handleSavePlan (Dashboard.js:1416:1)
+handleSavePlan @ Dashboard.js:1449
+await in handleSavePlan
+onClick @ Dashboard.js:2642
+callCallback @ react-dom.development.js:4164
+invokeGuardedCallbackDev @ react-dom.development.js:4213
+invokeGuardedCallback @ react-dom.development.js:4277
+invokeGuardedCallbackAndCatchFirstError @ react-dom.development.js:4291
+executeDispatch @ react-dom.development.js:9041
+processDispatchQueueItemsInOrder @ react-dom.development.js:9073
+processDispatchQueue @ react-dom.development.js:9086
+dispatchEventsForPlugins @ react-dom.development.js:9097
+(anonymous) @ react-dom.development.js:9288
+batchedUpdates$1 @ react-dom.development.js:26179
+batchedUpdates @ react-dom.development.js:3991
+dispatchEventForPluginEventSystem @ react-dom.development.js:9287
+dispatchEventWithEnableCapturePhaseSelectiveHydrationWithoutDiscreteEventReplay @ react-dom.development.js:6465
+dispatchEvent @ react-dom.development.js:6457
+dispatchDiscreteEvent @ react-dom.development.js:6430
+14StatusChip.js:7 StatusChip: status= approved role= undefined
+
+
+
+from flask import Blueprint, jsonify, request, make_response, current_app, send_file
+from .extensions import db, login_manager, csrf
+from .models import User, Publication, Comment, Plan, PlanEntry, PublicationActionHistory, PublicationType
+from .utils import allowed_file
+from flask_login import login_user, current_user, logout_user, login_required
+from werkzeug.utils import secure_filename
+from flask_wtf.csrf import generate_csrf
+import os
+from .analytics import get_publications_by_year
+import bibtexparser
+from reportlab.platypus import SimpleDocTemplate, Paragraph
+from reportlab.lib.pagesizes import letter
+from bibtexparser.bibdatabase import BibDatabase
+from bibtexparser.bwriter import BibTexWriter
+import logging
+from datetime import datetime, UTC
+from werkzeug.security import generate_password_hash, check_password_hash
+
+bp = Blueprint('api', __name__, url_prefix='/api')
+
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+@bp.route('/uploads/<path:filename>')
+def download_file(filename):
+    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+    logger.debug(f"Serving file from {file_path}")
+    if not os.path.exists(file_path):
+        logger.error(f"File not found: {file_path}")
+        return jsonify({'error': 'Файл не найден'}), 404
+    response = send_file(file_path, as_attachment=True)
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, proxy-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+@bp.route('/publications/<int:pub_id>', methods=['GET'])
+@login_required
+def get_publication(pub_id):
+    publication = Publication.query.get_or_404(pub_id)
+
+    if publication.user_id != current_user.id and current_user.role not in ['admin', 'manager']:
+        return jsonify({"error": "У вас нет прав для просмотра этой публикации."}), 403
+
+    comments = Comment.query.filter_by(publication_id=pub_id, parent_id=None).order_by(Comment.created_at.asc()).all()
+    
+    def build_comment_tree(comment):
+        return {
+            'id': comment.id,
+            'content': comment.content,
+            'user': {'username': comment.user.username, 'full_name': comment.user.full_name, 'role': comment.user.role},
+            'created_at': comment.created_at.isoformat(),
+            'replies': [build_comment_tree(reply) for reply in comment.replies]
+        }
+    
+    return jsonify({
+        'id': publication.id,
+        'title': publication.title,
+        'authors': publication.authors,
+        'year': publication.year,
+        'type': publication.type.name if publication.type else 'Неизвестный тип',  # Используем name из PublicationType
+        'status': publication.status,
+        'file_url': publication.file_url if publication.file_url else None,
+        'user': {
+            'id': publication.user.id if publication.user else None,
+            'full_name': publication.user.full_name if publication.user else None},
+        'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
+        'published_at': publication.published_at.isoformat() if publication.published_at else None,
+        'returned_for_revision': publication.returned_for_revision,
+        'comments': [build_comment_tree(comment) for comment in comments]
+    }), 200
+
+@bp.route('/publications/<int:pub_id>/comments', methods=['POST'])
+@login_required
+def add_comment(pub_id):
+    publication = Publication.query.get_or_404(pub_id)
+    data = request.get_json()
+    content = data.get('content')
+    parent_id = data.get('parent_id')
+
+    if not content:
+        return jsonify({'error': 'Комментарий не может быть пустым'}), 400
+
+    comment = Comment(
+        content=content,
+        user_id=current_user.id,
+        publication_id=pub_id,
+        parent_id=parent_id if parent_id else None
+    )
+    db.session.add(comment)
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Комментарий добавлен',
+        'comment': {
+            'id': comment.id,
+            'content': comment.content,
+            'user': {'username': current_user.username, 'full_name': current_user.full_name, 'role': current_user.role},
+            'created_at': comment.created_at.isoformat(),
+            'replies': []
+        }
+    }), 201
+
+@bp.route('/publications/<int:pub_id>/submit-for-review', methods=['POST'])
+@login_required
+def submit_for_review(pub_id):
+    publication = Publication.query.get_or_404(pub_id)
+    
+    if publication.user_id != current_user.id:
+        logger.warning(f"Несанкционированная попытка отправить публикацию {pub_id} на проверку пользователем {current_user.id}")
+        return jsonify({'error': 'У вас нет прав на отправку этой публикации на проверку'}), 403
+
+    if publication.status not in ['draft', 'returned_for_revision']:
+        logger.debug(f"Публикация {pub_id} со статусом {publication.status} не может быть отправлена на проверку")
+        return jsonify({'error': 'Публикация уже отправлена на проверку или опубликована'}), 400
+
+    if not publication.file_url:
+        logger.debug(f"Попытка отправить публикацию {pub_id} без файла")
+        return jsonify({'error': 'Нельзя отправить на проверку публикацию без прикреплённого файла'}), 400
+
+    publication.status = 'needs_review'
+    publication.updated_at = datetime.utcnow()
+    publication.returned_for_revision = False
+
+    try:
+        db.session.commit()
+        logger.debug(f"Публикация {pub_id} успешно отправлена на проверку пользователем {current_user.id}")
+        return jsonify({'message': 'Публикация отправлена на проверку'}), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Ошибка отправки на проверку публикации {pub_id}: {str(e)}")
+        return jsonify({'error': 'Ошибка при отправке на проверку. Попробуйте позже.'}), 500
+
+@bp.route('/publications/<int:pub_id>/publish', methods=['POST'])
+@login_required
+def publish_publication(pub_id):
+    publication = Publication.query.get_or_404(pub_id)
+    if current_user.role not in ['admin', 'manager']:
+        return jsonify({"error": "У вас нет прав для публикации этой работы."}), 403
+    if publication.status != 'needs_review':
+        return jsonify({"error": "Публикация не находится на стадии проверки."}), 400
+    if not publication.file_url:
+        return jsonify({"error": "Нельзя опубликовать работу без прикреплённого файла."}), 400
+
+    publication.status = 'published'
+    publication.published_at = datetime.utcnow()
+    publication.returned_for_revision = False
+
+    # Добавление записи в историю
+    action = PublicationActionHistory(
+        publication_id=publication.id,
+        user_id=current_user.id,
+        action_type='approved',
+        timestamp=publication.published_at,
+        comment=None  # Комментарий можно добавить, если он передаётся в запросе
+    )
+    db.session.add(action)
+
+    try:
+        db.session.commit()
+        logger.debug(f"Публикация {pub_id} успешно опубликована пользователем {current_user.id}")
+        return jsonify({
+            'message': 'Публикация успешно опубликована',
+            'publication': {
+                'id': publication.id,
+                'title': publication.title,
+                'status': publication.status,
+                'published_at': publication.published_at.isoformat()
+            }
+        }), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Ошибка при публикации публикации {pub_id}: {str(e)}")
+        return jsonify({"error": "Ошибка при публикации. Попробуйте позже."}), 500
+
+@bp.route('/publications/<int:pub_id>/return-for-revision', methods=['POST'])
+@login_required
+def return_for_revision(pub_id):
+    # Получаем публикацию или возвращаем 404, если она не найдена
+    publication = Publication.query.get_or_404(pub_id)
+
+    # Проверяем права пользователя
+    if current_user.role not in ['admin', 'manager']:
+        logger.warning(f"Несанкционированная попытка вернуть публикацию {pub_id} на доработку пользователем {current_user.id} с ролью {current_user.role}")
+        return jsonify({"error": "У вас нет прав для возврата этой работы на доработку."}), 403
+
+    # Проверяем статус публикации
+    if publication.status != 'needs_review':
+        return jsonify({"error": "Публикация не находится на стадии проверки."}), 400
+
+    # Читаем комментарий из тела запроса
+    data = request.get_json()
+    comment = data.get('comment', '')
+
+    # Проверяем, что комментарий не пустой
+    if not comment.strip():
+        return jsonify({"error": "Необходимо добавить комментарий перед возвратом на доработку."}), 400
+
+    # Обновляем поля публикации
+    publication.status = 'returned_for_revision'
+    publication.returned_for_revision = True
+    publication.published_at = None
+    publication.returned_at = datetime.utcnow()
+    publication.return_comment = comment  # Сохраняем комментарий в публикации
+
+    # Создаем запись в истории действий без 'title'
+    action = PublicationActionHistory(
+        publication_id=publication.id,
+        user_id=current_user.id,
+        action_type='returned',
+        timestamp=publication.returned_at,
+        comment=comment  # Сохраняем комментарий в истории
+    )
+    db.session.add(action)
+
+    try:
+        # Фиксируем изменения в базе данных
+        db.session.commit()
+        logger.debug(f"Публикация {pub_id} возвращена на доработку пользователем {current_user.id}, returned_at: {publication.returned_at}")
+        return jsonify({
+            'message': 'Публикация отправлена на доработку',
+            'publication': {
+                'id': publication.id,
+                'title': publication.title,
+                'status': publication.status,
+                'returned_for_revision': publication.returned_for_revision,
+                'returned_at': publication.returned_at.isoformat() if publication.returned_at else None,
+                'return_comment': publication.return_comment
+            }
+        }), 200
+    except Exception as e:
+        # Откатываем изменения в случае ошибки
+        db.session.rollback()
+        logger.error(f"Ошибка при возврате публикации {pub_id} на доработку: {str(e)}")
+        return jsonify({"error": "Ошибка при возврате на доработку. Попробуйте позже."}), 500
+@bp.route('/login', methods=['POST'])
+@csrf.exempt
+def login():
+    logger.debug(f"Получен POST запрос для /login")
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+
+    user = User.query.filter_by(username=username).first()
+    if user and check_password_hash(user.password_hash, password):
+        login_user(user, remember=True)
+        return jsonify({
+            'message': 'Успешная авторизация',
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'role': user.role,
+                'last_name': user.last_name,
+                'first_name': user.first_name,
+                'middle_name': user.middle_name
+            }
+        }), 200
+    return jsonify({'error': 'Неверное имя пользователя или пароль'}), 401
+
+@bp.route('/csrf-token', methods=['GET'])
+def get_csrf_token():
+    logger.debug(f"Получен GET запрос для /api/csrf-token")
+    token = generate_csrf()
+    return jsonify({'csrf_token': token}), 200
+
+@bp.route('/logout', methods=['POST'])
+@login_required
+def logout():
+    logger.debug(f"Получен POST запрос для /logout")
+    logout_user()
+    response = jsonify({'message': 'Успешный выход'})
+    response.set_cookie('session', '', expires=0)
+    return response, 200
+
+@bp.route('/user', methods=['GET', 'PUT'])
+@login_required
+def user():
+    logger.debug(f"Получен {request.method} запрос для /user")
+    logger.debug(f"Текущий пользователь: {current_user.id if current_user.is_authenticated else 'Не аутентифицирован'}")
+    logger.debug(f"Куки сессии: {request.cookies.get('session')}")
+    if request.method == 'GET':
+        response_data = {
+            'id': current_user.id,
+            'username': current_user.username,
+            'role': current_user.role,
+            'last_name': current_user.last_name,
+            'first_name': current_user.first_name,
+            'middle_name': current_user.middle_name,
+            'created_at': current_user.created_at.isoformat() if current_user.created_at else None
+        }
+        logger.debug(f"Ответ сервера для /api/user: {response_data}")
+        return jsonify(response_data), 200
+    elif request.method == 'PUT':
+        data = request.get_json()
+        current_user.last_name = data.get('last_name', current_user.last_name)
+        current_user.first_name = data.get('first_name', current_user.first_name)
+        current_user.middle_name = data.get('middle_name', current_user.middle_name)
+        try:
+            db.session.commit()
+            return jsonify({
+                'message': 'Данные пользователя успешно обновлены',
+                'user': {
+                    'id': current_user.id,
+                    'username': current_user.username,
+                    'role': current_user.role,
+                    'last_name': current_user.last_name,
+                    'first_name': current_user.first_name,
+                    'middle_name': current_user.middle_name
+                }
+            }), 200
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Ошибка обновления данных пользователя {current_user.id}: {str(e)}")
+            return jsonify({"error": "Ошибка при обновлении данных. Попробуйте позже."}), 500
+
+@bp.route('/user/password', methods=['PUT'])
+@login_required
+def change_password():
+    logger.debug(f"Получен PUT запрос для /user/password")
+    data = request.get_json()
+    current_password = data.get('current_password')
+    new_password = data.get('new_password')
+
+    if not check_password_hash(current_user.password_hash, current_password):
+        return jsonify({'error': 'Текущий пароль неверен'}), 401
+
+    current_user.password_hash = generate_password_hash(new_password)
+    try:
+        db.session.commit()
+        return jsonify({'message': 'Пароль успешно изменён'}), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Ошибка изменения пароля для пользователя {current_user.id}: {str(e)}")
+        return jsonify({"error": "Ошибка при изменении пароля. Попробуйте позже."}), 500
+
+@bp.route('/public/publications', methods=['GET'])
+def get_public_publications():
+    logger.debug(f"Получен GET запрос для /api/public/publications")
+    
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    pub_type = request.args.get('type', 'all')
+
+    query = Publication.query.filter_by(status='published').order_by(
+        db.func.coalesce(Publication.published_at, Publication.updated_at).desc()
+    )
+
+    if pub_type != 'all':
+        type_ = PublicationType.query.filter_by(name=pub_type).first()
+        if type_:
+            query = query.filter(Publication.type_id == type_.id)
+        else:
+            return jsonify({'error': 'Недопустимый тип публикации'}), 400
+
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    publications = pagination.items
+
+    response = [{
+        'id': pub.id,
+        'title': pub.title,
+        'authors': pub.authors,
+        'year': pub.year,
+        'type': pub.type.name if pub.type else 'Неизвестный тип',  # Используем name из PublicationType
+        'status': pub.status,
+        'file_url': pub.file_url,
+        'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
+        'published_at': pub.published_at.isoformat() if pub.published_at else None,
+        'returned_for_revision': pub.returned_for_revision,
+        'user': {
+            'full_name': pub.user.full_name if pub.user else 'Не указан'
+        } if pub.user else None
+    } for pub in publications]
+
+    return jsonify({
+        'publications': response,
+        'total': pagination.total,
+        'pages': pagination.pages,
+        'current_page': pagination.page
+    }), 200
+
+@bp.route('/publications', methods=['GET'])
+@login_required
+def get_publications():
+    logger.debug(f"Получен GET запрос для /publications")
+    
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    search = request.args.get('search', '').lower()
+    pub_type = request.args.get('type', 'all')
+    status = request.args.get('status', 'all')
+
+    query = Publication.query.filter_by(user_id=current_user.id)
+
+    if search:
+        query = query.filter(
+            db.or_(
+                Publication.title.ilike(f'%{search}%'),
+                Publication.authors.ilike(f'%{search}%'),
+                db.cast(Publication.year, db.String).ilike(f'%{search}%')
+            )
+        )
+
+    if pub_type != 'all':
+        type_ = PublicationType.query.filter_by(name=pub_type).first()
+        if type_:
+            query = query.filter(Publication.type_id == type_.id)
+        else:
+            return jsonify({'error': 'Недопустимый тип публикации'}), 400
+
+    if status != 'all':
+        query = query.filter(Publication.status == status)
+
+    query = query.order_by(Publication.updated_at.desc())
+
+    pagination = query.paginate(page=page, per_page=per_page, error_out=False)
+    publications = pagination.items
+
+    response = [{
+        'id': pub.id,
+        'title': pub.title,
+        'authors': pub.authors,
+        'year': pub.year,
+        'type': pub.type.name if pub.type else 'Неизвестный тип',  # Используем name из PublicationType
+        'status': pub.status,
+        'file_url': pub.file_url,
+        'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
+        'returned_for_revision': pub.returned_for_revision,
+    } for pub in publications]
+
+    return jsonify({
+        'publications': response,
+        'total': pagination.total,
+        'pages': pagination.pages,
+        'current_page': pagination.page
+    }), 200
+
+@bp.route('/publications/<int:pub_id>', methods=['PUT', 'DELETE'])
+@login_required
+def manage_publication(pub_id):
+    publication = Publication.query.get_or_404(pub_id)
+    if publication.user_id != current_user.id:
+        return jsonify({'error': 'У вас нет прав на управление этой публикацией'}), 403
+
+    if publication.status == 'needs_review':
+        return jsonify({'error': 'Нельзя редактировать публикацию, пока она на проверке'}), 403
+
+    if request.method == 'PUT':
+        if request.content_type == 'application/json':
+            data = request.get_json()
+        elif 'file' in request.files or request.content_type.startswith('multipart/form-data'):
+            data = request.form
+        else:
+            return jsonify({"error": "Неподдерживаемый формат данных. Используйте application/json или multipart/form-data."}), 415
+
+        old_status = publication.status
+
+        if 'file' in request.files:
+            file = request.files['file']
+            if file and allowed_file(file.filename):
+                if publication.file_url:
+                    old_file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
+                    if os.path.exists(old_file_path):
+                        os.remove(old_file_path)
+                filename = secure_filename(file.filename)
+                file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+                if os.path.exists(file_path):
+                    base, extension = os.path.splitext(filename)
+                    counter = 1
+                    while os.path.exists(file_path):
+                        filename = f"{base}_{counter}{extension}"
+                        file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+                        counter += 1
+                file.save(file_path)
+                publication.file_url = f"/uploads/{filename}"
+
+        publication.title = data.get('title', publication.title)
+        publication.authors = data.get('authors', publication.authors)
+        publication.year = data.get('year', publication.year)
+        type_name = data.get('type', publication.type.name if publication.type else None)
+        if type_name:
+            type_ = PublicationType.query.filter_by(name=type_name).first()
+            if type_:
+                publication.type_id = type_.id
+            else:
+                return jsonify({'error': 'Недопустимый тип публикации'}), 400
+        new_status = data.get('status', publication.status)
+
+        if new_status == 'published' and not publication.file_url:
+            return jsonify({'error': 'Нельзя опубликовать работу без прикреплённого файла.'}), 400
+
+        publication.status = new_status
+
+        if publication.status == 'published' and old_status != 'published':
+            publication.published_at = datetime.utcnow()
+
+        try:
+            db.session.commit()
+            return jsonify({
+                'message': 'Публикация успешно обновлена',
+                'publication': {
+                    'id': publication.id,
+                    'title': publication.title,
+                    'authors': publication.authors,
+                    'year': publication.year,
+                    'type': publication.type.name if publication.type else 'Неизвестный тип',  # Используем name
+                    'status': publication.status,
+                    'file_url': publication.file_url,
+                    'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
+                    'published_at': publication.published_at.isoformat() if publication.published_at else None,
+                    'returned_for_revision': publication.returned_for_revision,
+                }
+            }), 200
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Ошибка обновления публикации {pub_id}: {str(e)}")
+            return jsonify({"error": "Ошибка при обновлении публикации. Попробуйте позже."}), 500
+
+    elif request.method == 'DELETE':
+        # Логика удаления остается без изменений
+        try:
+            if publication.file_url:
+                file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+            db.session.delete(publication)
+            db.session.commit()
+            return jsonify({'message': 'Публикация успешно удалена'}), 200
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Ошибка удаления публикации {pub_id}: {str(e)}")
+            return jsonify({"error": "Ошибка при удалении публикации. Попробуйте позже."}), 500
+@bp.route('/publications/upload-file', methods=['POST'])
+@login_required
+def upload_file():
+    logger.debug(f"Получен POST запрос для /publications/upload-file")
+    if 'file' not in request.files:
+        return jsonify({'error': 'Файл не предоставлен'}), 400
+
+    file = request.files['file']
+    if not file or not allowed_file(file.filename):
+        return jsonify({'error': 'Недопустимый файл'}), 400
+
+    title = request.form.get('title')
+    authors = request.form.get('authors')
+    year = request.form.get('year')
+    type_name = request.form.get('type', 'article')  # Имя типа из формы
+    
+    if not title or not authors or not year:
+        return jsonify({'error': 'Название, авторы и год обязательны'}), 400
+
+    try:
+        year = int(year)
+        if year < 1900 or year > datetime.now().year:
+            return jsonify({'error': 'Недопустимый год'}), 400
+    except ValueError:
+        return jsonify({'error': 'Год должен быть числом'}), 400
+
+    type_ = PublicationType.query.filter_by(name=type_name).first()
+    if not type_:
+        return jsonify({'error': 'Недопустимый тип публикации'}), 400
+
+    filename = secure_filename(file.filename)
+    file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+    if os.path.exists(file_path):
+        base, extension = os.path.splitext(filename)
+        counter = 1
+        while os.path.exists(file_path):
+            filename = f"{base}_{counter}{extension}"
+            file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+            counter += 1
+    file.save(file_path)
+
+    publication = Publication(
+        title=title,
+        authors=authors,
+        year=year,
+        type_id=type_.id,  # Используем type_id вместо type
+        status='draft',
+        file_url=f"/uploads/{filename}",
+        user_id=current_user.id,
+        returned_for_revision=False,
+    )
+
+    db.session.add(publication)
+    db.session.commit()
+
+    return jsonify({
+        'message': 'Публикация успешно загружена',
+        'publication': {
+            'id': publication.id,
+            'title': publication.title,
+            'authors': publication.authors,
+            'year': publication.year,
+            'type': type_.name,  # Возвращаем имя типа
+            'status': publication.status,
+            'file_url': publication.file_url,
+            'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
+            'returned_for_revision': publication.returned_for_revision,
+        }
+    }), 200
+
+@bp.route('/publications/upload-bibtex', methods=['POST'])
+@login_required
+def upload_bibtex():
+    logger.debug(f"Получен POST запрос для /publications/upload-bibtex")
+    if 'file' not in request.files:
+        return jsonify({'error': 'BibTeX файл не предоставлен'}), 400
+
+    file = request.files['file']
+    if file and file.filename.endswith('.bib'):
+        try:
+            content = file.read().decode('utf-8')
+            bib_database = bibtexparser.loads(content)
+            publications_added = 0
+
+            for entry in bib_database.entries:
+                title = entry.get('title', 'Без названия')
+                authors = entry.get('author', 'Неизвестный автор')
+                year = entry.get('year', datetime.now().year)
+                try:
+                    year = int(year)
+                except (ValueError, TypeError):
+                    year = datetime.now().year
+                type_name = entry.get('entrytype', 'article')
+                
+                type_ = PublicationType.query.filter_by(name=type_name).first()
+                if not type_:
+                    continue  # Пропускаем, если тип не найден
+
+                publication = Publication(
+                    title=title,
+                    authors=authors,
+                    year=year,
+                    type_id=type_.id,  # Используем type_id
+                    status='draft',
+                    user_id=current_user.id,
+                    returned_for_revision=False,
+                )
+                db.session.add(publication)
+                publications_added += 1
+
+            db.session.commit()
+            return jsonify({'message': f'Обработано {publications_added} публикаций'}), 200
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Ошибка обработки BibTeX: {str(e)}")
+            return jsonify({'error': 'Ошибка при обработке BibTeX файла'}), 500
+    return jsonify({'error': 'Недопустимый файл. Ожидается .bib'}), 400
+
+@bp.route('/publications/<int:pub_id>/attach-file', methods=['POST'])
+@login_required
+def attach_file(pub_id):
+    logger.debug(f"Получен POST запрос для /publications/{pub_id}/attach-file")
+    publication = Publication.query.get_or_404(pub_id)
+    if publication.user_id != current_user.id:
+        return jsonify({'error': 'У вас нет прав на изменение этой публикации'}), 403
+
+    if publication.status == 'needs_review':
+        return jsonify({'error': 'Нельзя редактировать публикацию, пока она на проверке'}), 403
+
+    if 'file' not in request.files:
+        return jsonify({'error': 'Файл не предоставлен'}), 400
+
+    file = request.files['file']
+    if file and allowed_file(file.filename):
+        if publication.file_url:
+            old_file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
+            if os.path.exists(old_file_path):
+                os.remove(old_file_path)
+        filename = secure_filename(file.filename)
+        file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+        if os.path.exists(file_path):
+            base, extension = os.path.splitext(filename)
+            counter = 1
+            while os.path.exists(file_path):
+                filename = f"{base}_{counter}{extension}"
+                file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+                counter += 1
+        file.save(file_path)
+        publication.file_url = f"/uploads/{filename}"
+
+        try:
+            db.session.commit()
+            return jsonify({
+                'message': 'Файл успешно прикреплен',
+                'publication': {
+                    'id': publication.id,
+                    'title': publication.title,
+                    'authors': publication.authors,
+                    'year': publication.year,
+                    'type': publication.type,
+                    'status': publication.status,
+                    'file_url': publication.file_url,
+                    'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
+                    'returned_for_revision': publication.returned_for_revision,
+                }
+            }), 200
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Ошибка прикрепления файла к публикации {pub_id}: {str(e)}")
+            return jsonify({"error": "Ошибка при прикреплении файла. Попробуйте позже."}), 500
+    return jsonify({'error': 'Недопустимый файл'}), 400
+
+@bp.route('/publications/export-bibtex', methods=['GET'])
+@login_required
+def export_bibtex():
+    logger.debug(f"Получен GET запрос для /publications/export-bibtex")
+    try:
+        logger.debug("Начинаем запрос публикаций для текущего пользователя")
+        publications = Publication.query.filter_by(user_id=current_user.id).all()
+        logger.debug(f"Найдено публикаций: {len(publications)}")
+
+        bib_db = BibDatabase()
+        bib_db.entries = [{
+            'ENTRYTYPE': pub.type.name if pub.type else 'article',
+            'ID': f'pub{pub.id}',
+            'title': pub.title or 'Без названия',
+            'author': pub.authors or 'Неизвестный автор',
+            'year': str(pub.year) if pub.year else str(datetime.now().year)
+        } for pub in publications]
+
+        writer = BibTexWriter()
+        if not callable(writer.write):
+            raise AttributeError("Метод write в BibTexWriter не является callable. Проверьте версию bibtexparser.")
+
+        bibtex_str = writer.write(bib_db)
+        
+        response = make_response(bibtex_str)
+        response.headers['Content-Disposition'] = 'attachment; filename=publications.bib'
+        response.headers['Content-Type'] = 'application/x-bibtex'
+        logger.debug("BibTeX успешно сгенерирован и отправлен")
+        return response
+    except ImportError as e:
+        logger.error(f"Ошибка импорта bibtexparser: {str(e)}")
+        return jsonify({'error': 'Ошибка импорта библиотеки bibtexparser. Установите или обновите bibtexparser (>=1.4.0).'}), 500
+    except AttributeError as e:
+        logger.error(f"Ошибка атрибута в bibtexparser: {str(e)}")
+        return jsonify({'error': 'Ошибка в библиотеке bibtexparser. Проверьте установку и версию.'}), 500
+    except Exception as e:
+        logger.error(f"Ошибка экспорта BibTeX: {str(e)}")
+        return jsonify({'error': f'Внутренняя ошибка сервера при экспорте BibTeX: {str(e)}'}), 500
+
+@bp.route('/analytics/yearly', methods=['GET'])
+@login_required
+def get_analytics_yearly():
+    logger.debug(f"Получен GET запрос для /analytics/yearly")
+    analytics = get_publications_by_year(current_user.id)
+    return jsonify([{
+        'year': year,
+        'count': count
+    } for year, count in analytics]), 200
+
+@bp.route('/plans', methods=['GET'])
+@login_required
+def get_plans():
+    logger.debug(f"Получен GET запрос для /plans")
+    page = request.args.get('page', 1, type=int)
+    per_page = request.args.get('per_page', 10, type=int)
+    plans = Plan.query.filter_by(user_id=current_user.id).order_by(Plan.year.desc()).paginate(page=page, per_page=per_page)
+    return jsonify({
+        'plans': [plan.to_dict() for plan in plans.items],
+        'total': plans.total,
+        'pages': plans.pages,
+        'current_page': plans.page
+    })
+
+@bp.route('/plans', methods=['POST'])
+@login_required
+def create_plan():
+    data = request.get_json()
+    if not data.get('year') or not data.get('fillType') or 'entries' not in data:
+        return jsonify({'error': 'Отсутствуют обязательные поля'}), 400
+    
+    if not isinstance(data['year'], int) or data['year'] < 1900 or data['year'] > 2100:
+        return jsonify({'error': 'Недопустимый год'}), 400
+    
+    if data['fillType'] not in ['manual', 'link']:
+        return jsonify({'error': 'Недопустимый тип заполнения'}), 400
+
+    existing_approved_plan = Plan.query.filter_by(
+        user_id=current_user.id,
+        year=data['year'],
+        status='approved'
+    ).first()
+    if existing_approved_plan:
+        return jsonify({'error': f'У вас уже есть утверждённый план на {data["year"]} год.'}), 403
+
+    plan = Plan(
+        year=data['year'],
+        fillType=data['fillType'],
+        user_id=current_user.id,
+        status='draft'
+    )
+    db.session.add(plan)
+
+    for entry_data in data['entries']:
+        type_name = entry_data.get('type')
+        type_ = PublicationType.query.filter_by(name=type_name).first() if type_name else None
+        if type_name and not type_:
+            db.session.rollback()
+            return jsonify({'error': f'Недопустимый тип публикации: {type_name}'}), 400
+
+        entry = PlanEntry(
+            title=entry_data.get('title'),
+            type_id=type_.id if type_ else None,  # Используем type_id
+            publication_id=entry_data.get('publication_id'),
+            status=entry_data.get('status', 'planned'),
+            isPostApproval=False,
+            plan=plan
+        )
+        if entry.publication_id:
+            publication = Publication.query.filter_by(id=entry.publication_id, user_id=current_user.id, status='published').first()
+            if not publication:
+                db.session.rollback()
+                return jsonify({'error': f'Публикация с ID {entry.publication_id} не найдена или не опубликована'}), 404
+        db.session.add(entry)
+
+    db.session.commit()
+    return jsonify({'message': f'План создан с ID {plan.id}', 'plan': plan.to_dict()}), 201
+
+@bp.route('/plans/<int:plan_id>', methods=['PUT'])
+@login_required
+def update_plan(plan_id):
+    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
+    if not plan:
+        return jsonify({'error': 'План не найден или доступ запрещён'}), 404
+    
+    if plan.status not in ['draft', 'returned', 'approved']:
+        return jsonify({'error': 'Нельзя редактировать план на проверке'}), 403
+
+    data = request.get_json()
+    if not all(k in data for k in ('year', 'fillType', 'entries')):
+        return jsonify({'error': 'Отсутствуют обязательные поля'}), 400
+    
+    if not isinstance(data['year'], int) or data['year'] < 1900 or data['year'] > 2100:
+        return jsonify({'error': 'Недопустимый год'}), 400
+    
+    if data['fillType'] not in ['manual', 'link']:
+        return jsonify({'error': 'Недопустимый тип заполнения'}), 400
+
+    if plan.status == 'approved':
+        existing_entries = {entry.id: entry for entry in plan.entries}
+        new_entries = []
+        for entry_data in data['entries']:
+            entry_id = entry_data.get('id')
+            type_name = entry_data.get('type')
+            type_ = PublicationType.query.filter_by(name=type_name).first() if type_name else None
+            if type_name and not type_:
+                db.session.rollback()
+                return jsonify({'error': f'Недопустимый тип публикации: {type_name}'}), 400
+
+            if entry_id and entry_id in existing_entries:
+                entry = existing_entries[entry_id]
+                entry.title = entry_data.get('title', entry.title)
+                entry.type_id = type_.id if type_ else None  # Используем type_id
+                entry.publication_id = entry_data.get('publication_id', entry.publication_id)
+                entry.status = entry_data.get('status', entry.status)
+                if entry.publication_id:
+                    publication = Publication.query.filter_by(id=entry.publication_id, user_id=current_user.id, status='published').first()
+                    if not publication:
+                        db.session.rollback()
+                        return jsonify({'error': f'Публикация с ID {entry.publication_id} не найдена или не опубликована'}), 404
+            else:
+                new_entry = PlanEntry(
+                    title=entry_data.get('title', ''),
+                    type_id=type_.id if type_ else None,  # Используем type_id
+                    publication_id=entry_data.get('publication_id'),
+                    status=entry_data.get('status', 'planned'),
+                    isPostApproval=True,
+                    plan=plan
+                )
+                if new_entry.publication_id:
+                    publication = Publication.query.filter_by(id=new_entry.publication_id, user_id=current_user.id, status='published').first()
+                    if not publication:
+                        db.session.rollback()
+                        return jsonify({'error': f'Публикация с ID {new_entry.publication_id} не найдена или не опубликована'}), 404
+                new_entries.append(new_entry)
+                db.session.add(new_entry)
+    else:
+        plan.year = data['year']
+        plan.fillType = data['fillType']
+        PlanEntry.query.filter_by(plan_id=plan.id).delete()
+        for entry_data in data['entries']:
+            type_name = entry_data.get('type')
+            type_ = PublicationType.query.filter_by(name=type_name).first() if type_name else None
+            if type_name and not type_:
+                db.session.rollback()
+                return jsonify({'error': f'Недопустимый тип публикации: {type_name}'}), 400
+
+            entry = PlanEntry(
+                title=entry_data.get('title'),
+                type_id=type_.id if type_ else None,  # Используем type_id
+                publication_id=entry_data.get('publication_id'),
+                status=entry_data.get('status', 'planned'),
+                isPostApproval=False,
+                plan=plan
+            )
+            if entry.publication_id:
+                publication = Publication.query.filter_by(id=entry.publication_id, user_id=current_user.id, status='published').first()
+                if not publication:
+                    db.session.rollback()
+                    return jsonify({'error': f'Публикация с ID {entry.publication_id} не найдена или не опубликована'}), 404
+            db.session.add(entry)
+
+    db.session.commit()
+    return jsonify({'message': 'План успешно обновлён', 'plan': plan.to_dict()}), 200
+
+@bp.route('/plans/<int:plan_id>', methods=['DELETE'])
+@login_required
+def delete_plan(plan_id):
+    logger.debug(f"Получен DELETE запрос для /plans/{plan_id}")
+    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
+    if not plan:
+        return jsonify({'error': 'Plan not found or unauthorized'}), 404
+    
+    if plan.status not in ['draft', 'returned']:
+        return jsonify({'error': 'Cannot delete plan that is under review or approved'}), 403
+
+    db.session.delete(plan)
+    db.session.commit()
+    return jsonify({'message': 'Plan deleted successfully'}), 200
+
+@bp.route('/plans/<int:plan_id>/submit-for-review', methods=['POST'])
+@login_required
+def submit_plan_for_review(plan_id):
+    logger.debug(f"Получен POST запрос для /plans/{plan_id}/submit-for-review")
+    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
+    if not plan:
+        return jsonify({'error': 'Plan not found or unauthorized'}), 404
+    
+    if plan.status not in ['draft', 'returned']:
+        return jsonify({'error': 'План уже отправлен на проверку или утверждён'}), 400
+    
+    if not all(entry.title and entry.title.strip() for entry in plan.entries):
+        return jsonify({'error': 'Все записи плана должны иметь заполненные заголовки'}), 400
+
+    plan.status = 'needs_review'
+    db.session.commit()
+    return jsonify({'message': 'План отправлен на проверку', 'plan': plan.to_dict()}), 200
+
+@bp.route('/publication-types', methods=['GET'])
+@login_required
+def get_publication_types():
+    """
+    Эндпоинт для получения списка типов публикаций.
+    Доступен для всех аутентифицированных пользователей.
+    """
+    # Логируем запрос
+    logger.debug(f"Получен GET запрос для /api/publication-types от пользователя {current_user.id}")
+    
+    try:
+        # Запрашиваем все типы публикаций из таблицы PublicationType
+        types = PublicationType.query.all()
+        
+        # Формируем ответ в виде списка словарей
+        response = [{
+            'id': type_.id,
+            'name': type_.name,
+            'display_name': type_.display_name
+        } for type_ in types]
+        
+        # Логируем успешное выполнение
+        logger.debug(f"Возвращено {len(response)} типов публикаций")
+        
+        # Возвращаем JSON-ответ
+        return jsonify(response), 200
+    
+    except Exception as e:
+        # Логируем ошибку
+        logger.error(f"Ошибка получения типов публикаций: {str(e)}")
+        # Возвращаем сообщение об ошибке
+        return jsonify({'error': 'Ошибка при получении типов публикаций. Попробуйте позже.'}), 500
+
+@bp.route('/plans/<int:plan_id>/entries/<int:entry_id>/link', methods=['POST'])
+@login_required
+def link_publication_to_plan_entry(plan_id, entry_id):
+    logger.debug(f"Получен POST запрос для /plans/{plan_id}/entries/{entry_id}/link")
+    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
+    if not plan:
+        return jsonify({'error': 'Plan not found or unauthorized'}), 404
+    
+    entry = PlanEntry.query.filter_by(id=entry_id, plan_id=plan_id).first()
+    if not entry:
+        return jsonify({'error': 'Entry not found'}), 404
+    
+    if plan.status != 'approved':
+        return jsonify({'error': 'Can only link publications to approved plans'}), 403
+    
+    if entry.publication_id:
+        return jsonify({'error': 'Entry already linked to a publication'}), 400
+
+    data = request.get_json()
+    publication_id = data.get('publication_id')
+    if not publication_id:
+        return jsonify({'error': 'Publication ID is required'}), 400
+
+    publication = Publication.query.filter_by(id=publication_id, user_id=current_user.id, status='published').first()
+    if not publication:
+        return jsonify({'error': f'Publication with ID {publication_id} not found or not published'}), 404
+
+    existing_link = PlanEntry.query.filter_by(publication_id=publication_id).first()
+    if existing_link:
+        return jsonify({'error': f'Publication with ID {publication_id} is already linked to another plan entry'}), 400
+
+    entry.publication_id = publication_id
+    entry.status = 'completed'
+    db.session.commit()
+    return jsonify({'message': 'Publication linked successfully', 'entry': entry.to_dict()}), 200
+
+@bp.route('/plans/<int:plan_id>/entries/<int:entry_id>/unlink', methods=['POST'])
+@login_required
+def unlink_publication_from_plan_entry(plan_id, entry_id):
+    logger.debug(f"Получен POST запрос для /plans/{plan_id}/entries/{entry_id}/unlink")
+    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
+    if not plan:
+        return jsonify({'error': 'Plan not found or unauthorized'}), 404
+    
+    entry = PlanEntry.query.filter_by(id=entry_id, plan_id=plan_id).first()
+    if not entry:
+        return jsonify({'error': 'Entry not found'}), 404
+    
+    if plan.status != 'approved':
+        return jsonify({'error': 'Can only unlink publications from approved plans'}), 403
+    
+    if not entry.publication_id:
+        return jsonify({'error': 'No publication linked to this entry'}), 400
+
+    entry.publication_id = None
+    entry.status = 'planned'
+    db.session.commit()
+    return jsonify({'message': 'Publication unlinked successfully', 'entry': entry.to_dict()}), 200
+
+
+dfffffffffffffffffffffffffffff
 
 import React, { useState, useEffect, useRef } from 'react';
 import { Line } from 'react-chartjs-2';
+import { Snackbar, Slide } from '@mui/material';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler } from 'chart.js';
 import {
 	Container,
@@ -1544,6 +1164,10 @@ import {
 	Fade,
 	CircularProgress,
 	Autocomplete,
+	FormControl, // Добавляем для выпадающего списка
+	InputLabel,  // Добавляем для выпадающего списка
+	Select,
+	Chip,     // Добавляем для выпадающего списка
 } from '@mui/material';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
 import AddIcon from '@mui/icons-material/Add';
@@ -1583,6 +1207,21 @@ const AppleButton = styled(Button)(({ theme }) => ({
 	'&:disabled': {
 		backgroundColor: '#D1D1D6',
 		color: '#FFFFFF',
+	},
+}));
+
+const RedCancelButton = styled(Button)(({ theme }) => ({
+	borderRadius: '12px',
+	textTransform: 'none',
+	backgroundColor: '#FF3B30', // Красный фон
+	color: '#FFFFFF', // Белый текст
+	padding: '8px 16px',
+	fontSize: '14px',
+	fontWeight: 600,
+	boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+	'&:hover': {
+		backgroundColor: '#990F0A', // Более тёмный красный при наведении
+		boxShadow: '0 4px 8px rgba(0, 0, 0, 0.15)', // Увеличенная тень при наведении
 	},
 }));
 
@@ -1662,6 +1301,11 @@ const CancelButton = styled(Button)(({ theme }) => ({
 	},
 }));
 
+const TransitionDown = (props) => {
+	return <Slide {...props} direction="down" />;
+};
+
+
 const DetailsButton = styled(Button)(({ theme }) => ({
 	borderRadius: '12px',
 	border: '1px solid #D1D1D6',
@@ -1673,6 +1317,57 @@ const DetailsButton = styled(Button)(({ theme }) => ({
 		borderColor: '#0071E3',
 		color: '#0071E3',
 		backgroundColor: 'transparent',
+	},
+}));
+
+const AppleSelect = styled(Select)(({ theme }) => ({
+	// Увеличиваем специфичность, добавляя селектор
+	'& .MuiInputLabel-root.MuiInputLabel-root': {
+		color: '#6E6E73 !important', // Серый цвет метки
+		fontSize: '16px !important',
+		// Позиционирование в нераскрытом состоянии
+		transform: 'translate(14px, 12px) scale(1) !important', // Поднимаем метку к середине поля
+		'&.MuiInputLabel-shrink': {
+			// Позиционирование в раскрытом состоянии
+			transform: 'translate(14px, -12px) scale(0.75) !important', // Поднимаем метку выше поля
+			color: '#0071E3 !important', // Синий цвет при фокусе
+		},
+	},
+	'& .MuiSelect-select': {
+		padding: '10px 14px', // Уменьшенные отступы для компактности
+		color: '#1D1D1F', // Тёмный текст
+		fontSize: '14px', // Соответствует шрифту кнопок
+		fontWeight: 400,
+		display: 'flex',
+		alignItems: 'center', // Центрирование содержимого по вертикали
+		height: '40px !important', // Фиксируем высоту поля
+		boxSizing: 'border-box', // Учитываем padding в высоте
+	},
+	'& .MuiOutlinedInput-root': {
+		borderRadius: '12px',
+		backgroundColor: '#F5F5F7', // Светло-серый фон
+		'& fieldset': {
+			borderColor: '#D1D1D6', // Серая рамка в покое
+		},
+		'&:hover fieldset': {
+			borderColor: '#0071E3', // Синяя рамка при наведении
+		},
+		'&.Mui-focused fieldset': {
+			borderColor: '#0071E3', // Синяя рамка при фокусе
+		},
+	},
+	'& .MuiMenuItem-root': {
+		borderRadius: '8px', // Закругленные углы для элементов списка
+		margin: '4px 8px', // Отступы внутри выпадающего списка
+		'&:hover': {
+			backgroundColor: '#E5E5EA', // Светло-серая подсветка при наведении
+		},
+		'&.Mui-selected': {
+			backgroundColor: '#D1D1D6', // Более тёмный серый для выбранного элемента
+			'&:hover': {
+				backgroundColor: '#C7C7CC', // Чуть темнее при наведении на выбранный
+			},
+		},
 	},
 }));
 
@@ -1726,6 +1421,7 @@ function Dashboard() {
 	const [filterType, setFilterType] = useState('all');
 	const [filterStatus, setFilterStatus] = useState('all');
 	const [linkDialogOpen, setLinkDialogOpen] = useState(false);
+	const [selectedNewEntryType, setSelectedNewEntryType] = useState([]);
 	const [selectedPlanEntry, setSelectedPlanEntry] = useState(null);
 	const [filteredPublishedPublications, setFilteredPublishedPublications] = useState([]);
 	const [linkSearchQuery, setLinkSearchQuery] = useState('');
@@ -1743,8 +1439,27 @@ function Dashboard() {
 	const plansPerPage = 10;
 	const navigate = useNavigate();
 	const chartRef = useRef(null);
+	const [unlinkDialogOpen, setUnlinkDialogOpen] = useState(false);
+	const [selectedGroup, setSelectedGroup] = useState(null);
+	const [createPlanError, setCreatePlanError] = useState('');
+	const [createPlanSuccess, setCreatePlanSuccess] = useState('');
+	const [planDialogError, setPlanDialogError] = useState('');
+	const [planDialogSuccess, setPlanDialogSuccess] = useState('');
+	const [openPlanSnackbar, setOpenPlanSnackbar] = useState(false); // Управление видимостью Snackbar
+	const [loadingTypes, setLoadingTypes] = useState(true);
 
 
+	// Добавляем состояния для управления диалогом удаления типа
+	const [openDeleteTypeDialog, setOpenDeleteTypeDialog] = useState(false);
+	const [typeToDelete, setTypeToDelete] = useState(null);
+	const [planIdForTypeDelete, setPlanIdForTypeDelete] = useState(null);
+
+	// Временное состояние для редактируемого плана
+	const [tempPlan, setTempPlan] = useState(null);
+
+	// Состояние для управления раскрытием аккордеонов
+	const [expandedPlanId, setExpandedPlanId] = useState(null);
+	const [publicationTypes, setPublicationTypes] = useState([]);
 	const validPublicationTypes = ['article', 'monograph', 'conference'];
 	const validPlanStatuses = ['planned', 'in_progress', 'completed'];
 
@@ -1757,9 +1472,50 @@ function Dashboard() {
 		}
 	}, [user]);
 
+	const PlanAccordion = React.memo(({ plan, expanded, onChange, children }) => (
+		<Accordion
+			key={plan.id}
+			expanded={expanded}
+			onChange={onChange}
+			sx={{ mb: 2, borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}
+		>
+			{children}
+		</Accordion>
+	));
+
+	useEffect(() => {
+		const fetchPublicationTypes = async () => {
+			setLoadingTypes(true);
+			try {
+				const response = await axios.get('http://localhost:5000/api/publication-types', {
+					withCredentials: true,
+					headers: { 'X-CSRFToken': csrfToken },
+				});
+				setPublicationTypes(response.data || []);
+			} catch (err) {
+				console.error('Ошибка загрузки типов публикаций:', err);
+				setError('Не удалось загрузить типы публикаций.');
+				setOpenError(true);
+				setPublicationTypes([]);
+			} finally {
+				setLoadingTypes(false);
+			}
+		};
+		fetchPublicationTypes();
+	}, [csrfToken]);
+
 	const handleTabChange = (event, newValue) => {
 		setValue(newValue);
 		if (newValue !== 2) setShowDetailedAnalytics(false);
+	};
+
+	const handleClosePlanSnackbar = () => {
+		setOpenPlanSnackbar(false);
+		setPlanDialogError('');
+		setPlanDialogSuccess('');
+		if (planDialogSuccess) {
+			setOpenCreatePlanDialog(false); // Закрываем диалог только после успеха
+		}
 	};
 
 	const fetchAllPublications = async () => {
@@ -1826,6 +1582,30 @@ function Dashboard() {
 		}
 	};
 
+
+	const groupEntriesByType = (entries) => {
+		const grouped = {};
+
+		entries.forEach((entry) => {
+			const type = entry.type || 'unknown';
+			if (!grouped[type]) {
+				grouped[type] = {
+					type,
+					planCount: 0,
+					factCount: 0,
+					entries: [],
+				};
+			}
+			grouped[type].planCount += 1;
+			if (entry.publication_id) {
+				grouped[type].factCount += 1;
+			}
+			grouped[type].entries.push(entry);
+		});
+
+		return Object.values(grouped);
+	};
+
 	const fetchPlans = async (page = 1) => {
 		try {
 			const response = await axios.get('http://localhost:5000/api/plans', {
@@ -1840,11 +1620,12 @@ function Dashboard() {
 				isSaved: true,
 				entries: plan.entries.map(entry => ({
 					...entry,
+					type: typeof entry.type === 'object' && entry.type !== null ? entry.type.name : entry.type,
 					publication_id: entry.publication_id || null,
-					isPostApproval: entry.isPostApproval || false, // Устанавливаем false для старых записей, если не указано
+					isPostApproval: entry.isPostApproval || false,
 				})),
 			})).sort((a, b) => b.year - a.year);
-			console.log('Обновлённые планы:', sortedPlans); // Логируем для проверки
+			console.log('Обновлённые планы:', sortedPlans);
 			setPlans(sortedPlans);
 			setPlanPage(page);
 			const total = response.data.total || 0;
@@ -1856,14 +1637,115 @@ function Dashboard() {
 			setOpenError(true);
 		}
 	};
+
+	const handlePlanEntryTypeChange = (planId, oldType, newType) => {
+		setTempPlan((prevTempPlan) => {
+			if (prevTempPlan.id !== planId) return prevTempPlan;
+			const updatedGroupedEntries = prevTempPlan.groupedEntries.map((group) => {
+				if (group.type === oldType) {
+					const updatedEntries = group.entries.map((entry) => ({
+						...entry,
+						type: newType,
+					}));
+					return { ...group, type: newType, entries: updatedEntries };
+				}
+				return group;
+			});
+			return { ...prevTempPlan, groupedEntries: updatedGroupedEntries };
+		});
+	};
+
+	// Изменение количества записей для типа
+	const handlePlanEntryCountChange = (planId, type, count) => {
+		setTempPlan((prevTempPlan) => {
+			if (prevTempPlan.id !== planId) return prevTempPlan;
+			const updatedGroupedEntries = prevTempPlan.groupedEntries.map((group) => {
+				if (group.type === type) {
+					const currentEntries = group.entries;
+					const currentCount = currentEntries.length;
+					let updatedEntries = [...currentEntries];
+
+					if (count > currentCount) {
+						for (let i = currentCount; i < count; i++) {
+							updatedEntries.push({
+								id: `temp-${type}-${i}`,
+								title: `${type} ${i + 1}`,
+								type,
+								status: 'planned',
+								publication_id: null,
+								isPostApproval: false,
+							});
+						}
+					} else if (count < currentCount) {
+						updatedEntries = updatedEntries.slice(0, count);
+					}
+
+					return { ...group, entries: updatedEntries, planCount: count };
+				}
+				return group;
+			});
+			return { ...prevTempPlan, groupedEntries: updatedGroupedEntries };
+		});
+	};
+
+	// Удаление всех записей определённого типа
+	const handleDeletePlanEntryByType = (planId, type) => {
+		setPlanIdForTypeDelete(planId);
+		setTypeToDelete(type);
+		setOpenDeleteTypeDialog(true);
+	};
+
+	const handleDeleteTypeConfirm = () => {
+		if (!planIdForTypeDelete || !typeToDelete) return;
+
+		setTempPlan((prevTempPlan) => {
+			if (prevTempPlan.id !== planIdForTypeDelete) return prevTempPlan;
+			const updatedGroupedEntries = prevTempPlan.groupedEntries.map((group) => {
+				if (group.type === typeToDelete) {
+					return { ...group, isDeleted: true };
+				}
+				return group;
+			});
+			return { ...prevTempPlan, groupedEntries: updatedGroupedEntries };
+		});
+
+		setOpenDeleteTypeDialog(false);
+		setPlanIdForTypeDelete(null);
+		setTypeToDelete(null);
+	};
+
+	const handleRestoreType = (planId, type) => {
+		setTempPlan((prevTempPlan) => {
+			if (prevTempPlan.id !== planId) return prevTempPlan;
+			const updatedGroupedEntries = prevTempPlan.groupedEntries.map((group) => {
+				if (group.type === type) {
+					return { ...group, isDeleted: false };
+				}
+				return group;
+			});
+			return { ...prevTempPlan, groupedEntries: updatedGroupedEntries };
+		});
+	};
+
+	// Функция отмены удаления типа
+	const handleDeleteTypeCancel = () => {
+		setOpenDeleteTypeDialog(false);
+		setPlanIdForTypeDelete(null);
+		setTypeToDelete(null);
+	};
+
+
 	const updateAnalytics = (allPublications) => {
-		const types = { article: 0, monograph: 0, conference: 0 };
+		const types = {};
 		const statuses = { draft: 0, needs_review: 0, published: 0 };
 		let citations = 0;
 
 		allPublications.forEach((pub) => {
-			const pubType = validPublicationTypes.includes(pub.type) ? pub.type : 'article';
-			types[pubType] = (types[pubType] || 0) + 1;
+			const pubType = pub.type; // Теперь это name из PublicationType
+			if (!types[pubType]) {
+				types[pubType] = 0;
+			}
+			types[pubType] += 1;
 			statuses[pub.status] = (statuses[pub.status] || 0) + 1;
 			if (pub.citations) citations += pub.citations;
 		});
@@ -2012,7 +1894,7 @@ function Dashboard() {
 			setTitle('');
 			setAuthors('');
 			setYear('');
-			setType('article');
+			setType(publicationTypes.length > 0 ? publicationTypes[0].name : ''); // Исправлено
 			setFile(null);
 			await fetchData();
 		} catch (err) {
@@ -2073,46 +1955,90 @@ function Dashboard() {
 	};
 
 	const handleEditClick = (publication) => {
-		console.log('Editing publication:', publication.id);
+		// Логируем действие для отладки
+		console.log('Editing publication:', publication?.id || 'unknown');
+
+		// Устанавливаем редактируемую публикацию
 		setEditPublication(publication || {});
+
+		// Устанавливаем поля формы
 		setEditTitle(publication?.title || '');
 		setEditAuthors(publication?.authors || '');
 		setEditYear(publication?.year || '');
-		setEditType(validPublicationTypes.includes(publication?.type) ? publication.type : 'article');
+
+		// Определяем значение для editType
+		let newEditType = '';
+		if (publication?.type && publicationTypes.some((t) => t.name === publication.type)) {
+			// Если тип публикации валиден, используем его
+			newEditType = publication.type;
+		} else if (publicationTypes.length > 0) {
+			// Иначе берем первый доступный тип
+			newEditType = publicationTypes[0].name;
+		}
+		// Если publicationTypes пуст, оставляем editType пустым (валидация будет в handleEditSubmit)
+		setEditType(newEditType);
+
+		// Сбрасываем файл
 		setEditFile(null);
+
+		// Открываем диалог редактирования
 		setOpenEditDialog(true);
 	};
 
 	const handleEditSubmit = async (e) => {
 		e.preventDefault();
-		if (!editPublication) return;
+
+		// Проверяем, что редактируемая публикация существует
+		if (!editPublication) {
+			setError('Публикация для редактирования не выбрана.');
+			setOpenError(true);
+			return;
+		}
+
+		// Проверяем, что тип публикации выбран и список типов не пуст
+		if (!editType || !publicationTypes.some((t) => t.name === editType)) {
+			setError('Пожалуйста, выберите тип публикации.');
+			setOpenError(true);
+			return;
+		}
+
+		// Валидация остальных обязательных полей
+		if (!editTitle.trim() || !editAuthors.trim() || !editYear) {
+			setError('Название, авторы и год обязательны для заполнения.');
+			setOpenError(true);
+			return;
+		}
 
 		let data;
-		let headers = {};
+		let headers = { 'X-CSRFToken': csrfToken };
+
+		// Если есть файл, используем FormData
 		if (editFile) {
 			data = new FormData();
 			data.append('file', editFile);
-			data.append('title', editTitle.trim() || '');
-			data.append('authors', editAuthors.trim() || '');
-			data.append('year', editYear ? parseInt(editYear, 10) : '');
-			data.append('type', editType || 'article');
+			data.append('title', editTitle.trim());
+			data.append('authors', editAuthors.trim());
+			data.append('year', parseInt(editYear, 10));
+			data.append('type', editType); // Используем выбранный тип
 			data.append('status', 'draft');
-			headers['Content-Type'] = 'multipart/form-data';
-			headers['X-CSRFToken'] = csrfToken;
+			// Content-Type для FormData устанавливается автоматически
 		} else {
+			// Иначе используем JSON
 			data = {
-				title: editTitle.trim() || '',
-				authors: editAuthors.trim() || '',
-				year: editYear ? parseInt(editYear, 10) : '',
-				type: editType || 'article',
+				title: editTitle.trim(),
+				authors: editAuthors.trim(),
+				year: parseInt(editYear, 10),
+				type: editType, // Используем выбранный тип
 				status: 'draft',
 			};
 			headers['Content-Type'] = 'application/json';
-			headers['X-CSRFToken'] = csrfToken;
 		}
 
 		try {
+			// Обновляем CSRF-токен перед запросом
 			await refreshCsrfToken();
+
+			// Логируем данные для отладки
 			console.log('Updating publication with:', {
 				title: editTitle,
 				authors: editAuthors,
@@ -2121,16 +2047,29 @@ function Dashboard() {
 				status: 'draft',
 				file: editFile ? editFile.name : 'No new file',
 			});
-			const response = await axios.put(`http://localhost:5000/api/publications/${editPublication.id || ''}`, data, {
-				withCredentials: true,
-				headers,
-			});
+
+			// Отправляем PUT-запрос
+			const response = await axios.put(
+				`http://localhost:5000/api/publications/${editPublication.id}`,
+				data,
+				{
+					withCredentials: true,
+					headers,
+				}
+			);
+
+			// Устанавливаем сообщение об успехе
 			setSuccess('Публикация успешно отредактирована!');
 			setOpenSuccess(true);
 			setError('');
+
+			// Обновляем данные на странице
 			await fetchData();
+
+			// Закрываем диалог редактирования
 			setOpenEditDialog(false);
 		} catch (err) {
+			// Обрабатываем ошибки
 			console.error('Ошибка редактирования публикации:', err.response?.data || err);
 			if (err.response) {
 				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`);
@@ -2182,7 +2121,7 @@ function Dashboard() {
 		setEditTitle('');
 		setEditAuthors('');
 		setEditYear('');
-		setEditType('article');
+		setEditType(publicationTypes.length > 0 ? publicationTypes[0].name : '');
 		setEditFile(null);
 	};
 
@@ -2424,78 +2363,116 @@ function Dashboard() {
 	};
 
 	const handleCreatePlan = async () => {
-		if (!newPlan.year || !newPlan.expectedCount || newPlan.expectedCount < 1) {
-			setError('Пожалуйста, укажите год и количество ожидаемых публикаций (минимум 1).');
-			setOpenError(true);
+		if (!newPlan.year || newPlan.year < 1900 || newPlan.year > 2100) {
+			setPlanDialogError('Пожалуйста, укажите корректный год (1900–2100).');
+			setOpenPlanSnackbar(true);
 			return;
 		}
 
 		try {
 			await refreshCsrfToken();
-			const planData = {
-				year: newPlan.year,
-				expectedCount: newPlan.expectedCount,
-				fillType: 'manual',
-				entries: Array.from({ length: newPlan.expectedCount }, () => ({
-					title: '',
-					type: 'article',
-					status: 'planned',
-				})),
-			};
-			console.log('Creating plan with:', planData);
-			const response = await axios.post('http://localhost:5000/api/plans', planData, {
-				withCredentials: true,
-				headers: {
-					'X-CSRFToken': csrfToken,
-					'Content-Type': 'application/json',
-				},
-			});
-			setSuccess('План успешно создан!');
-			setOpenSuccess(true);
-			setError('');
-			setOpenCreatePlanDialog(false);
-			setNewPlan({ year: new Date().getFullYear() + 1, expectedCount: 1 });
-			await fetchPlans(planPage);
 		} catch (err) {
-			console.error('Ошибка создания плана:', err.response?.data || err);
-			if (err.response) {
-				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`);
-			} else {
-				setError('Ошибка сети. Проверьте подключение и сервер.');
-			}
-			setOpenError(true);
-			setSuccess('');
+			console.error('Ошибка при обновлении CSRF-токена:', err);
+			setPlanDialogError('Не удалось обновить CSRF-токен. Попробуйте снова.');
+			setOpenPlanSnackbar(true);
+			return;
+		}
+
+		const planData = {
+			year: newPlan.year,
+			fillType: 'manual',
+			entries: [],
+		};
+
+		try {
+			const response = await axios.post(
+				'http://localhost:5000/api/plans',
+				planData,
+				{
+					withCredentials: true,
+					headers: {
+						'Content-Type': 'application/json',
+						'X-CSRFToken': csrfToken,
+					},
+				}
+			);
+
+			setPlans([...plans, response.data.plan]);
+			setNewPlan({ year: new Date().getFullYear() + 1, expectedCount: 1 });
+			setPlanDialogSuccess('План успешно создан!');
+			setOpenPlanSnackbar(true);
+			// Диалог не закрываем сразу, ждём закрытия Snackbar
+		} catch (err) {
+			console.error('Ошибка при создании плана:', err);
+			const errorMessage = err.response?.data?.error || 'Произошла ошибка при создании плана.';
+			setPlanDialogError(errorMessage);
+			setOpenPlanSnackbar(true);
 		}
 	};
-
 	const handleEditPlanClick = (planId) => {
 		setEditingPlanId(planId);
-		setPlans(prevPlans =>
-			prevPlans.map(plan =>
+		setExpandedPlanId(planId);
+		const planToEdit = plans.find((plan) => plan.id === planId);
+		const tempEntries = groupEntriesByType(planToEdit.entries).map((group) => ({
+			...group,
+			isDeleted: false,
+		}));
+		setTempPlan({ ...planToEdit, groupedEntries: tempEntries });
+		setPlans((prevPlans) =>
+			prevPlans.map((plan) =>
 				plan.id === planId ? { ...plan, isSaved: false } : plan
 			)
 		);
 	};
 
+
 	const handleAddPlanEntry = (planId) => {
-		setPlans(prevPlans =>
-			prevPlans.map(plan =>
-				plan.id === planId
-					? {
-						...plan,
-						entries: [
-							...plan.entries,
-							{
-								title: '',
-								type: 'article',
-								status: 'planned',
-								isPostApproval: true // Новая запись после утверждения
-							},
-						],
-					}
-					: plan
-			)
-		);
+		setTempPlan((prevTempPlan) => {
+			if (prevTempPlan.id !== planId) return prevTempPlan;
+
+			const newGroupedEntries = [...prevTempPlan.groupedEntries];
+
+			// Проверяем, что selectedNewEntryType содержит валидные типы
+			selectedNewEntryType.forEach((typeName) => {
+				// Проверяем, существует ли тип в publicationTypes
+				const typeObj = publicationTypes.find((t) => t.name === typeName);
+				if (!typeObj) {
+					console.warn(`Тип ${typeName} не найден в publicationTypes`);
+					return;
+				}
+
+				// Проверяем, нет ли уже группы с этим типом (игнорируем удалённые)
+				const existingGroup = newGroupedEntries.find(
+					(group) => group.type === typeName && !group.isDeleted
+				);
+
+				if (!existingGroup) {
+					// Создаём новую запись
+					const newEntry = {
+						id: `temp-${typeName}-${newGroupedEntries.length}`,
+						title: `Новая ${typeObj.display_name.toLowerCase()}`,
+						type: typeName, // Используем строку name
+						status: "planned",
+						publication_id: null,
+						isPostApproval: false,
+					};
+
+					// Добавляем новую группу
+					newGroupedEntries.push({
+						type: typeName, // Используем строку name
+						planCount: 1,
+						factCount: 0,
+						entries: [newEntry],
+						isDeleted: false,
+					});
+				}
+			});
+
+			return { ...prevTempPlan, groupedEntries: newGroupedEntries };
+		});
+
+		// Сбрасываем выбранные типы
+		setSelectedNewEntryType([]);
 	};
 
 	const handleDeletePlanEntry = (planId, index) => {
@@ -2516,42 +2493,95 @@ function Dashboard() {
 			await refreshCsrfToken();
 			const planData = {
 				year: plan.year,
-				expectedCount: plan.expectedCount,
+				expectedCount: tempPlan.groupedEntries.reduce(
+					(sum, group) => sum + (group.isDeleted ? 0 : group.planCount),
+					0
+				),
 				fillType: 'manual',
-				entries: plan.entries.map(entry => ({
-					id: entry.id || undefined, // Сохраняем id для существующих записей
-					title: entry.title || '',
-					type: entry.type || 'article',
-					status: entry.status || 'planned',
-					publication_id: entry.publication_id || null,
-					isPostApproval: entry.isPostApproval || false, // Сохраняем флаг
-				})),
+				entries: tempPlan.groupedEntries
+					.filter((group) => !group.isDeleted)
+					.flatMap((group) =>
+						group.entries.map((entry) => {
+							const typeName = publicationTypes.some(
+								(t) => t.name === entry.type
+							)
+								? entry.type
+								: publicationTypes[0]?.name || 'article';
+							return {
+								id: typeof entry.id === 'number' ? entry.id : undefined,
+								title: entry.title || `Новая ${group.type}`,
+								type: typeName,
+								status: validPlanStatuses.includes(entry.status)
+									? entry.status
+									: 'planned',
+								publication_id: entry.publication_id || null,
+								isPostApproval: !!entry.isPostApproval,
+							};
+						})
+					),
 			};
-			console.log('Saving plan with:', planData);
-			const response = await axios.put(`http://localhost:5000/api/plans/${plan.id}`, planData, {
-				withCredentials: true,
-				headers: {
-					'X-CSRFToken': csrfToken,
-					'Content-Type': 'application/json',
-				},
-			});
+			console.log('Сохранение плана с данными:', planData);
+
+			const response = await axios.put(
+				`http://localhost:5000/api/plans/${plan.id}`,
+				planData,
+				{
+					withCredentials: true,
+					headers: {
+						'X-CSRFToken': csrfToken,
+						'Content-Type': 'application/json',
+					},
+				}
+			);
+
+			console.log('Ответ сервера:', response.data);
+
+			// Проверка статуса ответа
+			if (response.status !== 200) {
+				throw new Error(`Ошибка сервера: ${response.status} - ${response.data?.error || 'Неизвестная ошибка'}`);
+			}
+
+			// Проверка структуры данных
+			if (!response.data || !response.data.plan || !Array.isArray(response.data.plan.entries)) {
+				throw new Error('Ответ сервера не содержит данных о записях плана или они не в формате массива.');
+			}
+
+			// Обновление состояния
+			setPlans((prevPlans) =>
+				prevPlans.map((p) =>
+					p.id === plan.id
+						? {
+							...p,
+							entries: response.data.plan.entries.map((entry) => ({
+								...entry,
+								type:
+									typeof entry.type === 'object' && entry.type !== null
+										? entry.type.name
+										: entry.type,
+								publication_id: entry.publication_id || null,
+								isPostApproval: entry.isPostApproval || false,
+							})),
+							fact_count: response.data.plan.entries.filter((e) => e.publication_id).length,
+							plan_count: response.data.plan.entries.length,
+							status: response.data.plan.status,
+							isSaved: true,
+						}
+						: p
+				)
+			);
+
 			setSuccess('План успешно сохранён!');
 			setOpenSuccess(true);
 			setError('');
 			setEditingPlanId(null);
-			setPlans(prevPlans =>
-				prevPlans.map(p =>
-					p.id === plan.id ? { ...p, entries: response.data.plan.entries, isSaved: true } : p
-				)
-			);
-			await fetchPlans(planPage);
+			setTempPlan(null);
 		} catch (err) {
-			console.error('Ошибка сохранения плана:', err.response?.data || err);
-			if (err.response) {
-				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`);
-			} else {
-				setError('Ошибка сети. Проверьте подключение и сервер.');
-			}
+			console.error('Ошибка сохранения плана:', err);
+			setError(
+				err.response
+					? `Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`
+					: err.message || 'Ошибка сети или сервер не вернул ожидаемые данные.'
+			);
 			setOpenError(true);
 			setSuccess('');
 		}
@@ -2634,22 +2664,24 @@ function Dashboard() {
 			)
 		);
 
-		// Фильтруем публикации, исключая уже привязанные
-		const availablePublications = publishedPublications.filter(
-			pub => !linkedPublicationIds.has(pub.id)
+		// Фильтруем публикации:
+		// 1. Оставляем только те, которые соответствуют типу записи плана
+		// 2. Исключаем уже привязанные
+		// 3. Применяем поиск по названию или авторам
+		const filtered = publishedPublications.filter(
+			pub =>
+				pub.type === selectedPlanEntry.type && // Фильтрация по типу записи плана
+				!linkedPublicationIds.has(pub.id) && // Исключаем уже привязанные
+				(pub.title.toLowerCase().includes(query.toLowerCase()) || // Поиск по названию
+					pub.authors.toLowerCase().includes(query.toLowerCase())) // Поиск по авторам
 		);
 
-		// Применяем поиск по отфильтрованным данным
-		const filtered = availablePublications.filter(
-			(pub) =>
-				pub.title.toLowerCase().includes(query.toLowerCase()) ||
-				pub.authors.toLowerCase().includes(query.toLowerCase())
-		);
 		setFilteredPublishedPublications(filtered);
 	};
 
+	// Функция для открытия диалога привязки публикации
 	const handleOpenLinkDialog = (planId, entry) => {
-		// Собираем все publication_id из записей всех планов
+		// Собираем все publication_id из записей всех планов, чтобы исключить уже привязанные публикации
 		const linkedPublicationIds = new Set(
 			plans.flatMap(plan =>
 				plan.entries
@@ -2658,72 +2690,193 @@ function Dashboard() {
 			)
 		);
 
-		// Фильтруем только те публикации, которые ещё не привязаны
+		// Фильтруем публикации:
+		// 1. Оставляем только те, которые соответствуют типу записи плана (entry.type)
+		// 2. Исключаем уже привязанные публикации
 		const availablePublications = publishedPublications.filter(
-			pub => !linkedPublicationIds.has(pub.id)
+			pub =>
+				pub.type === entry.type && // Фильтрация по типу записи плана
+				!linkedPublicationIds.has(pub.id) // Исключаем уже привязанные
 		);
 
+		// Устанавливаем выбранную запись плана и открываем диалог
 		setSelectedPlanEntry({ planId, ...entry });
 		setLinkDialogOpen(true);
-		setLinkSearchQuery('');
-		setFilteredPublishedPublications(availablePublications);
+		setLinkSearchQuery(''); // Сбрасываем поиск
+		setFilteredPublishedPublications(availablePublications); // Устанавливаем отфильтрованные публикации
+	};
+
+	const handleOpenUnlinkDialog = (planId, group) => {
+		setSelectedGroup({ ...group, planId });
+		setUnlinkDialogOpen(true);
 	};
 
 	// Функция привязки публикации
-	const handleLinkPublication = async (planId, entryId, publicationId) => {
+	const handleLinkPublication = async (planId, entryGroup, publicationId) => {
 		try {
+			// Находим первую запись без publication_id
+			const entryToLink = entryGroup.entries.find((entry) => !entry.publication_id);
+			if (!entryToLink) {
+				setError('Вы уже привязали планируемое количество работ этого типа');
+				setOpenError(true);
+				return;
+			}
+
+			// Обновляем CSRF-токен перед запросом
 			await refreshCsrfToken();
-			console.log('Отправка запроса привязки:', { planId, entryId, publicationId });
+
+			// Отправляем запрос на сервер
 			const response = await axios.post(
-				`http://localhost:5000/api/plans/${planId}/entries/${entryId}/link`,
+				`http://localhost:5000/api/plans/${planId}/entries/${entryToLink.id}/link`,
 				{ publication_id: publicationId },
 				{
 					withCredentials: true,
 					headers: {
-						'X-CSRFToken': csrfToken,
 						'Content-Type': 'application/json',
+						'X-CSRFToken': csrfToken,
 					},
 				}
 			);
-			console.log('Ответ сервера:', response.data);
+
+			// Локально обновляем состояние plans
+			setPlans((prevPlans) =>
+				prevPlans.map((plan) => {
+					if (plan.id === planId) {
+						const updatedEntries = plan.entries.map((entry) =>
+							entry.id === entryToLink.id
+								? { ...entry, publication_id: publicationId }
+								: entry
+						);
+						return {
+							...plan,
+							entries: updatedEntries,
+							fact_count: updatedEntries.filter((e) => e.publication_id).length,
+						};
+					}
+					return plan;
+				})
+			);
+
+			// Обновляем filteredPublishedPublications для диалога
+			const linkedPublicationIds = new Set(
+				plans
+					.flatMap((plan) =>
+						plan.entries
+							.filter((entry) => entry.publication_id)
+							.map((entry) => entry.publication_id)
+					)
+					.concat(publicationId)
+			);
+
+			const updatedFilteredPublications = publishedPublications.filter(
+				(pub) =>
+					pub.type === entryGroup.type &&
+					!linkedPublicationIds.has(pub.id) &&
+					(pub.title.toLowerCase().includes(linkSearchQuery.toLowerCase()) ||
+						pub.authors.toLowerCase().includes(linkSearchQuery.toLowerCase()))
+			);
+			setFilteredPublishedPublications(updatedFilteredPublications);
+
+			// Обновляем selectedPlanEntry для текущего диалога
+			setSelectedPlanEntry({
+				...entryGroup,
+				planId,
+				entries: entryGroup.entries.map((entry) =>
+					entry.id === entryToLink.id
+						? { ...entry, publication_id: publicationId }
+						: entry
+				),
+				factCount: entryGroup.factCount + 1,
+			});
+
 			setSuccess('Публикация успешно привязана!');
 			setOpenSuccess(true);
-			await Promise.all([fetchPlans(planPage), fetchAllPublications()]);
-			setLinkDialogOpen(false);
 		} catch (err) {
-			console.error('Ошибка привязки:', err.response?.data || err.message);
-			setError(err.response?.data?.error || 'Не удалось привязать публикацию.');
+			console.error('Ошибка привязки публикации:', err);
+			setError(
+				err.response?.data?.error || 'Произошла ошибка при привязке публикации.'
+			);
 			setOpenError(true);
 		}
 	};
 
-
-	// Функция отвязки публикации
 	const handleUnlinkPublication = async (planId, entryId) => {
 		try {
 			await refreshCsrfToken();
-			await axios.post(
+			const response = await axios.post(
 				`http://localhost:5000/api/plans/${planId}/entries/${entryId}/unlink`,
 				{},
 				{
 					withCredentials: true,
-					headers: { 'X-CSRFToken': csrfToken },
+					headers: {
+						'Content-Type': 'application/json',
+						'X-CSRFToken': csrfToken,
+					},
 				}
 			);
+
+			// Локально обновляем состояние plans
+			setPlans((prevPlans) =>
+				prevPlans.map((plan) => {
+					if (plan.id === planId) {
+						const updatedEntries = plan.entries.map((entry) =>
+							entry.id === entryId ? { ...entry, publication_id: null } : entry
+						);
+						return {
+							...plan,
+							entries: updatedEntries,
+							fact_count: updatedEntries.filter((e) => e.publication_id).length,
+						};
+					}
+					return plan;
+				})
+			);
+
+			// Обновляем selectedGroup для диалога отвязки
+			setSelectedGroup((prevGroup) => ({
+				...prevGroup,
+				entries: prevGroup.entries.map((entry) =>
+					entry.id === entryId ? { ...entry, publication_id: null } : entry
+				),
+				factCount: prevGroup.entries.filter(
+					(entry) => entry.id !== entryId && entry.publication_id
+				).length,
+			}));
+
+			// Обновляем filteredPublishedPublications для диалога привязки
+			const linkedPublicationIds = new Set(
+				plans.flatMap((plan) =>
+					plan.entries
+						.filter((entry) => entry.publication_id && entry.id !== entryId)
+						.map((entry) => entry.publication_id)
+				)
+			);
+
+			const updatedFilteredPublications = publishedPublications.filter(
+				(pub) =>
+					pub.type === selectedPlanEntry?.type &&
+					!linkedPublicationIds.has(pub.id) &&
+					(pub.title.toLowerCase().includes(linkSearchQuery.toLowerCase()) ||
+						pub.authors.toLowerCase().includes(linkSearchQuery.toLowerCase()))
+			);
+			setFilteredPublishedPublications(updatedFilteredPublications);
+
 			setSuccess('Публикация успешно отвязана!');
 			setOpenSuccess(true);
-			fetchPlans(planPage);
 		} catch (err) {
-			setError(err.response?.data?.error || 'Не удалось отвязать публикацию.');
+			console.error('Ошибка отвязки публикации:', err);
+			setError(
+				err.response?.data?.error || 'Произошла ошибка при отвязке публикации.'
+			);
 			setOpenError(true);
 		}
 	};
 
 	// Функция вычисления прогресса выполнения плана
 	const calculateProgress = (plan) => {
-		const completed = plan.entries.filter((entry) => entry.publication_id).length;
-		const total = plan.expectedCount;
-		return total > 0 ? (completed / total) * 100 : 0;
+		const completed = plan.fact_count || 0; // Используем fact_count
+		const total = plan.plan_count || 0; // Используем plan_count
+		return total > 0 ? (completed / total) * 100 : 0; // Защищаемся от NaN
 	};
 
 	const handlePlanEntryChange = (planId, index, field, value) => {
@@ -2958,14 +3111,21 @@ function Dashboard() {
 													fullWidth
 													select
 													label="Тип публикации"
-													value={type}
-													onChange={(e) => setType(e.target.value)}
+													value={editType}
+													onChange={(e) => setEditType(e.target.value)}
 													margin="normal"
 													variant="outlined"
+													disabled={publicationTypes.length === 0}
 												>
-													<MenuItem value="article">Статья</MenuItem>
-													<MenuItem value="monograph">Монография</MenuItem>
-													<MenuItem value="conference">Доклад/конференция</MenuItem>
+													{publicationTypes.length === 0 ? (
+														<MenuItem value="" disabled>
+															Типы не доступны
+														</MenuItem>
+													) : (
+														publicationTypes.map(type => (
+															<MenuItem key={type.id} value={type.name}>{type.display_name}</MenuItem>
+														))
+													)}
 												</AppleTextField>
 												<Box sx={{ mt: 2 }}>
 													<input
@@ -3111,9 +3271,9 @@ function Dashboard() {
 												variant="outlined"
 											>
 												<MenuItem value="all">Все</MenuItem>
-												<MenuItem value="article">Статья</MenuItem>
-												<MenuItem value="monograph">Монография</MenuItem>
-												<MenuItem value="conference">Доклад/конференция</MenuItem>
+												{publicationTypes.map(type => (
+													<MenuItem key={type.id} value={type.name}>{type.display_name}</MenuItem>
+												))}
 											</AppleTextField>
 											<AppleTextField
 												select
@@ -3171,26 +3331,21 @@ function Dashboard() {
 															<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>
-																{pub.type === 'article'
-																	? 'Статья'
-																	: pub.type === 'monograph'
-																		? 'Монография'
-																		: pub.type === 'conference'
-																			? 'Доклад/конференция'
-																			: 'Неизвестный тип'}
+																{publicationTypes.find(t => t.name === pub.type)?.display_name || 'Неизвестный тип'}
 															</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>
 																<StatusChip
 																	status={
-																		pub.status === 'draft' && pub.returned_for_revision
-																			? 'returned'
+																		pub.status === 'returned_for_revision' && pub.returned_for_revision
+																			? 'returned_for_revision'
 																			: pub.status
 																	}
+																	role={user.role} // Передаем роль пользователя
 																/>
 															</TableCell>
 															<TableCell sx={{ textAlign: 'center' }}>
 																<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-																	{pub.status === 'draft' && (
+																	{(pub.status === 'draft' || pub.status === 'returned_for_revision') && (
 																		<>
 																			<IconButton
 																				aria-label="edit"
@@ -3241,7 +3396,7 @@ function Dashboard() {
 																			)}
 																		</>
 																	)}
-																	{pub.file_url && pub.status !== 'draft' && (
+																	{pub.file_url && pub.status !== 'draft' && pub.status !== 'returned_for_revision' && (
 																		<IconButton
 																			aria-label="download"
 																			onClick={() => handleDownloadClick(pub)}
@@ -3258,7 +3413,7 @@ function Dashboard() {
 																			<DownloadIcon />
 																		</IconButton>
 																	)}
-																	{!pub.file_url && pub.status === 'draft' && (
+																	{!pub.file_url && (pub.status === 'draft' || pub.status === 'returned_for_revision') && (
 																		<IconButton
 																			aria-label="attach"
 																			onClick={() => handleAttachFileClick(pub)}
@@ -3362,17 +3517,20 @@ function Dashboard() {
 															Типы публикаций
 														</Typography>
 														<Grid container spacing={2} sx={{ mb: 4 }}>
-															{Object.entries(pubTypes).map(([type, count]) => (
-																<Grid item xs={12} sm={4} key={type}>
-																	<AppleCard elevation={1} sx={{ p: 2, borderRadius: '12px', backgroundColor: '#FFFFFF', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}>
-																		<CardContent>
-																			<Typography variant="body1" sx={{ color: '#1D1D1F' }}>
-																				{type === 'article' ? 'Статьи' : type === 'monograph' ? 'Монографии' : 'Доклады'}: {count}
-																			</Typography>
-																		</CardContent>
-																	</AppleCard>
-																</Grid>
-															))}
+															{Object.entries(pubTypes).map(([typeName, count]) => {
+																const type = publicationTypes.find(t => t.name === typeName);
+																return (
+																	<Grid item xs={12} sm={4} key={typeName}>
+																		<AppleCard elevation={1} sx={{ p: 2, borderRadius: '12px', backgroundColor: '#FFFFFF', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}>
+																			<CardContent>
+																				<Typography variant="body1" sx={{ color: '#1D1D1F' }}>
+																					{type ? type.display_name : typeName}: {count}
+																				</Typography>
+																			</CardContent>
+																		</AppleCard>
+																	</Grid>
+																);
+															})}
 														</Grid>
 
 														<Typography variant="h6" sx={{ color: '#1D1D1F', mb: 2 }}>
@@ -3410,326 +3568,330 @@ function Dashboard() {
 							{value === 3 && (
 								<>
 									<Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
-										<Typography
-											variant="h5"
-											sx={{
-												color: '#1D1D1F',
-												fontWeight: 600,
-											}}
-										>
+										<Typography variant="h5" sx={{ color: '#1D1D1F', fontWeight: 600 }}>
 											Ваши планы
 										</Typography>
-										<AppleButton
-											startIcon={<AddIcon />}
-											onClick={() => setOpenCreatePlanDialog(true)}
-										>
+										<AppleButton startIcon={<AddIcon />} onClick={() => setOpenCreatePlanDialog(true)}>
 											Создать план
 										</AppleButton>
 									</Box>
-
-									{plans.map((plan) => {
-										// Сортировка записей плана
-										const sortedEntries = [...plan.entries].sort((a, b) => {
-											// Сначала сортируем по наличию publication_id (с публикациями выше)
-											if (a.publication_id && !b.publication_id) return -1;
-											if (!a.publication_id && b.publication_id) return 1;
-											// Если оба с publication_id или оба без, сортируем по времени создания (позже добавленные ниже)
-											// Если нет created_at, используем порядок в массиве (предполагаем, что новые добавляются в конец)
-											return (b.created_at || 0) - (a.created_at || 0); // Если created_at нет, используем 0
-										});
-
-										// Разделяем на утвержденные (до утверждения) и дополнительные (после утверждения)
-										const preApprovalEntries = sortedEntries.filter(entry => !entry.isPostApproval);
-										const postApprovalEntries = sortedEntries.filter(entry => entry.isPostApproval);
-
-										return (
-											<Accordion
-												key={plan.id}
-												sx={{
-													mb: 2,
-													borderRadius: '16px',
-													boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-												}}
-											>
-												<AccordionSummary expandIcon={<ExpandMoreIcon />}>
-													<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-														<Typography variant="h6" sx={{ color: '#1D1D1F' }}>
-															План на {plan.year} год (Ожидаемое количество: {plan.expectedCount} | Текущее количество: {plan.entries.length})
-														</Typography>
-														<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-															<StatusChip status={plan.status} />
-															{(plan.status === 'draft' || plan.status === 'returned') && (
-																<>
-																	<IconButton
-																		onClick={(e) => {
-																			e.stopPropagation();
-																			handleEditPlanClick(plan.id);
-																		}}
-																		sx={{ color: '#0071E3' }}
-																	>
-																		<EditIcon />
-																	</IconButton>
-																	<IconButton
-																		onClick={(e) => {
-																			e.stopPropagation();
-																			handleDeletePlanClick(plan);
-																		}}
-																		sx={{ color: '#FF3B30' }}
-																	>
-																		<DeleteIcon />
-																	</IconButton>
-																	<IconButton
-																		onClick={(e) => {
-																			e.stopPropagation();
-																			handleSubmitPlanForReview(plan);
-																		}}
-																		sx={{ color: '#0071E3' }}
-																		disabled={!areAllTitlesFilled(plan)}
-																		title={areAllTitlesFilled(plan) ? 'Отправить на проверку' : 'Заполните все заголовки'}
-																	>
-																		<PublishIcon />
-																	</IconButton>
-																</>
-															)}
+									{loadingTypes ? (
+										<Typography sx={{ color: '#6E6E73', textAlign: 'center' }}>
+											Загрузка типов публикаций...
+										</Typography>
+									) : plans.length === 0 ? (
+										<Typography sx={{ color: '#6E6E73', textAlign: 'center' }}>
+											У вас пока нет планов. Создайте новый план.
+										</Typography>
+									) : (
+										plans.map((plan) => {
+											const groupedEntries = groupEntriesByType(plan.entries);
+											return (
+												<PlanAccordion
+													plan={plan}
+													expanded={expandedPlanId === plan.id}
+													onChange={(event, isExpanded) => setExpandedPlanId(isExpanded ? plan.id : null)}
+												>
+													<AccordionSummary expandIcon={<ExpandMoreIcon />}>
+														<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+															<Typography variant="h6" sx={{ color: '#1D1D1F' }}>
+																План на {plan.year} год (План: {plan.plan_count} | Факт: {plan.fact_count})
+															</Typography>
+															<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+																<StatusChip status={plan.status} />
+																{(plan.status === 'draft' || plan.status === 'returned') && (
+																	<>
+																		<IconButton
+																			onClick={(e) => {
+																				e.stopPropagation();
+																				handleEditPlanClick(plan.id);
+																			}}
+																			sx={{ color: '#0071E3' }}
+																		>
+																			<EditIcon />
+																		</IconButton>
+																		<IconButton
+																			onClick={(e) => {
+																				e.stopPropagation();
+																				handleDeletePlanClick(plan);
+																			}}
+																			sx={{ color: '#FF3B30' }}
+																		>
+																			<DeleteIcon />
+																		</IconButton>
+																		<IconButton
+																			onClick={(e) => {
+																				e.stopPropagation();
+																				handleSubmitPlanForReview(plan);
+																			}}
+																			sx={{ color: '#0071E3' }}
+																			disabled={!areAllTitlesFilled(plan)}
+																			title={areAllTitlesFilled(plan) ? 'Отправить на проверку' : 'Заполните все заголовки'}
+																		>
+																			<PublishIcon />
+																		</IconButton>
+																	</>
+																)}
+															</Box>
 														</Box>
-													</Box>
-												</AccordionSummary>
-												<AccordionDetails>
-													{editingPlanId === plan.id ? (
-														<>
-															<PlanTable>
-																<TableHead>
-																	<TableRow>
-																		<TableCell>Название</TableCell>
-																		<TableCell>Тип</TableCell>
-																		<TableCell>Статус</TableCell>
-																		<TableCell>Действия</TableCell>
-																	</TableRow>
-																</TableHead>
-																<TableBody>
-																	{plan.entries.map((entry, index) => (
-																		<TableRow key={index}>
-																			<TableCell>
-																				<AppleTextField
-																					value={entry.title}
-																					onChange={(e) => handlePlanEntryChange(plan.id, index, 'title', e.target.value)}
-																					fullWidth
-																					variant="outlined"
-																				/>
-																			</TableCell>
-																			<TableCell>
-																				<AppleTextField
-																					select
-																					value={entry.type}
-																					onChange={(e) => handlePlanEntryChange(plan.id, index, 'type', e.target.value)}
-																					fullWidth
-																					variant="outlined"
-																				>
-																					<MenuItem value="article">Статья</MenuItem>
-																					<MenuItem value="monograph">Монография</MenuItem>
-																					<MenuItem value="conference">Доклад/конференция</MenuItem>
-																				</AppleTextField>
-																			</TableCell>
-																			<TableCell>
-																				<StatusChip status={entry.status} />
-																			</TableCell>
-																			<TableCell>
-																				<IconButton
-																					onClick={() => handleDeletePlanEntry(plan.id, index)}
-																					sx={{ color: '#FF3B30' }}
-																				>
-																					<DeleteIcon />
-																				</IconButton>
-																			</TableCell>
-																		</TableRow>
-																	))}
-																</TableBody>
-															</PlanTable>
-															<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-																<AppleButton
-																	startIcon={<AddIcon />}
-																	onClick={() => handleAddPlanEntry(plan.id)}
-																>
-																	Добавить запись
-																</AppleButton>
-																<GreenButton
-																	startIcon={<SaveIcon />}
-																	onClick={() => handleSavePlan(plan)}
-																	disabled={!areAllTitlesFilled(plan)}
-																>
-																	Сохранить
-																</GreenButton>
-															</Box>
-														</>
-													) : (
-														<>
-															<Typography sx={{ mb: 1 }}>Прогресс выполнения:</Typography>
-															<Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-																<LinearProgress
-																	variant="determinate"
-																	value={Math.min(calculateProgress(plan), 100)}
-																	sx={{
-																		height: 8,
-																		borderRadius: 4,
-																		flexGrow: 1,
-																		backgroundColor: '#E5E5EA',
-																		'& .MuiLinearProgress-bar': { backgroundColor: '#34C759' },
-																	}}
-																/>
-																<Typography
-																	variant="body2"
-																	sx={{
-																		minWidth: '50px',
-																		textAlign: 'right',
-																		color: calculateProgress(plan) > 100 ? '#FF9500' : '#1D1D1F',
-																	}}
-																>
-																	{Math.round(calculateProgress(plan))}%
-																</Typography>
-															</Box>
-															<PlanTable>
-																<TableHead>
-																	<TableRow>
-																		<TableCell>Название</TableCell>
-																		<TableCell>Тип</TableCell>
-																		<TableCell>Статус</TableCell>
-																		<TableCell>Привязанная публикация</TableCell>
-																		{plan.status === 'approved' && <TableCell>Действия</TableCell>}
-																	</TableRow>
-																</TableHead>
-																<TableBody>
-																	{/* Утверждённые работы (до утверждения плана) */}
-																	{preApprovalEntries.map((entry) => (
-																		<TableRow key={entry.id}>
-																			<TableCell>{entry.title}</TableCell>
-																			<TableCell>{entry.type}</TableCell>
-																			<TableCell><StatusChip status={entry.status} /></TableCell>
-																			<TableCell>
-																				{entry.publication_id ? (
-																					<Typography
-																						sx={{
-																							color: '#0071E3',
-																							textDecoration: 'underline',
-																							cursor: 'pointer',
-																							'&:hover': { textDecoration: 'none' },
-																						}}
-																						onClick={() => navigate(`/publication/${entry.publication_id}`)}
+													</AccordionSummary>
+													<AccordionDetails>
+														{editingPlanId === plan.id ? (
+															<>
+																{publicationTypes.length === 0 ? (
+																	<Typography sx={{ color: '#6E6E73' }}>
+																		Типы публикаций недоступны.
+																	</Typography>
+																) : tempPlan?.groupedEntries?.length === 0 ? (
+																	<Typography sx={{ color: '#1D1D1F', mt: 2, fontStyle: 'italic' }}>
+																		Ваш план пуст, выберите планируемые типы публикаций.
+																	</Typography>
+																) : (
+																	<PlanTable>
+																		<TableHead>
+																			<TableRow>
+																				<TableCell>Тип</TableCell>
+																				<TableCell>Количество</TableCell>
+																				<TableCell>Действия</TableCell>
+																			</TableRow>
+																		</TableHead>
+																		<TableBody>
+																			{tempPlan?.groupedEntries?.map((group, index) => {
+																				// Ищем объект типа в publicationTypes
+																				const typeObj = publicationTypes.find((t) => t.name === group.type);
+																				if (!typeObj && !group.isDeleted) {
+																					console.warn(`Тип ${group.type} не найден в publicationTypes`);
+																				}
+																				return (
+																					<TableRow
+																						key={index}
+																						sx={{ backgroundColor: group.isDeleted ? "#E5E5EA" : "inherit" }}
 																					>
-																						{publishedPublications.find(pub => pub.id === entry.publication_id)?.title || 'Неизвестно'}
-																					</Typography>
-																				) : (
-																					'Не привязана'
-																				)}
-																			</TableCell>
-																			{plan.status === 'approved' && (
-																				<TableCell>
-																					{entry.publication_id ? (
-																						<IconButton
-																							onClick={() => handleUnlinkPublication(plan.id, entry.id)}
-																							sx={{ color: '#FF3B30' }}
-																							title="Отвязать публикацию"
-																						>
-																							<UnlinkIcon />
-																						</IconButton>
-																					) : (
-																						<IconButton
-																							onClick={() => handleOpenLinkDialog(plan.id, entry)}
-																							sx={{ color: '#0071E3' }}
-																							title="Привязать публикацию"
-																						>
-																							<LinkIcon />
-																						</IconButton>
-																					)}
-																				</TableCell>
-																			)}
-																		</TableRow>
-																	))}
-																	{/* Дополнительные работы (после утверждения) */}
-																	{postApprovalEntries.length > 0 && (
-																		<TableRow>
-																			<TableCell colSpan={5} sx={{ fontWeight: 600, color: '#6E6E73', padding: '16px 20px' }}>
-																				Дополнительные работы (добавлены после утверждения)
-																			</TableCell>
-																		</TableRow>
-																	)}
-																	{postApprovalEntries.map((entry) => (
-																		<TableRow key={entry.id}>
-																			<TableCell>{entry.title}</TableCell>
-																			<TableCell>{entry.type}</TableCell>
-																			<TableCell><StatusChip status={entry.status} /></TableCell>
-																			<TableCell>
-																				{entry.publication_id ? (
-																					<Typography
-																						sx={{
-																							color: '#0071E3',
-																							textDecoration: 'underline',
-																							cursor: 'pointer',
-																							'&:hover': { textDecoration: 'none' },
-																						}}
-																						onClick={() => navigate(`/publication/${entry.publication_id}`)}
-																					>
-																						{publishedPublications.find(pub => pub.id === entry.publication_id)?.title || 'Неизвестно'}
-																					</Typography>
-																				) : (
-																					'Не привязана'
-																				)}
-																			</TableCell>
-																			{plan.status === 'approved' && (
-																				<TableCell>
-																					{entry.publication_id ? (
-																						<IconButton
-																							onClick={() => handleUnlinkPublication(plan.id, entry.id)}
-																							sx={{ color: '#FF3B30' }}
-																							title="Отвязать публикацию"
-																						>
-																							<UnlinkIcon />
-																						</IconButton>
-																					) : (
-																						<IconButton
-																							onClick={() => handleOpenLinkDialog(plan.id, entry)}
-																							sx={{ color: '#0071E3' }}
-																							title="Привязать публикацию"
-																						>
-																							<LinkIcon />
-																						</IconButton>
-																					)}
-																				</TableCell>
-																			)}
-																		</TableRow>
-																	))}
-																</TableBody>
-															</PlanTable>
-															{plan.status === 'approved' && (
-																<AppleButton
-																	startIcon={<AddIcon />}
-																	onClick={() => handleEditPlanClick(plan.id)}
-																	sx={{ mt: 2 }}
-																>
-																	Добавить запись
-																</AppleButton>
-															)}
-															{plan.return_comment && plan.status !== 'approved' && (
-																<Typography
-																	sx={{
-																		mt: 2,
-																		color: '#000000',
-																		fontWeight: 600,
-																		display: 'flex',
-																		alignItems: 'center',
-																		gap: 1,
-																	}}
-																>
-																	<WarningAmberIcon sx={{ color: '#FF3B30' }} />
-																	Комментарий при возврате: {plan.return_comment}
-																</Typography>
-															)}
-														</>
-													)}
-												</AccordionDetails>
-											</Accordion>
-										);
-									})}
+																						<TableCell>
+																							{typeObj ? typeObj.display_name : "Неизвестный тип"}
+																						</TableCell>
+																						<TableCell>
+																							<AppleTextField
+																								sx={{ width: "70px" }}
+																								type="number"
+																								value={group.planCount}
+																								onChange={(e) =>
+																									handlePlanEntryCountChange(
+																										plan.id,
+																										group.type,
+																										parseInt(e.target.value) || 1
+																									)
+																								}
+																								fullWidth
+																								variant="outlined"
+																								disabled={group.isDeleted}
+																							/>
+																						</TableCell>
+																						<TableCell>
+																							{group.isDeleted ? (
+																								<IconButton
+																									onClick={() => handleRestoreType(plan.id, group.type)}
+																									sx={{ color: "#34C759" }}
+																									title="Восстановить тип"
+																									disabled={plan.status === "pending"}
+																								>
+																									<AddIcon />
+																								</IconButton>
+																							) : (
+																								<IconButton
+																									onClick={() => handleDeletePlanEntryByType(plan.id, group.type)}
+																									sx={{ color: "#FF3B30" }}
+																									title="Удалить тип"
+																									disabled={plan.status === "pending"}
+																								>
+																									<DeleteIcon />
+																								</IconButton>
+																							)}
+																						</TableCell>
+																					</TableRow>
+																				);
+																			})}
 
+																		</TableBody>
+																	</PlanTable>
+																)}
+																<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+																	<FormControl sx={{ minWidth: 200 }}>
+																		<InputLabel>Типы публикаций</InputLabel>
+																		<AppleSelect
+																			multiple
+																			value={selectedNewEntryType}
+																			onChange={(e) => setSelectedNewEntryType(e.target.value)}
+																			renderValue={(selected) =>
+																				selected.length === 0 ? (
+																					<Typography sx={{ color: '#6E6E73' }}>Выберите типы</Typography>
+																				) : (
+																					<Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+																						{selected.map((value) => {
+																							const typeObj = publicationTypes.find(t => t.name === value);
+																							return (
+																								<Chip
+																									key={value}
+																									label={typeObj ? typeObj.display_name : value}
+																									onMouseDown={(event) => event.stopPropagation()}
+																									onDelete={(event) => {
+																										event.stopPropagation();
+																										setSelectedNewEntryType(selectedNewEntryType.filter((item) => item !== value));
+																									}}
+																								/>
+																							);
+																						})}
+																					</Box>
+																				)
+																			}
+																			disabled={publicationTypes.length === 0}
+																		>
+																			{publicationTypes.map(type => (
+																				<MenuItem key={type.id} value={type.name}>{type.display_name}</MenuItem>
+																			))}
+																		</AppleSelect>
+																	</FormControl>
+																	<AppleButton
+																		startIcon={<AddIcon />}
+																		onClick={() => handleAddPlanEntry(plan.id)}
+																		disabled={selectedNewEntryType.length === 0}
+																	>
+																		Добавить тип
+																	</AppleButton>
+																	<RedCancelButton
+																		onClick={() => {
+																			setEditingPlanId(null);
+																			setTempPlan(null);
+																			setExpandedPlanId(null);
+																		}}
+																	>
+																		Отмена
+																	</RedCancelButton>
+																	<GreenButton
+																		startIcon={<SaveIcon />}
+																		onClick={() => handleSavePlan(plan)}
+																		disabled={
+																			!areAllTitlesFilled({
+																				...plan,
+																				entries: tempPlan.groupedEntries.flatMap((group) => (group.isDeleted ? [] : group.entries)),
+																			})
+																		}
+																	>
+																		Сохранить
+																	</GreenButton>
+																</Box>
+															</>
+														) : (
+															<>
+																<Typography sx={{ mb: 1 }}>Прогресс выполнения:</Typography>
+																<Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+																	<LinearProgress
+																		variant="determinate"
+																		value={Math.min(calculateProgress(plan), 100)}
+																		sx={{
+																			height: 8,
+																			borderRadius: 4,
+																			flexGrow: 1,
+																			backgroundColor: '#E5E5EA',
+																			'& .MuiLinearProgress-bar': { backgroundColor: '#34C759' },
+																		}}
+																	/>
+																	<Typography
+																		variant="body2"
+																		sx={{
+																			minWidth: '50px',
+																			textAlign: 'right',
+																			color: calculateProgress(plan) > 100 ? '#FF9500' : '#1D1D1F',
+																		}}
+																	>
+																		{Math.round(calculateProgress(plan))}%
+																	</Typography>
+																</Box>
+																{groupedEntries.length === 0 ? (
+																	<Typography sx={{ color: '#1D1D1F', mt: 2, fontStyle: 'italic' }}>
+																		Ваш план пуст, выберите планируемые типы публикаций.
+																	</Typography>
+																) : (
+																	<PlanTable>
+																		<TableHead>
+																			<TableRow>
+																				<TableCell>План/Факт</TableCell>
+																				<TableCell>Тип</TableCell>
+																				<TableCell>Действия</TableCell>
+																			</TableRow>
+																		</TableHead>
+																		<TableBody>
+																			{groupedEntries.map((group) => {
+																				const typeObj = publicationTypes.find(t => t.name === group.type);
+																				if (!typeObj) {
+																					console.warn(`Тип ${group.type} не найден в publicationTypes`);
+																				}
+																				return (
+																					<TableRow key={group.type}>
+																						<TableCell>{`${group.planCount}/${group.factCount}`}</TableCell>
+																						<TableCell>
+																							{typeObj ? typeObj.display_name : 'Неизвестный тип'}
+																						</TableCell>
+																						<TableCell>
+																							<IconButton
+																								onClick={() => handleOpenLinkDialog(plan.id, group)}
+																								sx={{ color: '#0071E3' }}
+																								title="Привязать публикацию"
+																								disabled={plan.status !== 'approved' || group.factCount >= group.planCount}
+																							>
+																								<LinkIcon />
+																							</IconButton>
+																							<IconButton
+																								onClick={() => handleOpenUnlinkDialog(plan.id, group)}
+																								sx={{
+																									color: group.factCount > 0 ? '#FF3B30' : '#D1D1D6',
+																									'&:hover': {
+																										color: group.factCount > 0 ? '#FF2D1A' : '#D1D1D6',
+																									},
+																								}}
+																								title="Отвязать публикацию"
+																								disabled={plan.status !== 'approved' || group.factCount === 0}
+																							>
+																								<UnlinkIcon />
+																							</IconButton>
+																						</TableCell>
+																					</TableRow>
+																				);
+																			})}
+																		</TableBody>
+																	</PlanTable>
+																)}
+																{plan.status === 'approved' && groupedEntries.length !== 0 && (
+																	<AppleButton
+																		startIcon={<AddIcon />}
+																		onClick={() => handleEditPlanClick(plan.id)}
+																		sx={{ mt: 2 }}
+																	>
+																		Добавить тип
+																	</AppleButton>
+																)}
+																{plan.return_comment && plan.status !== 'approved' && (
+																	<Typography
+																		sx={{
+																			mt: 2,
+																			color: '#000000',
+																			fontWeight: 600,
+																			display: 'flex',
+																			alignItems: 'center',
+																			gap: 1,
+																		}}
+																	>
+																		<WarningAmberIcon sx={{ color: '#FF3B30' }} />
+																		Комментарий при возврате: {plan.return_comment}
+																	</Typography>
+																)}
+															</>
+														)}
+													</AccordionDetails>
+												</PlanAccordion>
+											);
+										})
+									)}
 									<Pagination
 										count={planTotalPages}
 										page={planPage}
@@ -3768,6 +3930,27 @@ function Dashboard() {
 				</CardContent>
 			</AppleCard>
 
+			<Snackbar
+				open={openPlanSnackbar}
+				autoHideDuration={2500}
+				onClose={handleClosePlanSnackbar}
+				anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
+				TransitionComponent={TransitionDown}
+			>
+				<Alert
+					severity={planDialogError ? 'error' : 'success'}
+					sx={{
+						borderRadius: '12px',
+						backgroundColor: planDialogError ? '#FFF1F0' : '#E7F8E7',
+						color: '#1D1D1F',
+						boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+						minWidth: '300px',
+					}}
+					onClose={handleClosePlanSnackbar}
+				>
+					{planDialogError || planDialogSuccess}
+				</Alert>
+			</Snackbar>
 			{/* Диалог редактирования пользователя */}
 			<Dialog
 				open={openEditUserDialog}
@@ -3924,10 +4107,17 @@ function Dashboard() {
 							onChange={(e) => setEditType(e.target.value)}
 							margin="normal"
 							variant="outlined"
+							disabled={publicationTypes.length === 0}
 						>
-							<MenuItem value="article">Статья</MenuItem>
-							<MenuItem value="monograph">Монография</MenuItem>
-							<MenuItem value="conference">Доклад/конференция</MenuItem>
+							{publicationTypes.length === 0 ? (
+								<MenuItem value="" disabled>
+									Типы не доступны
+								</MenuItem>
+							) : (
+								publicationTypes.map(type => (
+									<MenuItem key={type.id} value={type.name}>{type.display_name}</MenuItem>
+								))
+							)}
 						</AppleTextField>
 						<Box sx={{ mt: 2 }}>
 							<input
@@ -4089,7 +4279,132 @@ function Dashboard() {
 				</DialogActions>
 			</Dialog>
 
-			{/* Диалог создания плана */}
+
+			<Dialog
+				open={openDeleteTypeDialog}
+				onClose={handleDeleteTypeCancel}
+				maxWidth="sm"
+				fullWidth
+				PaperProps={{
+					sx: {
+						borderRadius: '16px',
+						boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+						backgroundColor: '#FFFFFF',
+					},
+				}}
+			>
+				<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600 }}>
+					Подтверждение удаления типа
+				</DialogTitle>
+				<DialogContent>
+					<Typography sx={{ color: '#1D1D1F' }}>
+						Вы уверены, что хотите удалить все записи типа "
+						{typeToDelete === 'article'
+							? 'Статья'
+							: typeToDelete === 'monograph'
+								? 'Монография'
+								: typeToDelete === 'conference'
+									? 'Доклад/конференция'
+									: 'Неизвестный тип'}
+						" из плана?
+					</Typography>
+				</DialogContent>
+				<DialogActions sx={{ p: 2 }}>
+					<CancelButton onClick={handleDeleteTypeCancel}>Отмена</CancelButton>
+					<AppleButton
+						onClick={handleDeleteTypeConfirm}
+						sx={{ backgroundColor: '#FF3B30', '&:hover': { backgroundColor: '#FF2D1A' } }}
+					>
+						Удалить
+					</AppleButton>
+				</DialogActions>
+			</Dialog>
+
+			<Dialog
+				open={unlinkDialogOpen}
+				onClose={() => setUnlinkDialogOpen(false)}
+				sx={{ '& .MuiDialog-paper': { borderRadius: '16px', p: 2, minWidth: '500px' } }}
+			>
+				<DialogTitle>Отвязать публикацию</DialogTitle>
+				<DialogContent>
+					<Table>
+						<TableHead>
+							<TableRow>
+								<TableCell>Название</TableCell>
+								<TableCell>Авторы</TableCell>
+								<TableCell>Действия</TableCell>
+							</TableRow>
+						</TableHead>
+						<TableBody>
+							{selectedGroup?.entries.filter((entry) => entry.publication_id).length > 0 ? (
+								selectedGroup.entries
+									.filter((entry) => entry.publication_id)
+									.map((entry) => {
+										const publication = publishedPublications.find((pub) => pub.id === entry.publication_id);
+										return publication ? (
+											<TableRow key={entry.id}>
+												<TableCell>{publication.title}</TableCell>
+												<TableCell>{publication.authors}</TableCell>
+												<TableCell>
+													<RedCancelButton
+														onClick={() => handleUnlinkPublication(selectedGroup.planId, entry.id)}
+													>
+														Отвязать
+													</RedCancelButton>
+												</TableCell>
+											</TableRow>
+										) : null;
+									})
+							) : (
+								<TableRow>
+									<TableCell colSpan={3} sx={{ textAlign: 'center', color: '#6E6E73' }}>
+										Нет привязанных публикаций для отвязки.
+									</TableCell>
+								</TableRow>
+							)}
+						</TableBody>
+					</Table>
+					<Collapse in={openSuccess}>
+						{success && (
+							<Alert
+								severity="success"
+								sx={{
+									mt: 2,
+									borderRadius: '12px',
+									backgroundColor: '#E7F8E7',
+									color: '#1D1D1F',
+									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+								}}
+								onClose={() => setOpenSuccess(false)}
+							>
+								{success}
+							</Alert>
+						)}
+					</Collapse>
+					<Collapse in={openError}>
+						{error && (
+							<Alert
+								severity="error"
+								sx={{
+									mt: 2,
+									borderRadius: '12px',
+									backgroundColor: '#FFF1F0',
+									color: '#1D1D1F',
+									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+								}}
+								onClose={() => setOpenError(false)}
+							>
+								{error}
+							</Alert>
+						)}
+					</Collapse>
+				</DialogContent>
+				<DialogActions>
+					<CancelButton onClick={() => setUnlinkDialogOpen(false)}>Закрыть</CancelButton>
+				</DialogActions>
+			</Dialog>
+
+
 			<Dialog
 				open={openCreatePlanDialog}
 				onClose={() => setOpenCreatePlanDialog(false)}
@@ -4106,19 +4421,46 @@ function Dashboard() {
 						margin="normal"
 						variant="outlined"
 					/>
-					<AppleTextField
-						label="Ожидаемое количество публикаций"
-						type="number"
-						value={newPlan.expectedCount}
-						onChange={(e) => setNewPlan({ ...newPlan, expectedCount: parseInt(e.target.value) || 1 })}
-						fullWidth
-						margin="normal"
-						variant="outlined"
-					/>
+					{/* Уведомления внутри диалога */}
+					<Collapse in={!!createPlanSuccess}>
+						{createPlanSuccess && (
+							<Alert
+								severity="success"
+								sx={{
+									mt: 2,
+									borderRadius: '12px',
+									backgroundColor: '#E7F8E7',
+									color: '#1D1D1F',
+									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+								}}
+							>
+								{createPlanSuccess}
+							</Alert>
+						)}
+					</Collapse>
+					<Collapse in={!!createPlanError}>
+						{createPlanError && (
+							<Alert
+								severity="error"
+								sx={{
+									mt: 2,
+									borderRadius: '12px',
+									backgroundColor: '#FFF1F0',
+									color: '#1D1D1F',
+									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+								}}
+								onClose={() => setCreatePlanError('')} // Позволяет закрыть ошибку вручную
+							>
+								{createPlanError}
+							</Alert>
+						)}
+					</Collapse>
 				</DialogContent>
 				<DialogActions>
 					<CancelButton onClick={() => setOpenCreatePlanDialog(false)}>Отмена</CancelButton>
-					<AppleButton onClick={handleCreatePlan}>Создать</AppleButton>
+					<AppleButton onClick={handleCreatePlan} disabled={!!createPlanSuccess}>
+						Создать
+					</AppleButton>
 				</DialogActions>
 			</Dialog>
 			<Dialog
@@ -4145,24 +4487,66 @@ function Dashboard() {
 							</TableRow>
 						</TableHead>
 						<TableBody>
-							{filteredPublishedPublications.map((pub) => (
-								<TableRow key={pub.id}>
-									<TableCell>{pub.title}</TableCell>
-									<TableCell>{pub.authors}</TableCell>
-									<TableCell>
-										<AppleButton
-											onClick={() => handleLinkPublication(selectedPlanEntry.planId, selectedPlanEntry.id, pub.id)}
-										>
-											Привязать
-										</AppleButton>
+							{filteredPublishedPublications.length > 0 ? (
+								filteredPublishedPublications.map((pub) => (
+									<TableRow key={pub.id}>
+										<TableCell>{pub.title}</TableCell>
+										<TableCell>{pub.authors}</TableCell>
+										<TableCell>
+											<AppleButton
+												onClick={() => handleLinkPublication(selectedPlanEntry.planId, selectedPlanEntry, pub.id)}
+											>
+												Привязать
+											</AppleButton>
+										</TableCell>
+									</TableRow>
+								))
+							) : (
+								<TableRow>
+									<TableCell colSpan={3} sx={{ textAlign: 'center', color: '#6E6E73' }}>
+										Нет доступных публикаций для привязки.
 									</TableCell>
 								</TableRow>
-							))}
+							)}
 						</TableBody>
 					</Table>
+					<Collapse in={openSuccess}>
+						{success && (
+							<Alert
+								severity="success"
+								sx={{
+									mt: 2,
+									borderRadius: '12px',
+									backgroundColor: '#E7F8E7',
+									color: '#1D1D1F',
+									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+								}}
+								onClose={() => setOpenSuccess(false)}
+							>
+								{success}
+							</Alert>
+						)}
+					</Collapse>
+					<Collapse in={openError}>
+						{error && (
+							<Alert
+								severity="error"
+								sx={{
+									mt: 2,
+									borderRadius: '12px',
+									backgroundColor: '#FFF1F0',
+									color: '#1D1D1F',
+									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
+								}}
+								onClose={() => setOpenError(false)}
+							>
+								{error}
+							</Alert>
+						)}
+					</Collapse>
 				</DialogContent>
 				<DialogActions>
-					<CancelButton onClick={() => setLinkDialogOpen(false)}>Отмена</CancelButton>
+					<CancelButton onClick={() => setLinkDialogOpen(false)}>Закрыть</CancelButton>
 				</DialogActions>
 			</Dialog>
 		</Container>

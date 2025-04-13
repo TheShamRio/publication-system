@@ -51,31 +51,34 @@ class User(db.Model, UserMixin):
     
 		
 
+class PublicationType(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(50), unique=True, nullable=False)  # Например, 'article'
+    display_name = db.Column(db.String(100), nullable=False)      # Например, 'Статья'
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+# Обновляем модель Publication
 class Publication(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
     authors = db.Column(db.String(200), nullable=False)
     year = db.Column(db.Integer, nullable=False)
-    type = db.Column(db.String(50), nullable=False)
+    # Заменяем type на type_id и добавляем связь
+    type_id = db.Column(db.Integer, db.ForeignKey('publication_type.id'), nullable=False)
+    type = db.relationship('PublicationType', backref='publications')
     status = db.Column(db.String(50), nullable=False, default='draft')
     file_url = db.Column(db.String(200), nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)
     updated_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow(), nullable=False)
     returned_for_revision = db.Column(db.Boolean, default=False)
     published_at = db.Column(db.DateTime, nullable=True)
-    # Новые поля
-    returned_at = db.Column(db.DateTime, nullable=True)  # Время возврата на доработку
-    return_comment = db.Column(db.Text, nullable=True)   # Комментарий при возврате
+    returned_at = db.Column(db.DateTime, nullable=True)
+    return_comment = db.Column(db.Text, nullable=True)
 
     user = db.relationship('User', back_populates='publications', lazy=True)
     plan_entries = db.relationship('PlanEntry', back_populates='publication', lazy=True)
-    @property
-    def type_ru(self):
-        return {
-            'article': 'Статья',
-            'monograph': 'Монография',
-            'conference': 'Доклад/конференция'
-        }.get(self.type, self.type)
+
 
     @property
     def status_ru(self):
@@ -91,14 +94,18 @@ class Publication(db.Model):
             'title': self.title,
             'authors': self.authors,
             'year': self.year,
-            'type': self.type,
+            'type': {
+                'id': self.type.id,
+                'name': self.type.name,
+                'display_name': self.type.display_name
+            } if self.type else None,
             'status': self.status,
             'file_url': self.file_url,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
             'returned_for_revision': self.returned_for_revision,
             'published_at': self.published_at.isoformat() if self.published_at else None,
-            'returned_at': self.returned_at.isoformat() if self.returned_at else None,  # Добавляем новое поле
-            'return_comment': self.return_comment,  # Добавляем новое поле
+            'returned_at': self.returned_at.isoformat() if self.returned_at else None,
+            'return_comment': self.return_comment,
             'user': {
                 'full_name': self.user.full_name if self.user else None
             } if self.user else None
@@ -186,11 +193,13 @@ class Plan(db.Model):
 class PlanEntry(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     plan_id = db.Column(db.Integer, db.ForeignKey('plan.id'), nullable=False)
-    title = db.Column(db.String(200), nullable=True)  # Для ручного заполнения
-    type = db.Column(db.String(50), nullable=True)  # Для ручного заполнения
-    publication_id = db.Column(db.Integer, db.ForeignKey('publication.id'), nullable=True)  # Для привязки
-    status = db.Column(db.String(50), nullable=False, default='planned')  # 'planned', 'in_progress', 'completed'
-    isPostApproval = db.Column(db.Boolean, nullable=False, default=False)  # Новое поле
+    title = db.Column(db.String(200), nullable=True)
+    # Заменяем type на type_id и добавляем связь
+    type_id = db.Column(db.Integer, db.ForeignKey('publication_type.id'), nullable=True)
+    type = db.relationship('PublicationType', backref='plan_entries')
+    publication_id = db.Column(db.Integer, db.ForeignKey('publication.id'), nullable=True)
+    status = db.Column(db.String(50), nullable=False, default='planned')
+    isPostApproval = db.Column(db.Boolean, nullable=False, default=False)
 
     plan = db.relationship('Plan', back_populates='entries')
     publication = db.relationship('Publication', back_populates='plan_entries', lazy=True)
@@ -200,10 +209,14 @@ class PlanEntry(db.Model):
         result = {
             'id': self.id,
             'title': self.title,
-            'type': self.type,
+            'type': {
+                'id': self.type.id,
+                'name': self.type.name,
+                'display_name': self.type.display_name
+            } if self.type else None,
             'publication_id': self.publication_id,
             'status': self.status,
-            'isPostApproval': self.isPostApproval,  # Добавляем поле в ответ
+            'isPostApproval': self.isPostApproval,
             'publication': {
                 'id': self.publication.id,
                 'title': self.publication.title

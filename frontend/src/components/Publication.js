@@ -18,8 +18,10 @@ import DownloadIcon from '@mui/icons-material/Download';
 import { useAuth } from '../contexts/AuthContext';
 import CommentSection from './CommentSection';
 
+// Настройка worker для react-pdf
 pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
 
+// Стилизованная кнопка в стиле Apple
 const AppleButton = styled(Button)({
 	borderRadius: '12px',
 	textTransform: 'none',
@@ -32,6 +34,7 @@ const AppleButton = styled(Button)({
 	'&:hover': { backgroundColor: '#0066CC', boxShadow: '0 4px 8px rgba(0, 0, 0, 0.1)' },
 });
 
+// Стилизованная зеленая кнопка
 const GreenButton = styled(Button)({
 	borderRadius: '12px',
 	textTransform: 'none',
@@ -51,6 +54,7 @@ const GreenButton = styled(Button)({
 	},
 });
 
+// Стилизованная красная кнопка
 const RedButton = styled(Button)({
 	borderRadius: '12px',
 	textTransform: 'none',
@@ -70,12 +74,14 @@ const RedButton = styled(Button)({
 	},
 });
 
+// Стилизованная карточка
 const AppleCard = styled(Card)({
 	borderRadius: '16px',
 	boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
 	backgroundColor: '#FFFFFF',
 });
 
+// Контейнер для предпросмотра документов
 const DocumentViewer = styled(Box)({
 	mb: 4,
 	border: '1px solid #E5E5EA',
@@ -102,10 +108,16 @@ function Publication() {
 	const { user, isAuthenticated, csrfToken } = useAuth();
 	const [hasReviewerComment, setHasReviewerComment] = useState(false);
 	const [loadingUser, setLoadingUser] = useState(true);
+	const [publicationTypes, setPublicationTypes] = useState([]);
+	const [isLoadingTypes, setIsLoadingTypes] = useState(true); // Состояние для отслеживания загрузки типов
 
+	// Функция загрузки данных публикации
 	const fetchPublication = useCallback(async () => {
 		try {
-			const response = await axios.get(`http://localhost:5000/api/publications/${id}`, { withCredentials: true });
+			const response = await axios.get(`http://localhost:5000/api/publications/${id}`, {
+				withCredentials: true,
+			});
+			console.log('Publication loaded:', response.data); // Логирование для отладки
 			setPublication(response.data);
 			const reviewerComment = response.data.comments.some(
 				(comment) =>
@@ -113,26 +125,50 @@ function Publication() {
 					comment.replies.some((reply) => ['admin', 'manager'].includes(reply.user.role))
 			);
 			setHasReviewerComment(reviewerComment);
+			setError('');
 		} catch (err) {
 			console.error('Ошибка загрузки публикации:', err);
 			setError('Не удалось загрузить публикацию. Попробуйте позже.');
 		}
 	}, [id]);
 
+	// Функция загрузки типов публикаций
+	const fetchPublicationTypes = useCallback(async () => {
+		try {
+			setIsLoadingTypes(true);
+			const response = await axios.get('http://localhost:5000/api/publication-types', {
+				withCredentials: true,
+			});
+			console.log('Publication types loaded:', response.data); // Логирование для отладки
+			setPublicationTypes(response.data);
+			setError('');
+		} catch (err) {
+			console.error('Ошибка загрузки типов публикаций:', err);
+			setError('Не удалось загрузить типы публикаций.');
+		} finally {
+			setIsLoadingTypes(false);
+		}
+	}, []);
+
+	// Выполняем запросы при монтировании компонента
 	useEffect(() => {
 		fetchPublication();
-	}, [fetchPublication]);
+		fetchPublicationTypes();
+	}, [fetchPublication, fetchPublicationTypes]);
 
+	// Проверяем загрузку пользователя
 	useEffect(() => {
 		if (user !== null) {
 			setLoadingUser(false);
 		}
 	}, [user]);
 
+	// Обработчик успешной загрузки PDF
 	const onDocumentLoadSuccess = ({ numPages }) => {
 		setNumPages(numPages);
 	};
 
+	// Обработчик скачивания файла
 	const handleDownload = () => {
 		if (publication && publication.file_url) {
 			const fileUrl = `http://localhost:5000${publication.file_url}`;
@@ -145,6 +181,7 @@ function Publication() {
 		}
 	};
 
+	// Обработчик публикации
 	const handlePublish = async () => {
 		try {
 			const response = await axios.post(
@@ -160,6 +197,7 @@ function Publication() {
 		}
 	};
 
+	// Обработчик отправки на доработку
 	const handleReject = async () => {
 		try {
 			const reviewerComment = publication.comments
@@ -184,6 +222,7 @@ function Publication() {
 		}
 	};
 
+	// Обработчик добавления комментария
 	const handleCommentAdded = (newComment) => {
 		setPublication((prev) => {
 			if (newComment.parent_id) {
@@ -201,12 +240,18 @@ function Publication() {
 		}
 	};
 
+	// Отображаем ошибку, если она есть
 	if (error) return <Typography color="error">{error}</Typography>;
-	if (!publication || loadingUser) return <Typography sx={{ color: '#212121' }}>Загрузка...</Typography>;
 
+	// Ждем загрузки всех данных
+	if (!publication || loadingUser || isLoadingTypes) {
+		return <Typography sx={{ color: '#212121' }}>Загрузка...</Typography>;
+	}
+
+	// Формируем URL файла
 	const fileUrl = publication.file_url ? `http://localhost:5000${publication.file_url}` : null;
 
-	// Функция для отображения статуса с учётом локализации и цвета
+	// Функция для отображения статуса с учетом локализации и цвета
 	const renderStatus = (status, returnedForRevision, isReviewer) => {
 		console.log('renderStatus called with:', { status, returnedForRevision, isReviewer });
 
@@ -217,8 +262,8 @@ function Publication() {
 		// Проверяем оба возможных условия для "Требует доработки"
 		if (status === 'returned_for_revision' || (status === 'draft' && returnedForRevision)) {
 			statusText = 'Требует доработки';
-			statusColor = '#FF3B30'; // Белый текст
-			backgroundColor = '#FFfff'; // Красный фон с приоритетом
+			statusColor = '#FF3B30'; // Красный текст
+			backgroundColor = 'transparent'; // Исправляем некорректный цвет фона
 			console.log('Condition matched: Требует доработки');
 		} else if (isReviewer) {
 			// Логика для менеджера или админа
@@ -258,17 +303,20 @@ function Publication() {
 					color: statusColor,
 					backgroundColor: backgroundColor,
 					display: 'inline-block',
-					padding: 'px 8px',
+					
 					borderRadius: '4px',
 					mb: 1,
 				}}
 			>
-				{`Статус: ${statusText}`}
+			{`Статус: ${statusText}`}
 			</Typography>
 		);
 	};
+
+	// Проверяем, является ли пользователь рецензентом
 	const isReviewer = ['admin', 'manager'].includes(user?.role);
 
+	// Логи для отладки
 	console.log('User:', user);
 	console.log('User role:', user?.role);
 	console.log('Publication status:', publication.status);
@@ -288,7 +336,10 @@ function Publication() {
 						Год: {publication.year}
 					</Typography>
 					<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
-						Тип: {publication.type === 'article' ? 'Статья' : publication.type === 'monograph' ? 'Монография' : publication.type === 'conference' ? 'Доклад/конференция' : publication.type}
+						{/* Отображаем тип публикации с проверкой */}
+						Тип:{' '}
+						{publicationTypes.find((type) => type.name === publication.type)?.display_name ||
+							'Неизвестный тип'}
 					</Typography>
 					{renderStatus(publication.status, publication.returned_for_revision, isReviewer)}
 					<Typography variant="body1" sx={{ color: '#757575', mb: 2 }}>
@@ -326,8 +377,15 @@ function Publication() {
 												'& .MuiPaginationItem-root': {
 													borderRadius: 20,
 													transition: 'all 0.3s ease',
-													'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
-													'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
+													'&:hover': {
+														backgroundColor: 'grey.100',
+														boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+													},
+													'&.Mui-selected': {
+														backgroundColor: '#1976D2',
+														color: 'white',
+														boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)',
+													},
 												},
 											}}
 										/>

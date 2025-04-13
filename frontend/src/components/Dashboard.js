@@ -328,7 +328,7 @@ function Dashboard() {
 
 	// Состояние для управления раскрытием аккордеонов
 	const [expandedPlanId, setExpandedPlanId] = useState(null);
-
+	const [publicationTypes, setPublicationTypes] = useState([]);
 	const validPublicationTypes = ['article', 'monograph', 'conference'];
 	const validPlanStatuses = ['planned', 'in_progress', 'completed'];
 
@@ -340,6 +340,23 @@ function Dashboard() {
 			setEditMiddleName(user.middle_name || '');
 		}
 	}, [user]);
+
+	useEffect(() => {
+		const fetchPublicationTypes = async () => {
+			try {
+				const response = await axios.get('http://localhost:5000/api/publication-types', {
+					withCredentials: true,
+					headers: { 'X-CSRFToken': csrfToken },
+				});
+				setPublicationTypes(response.data);
+			} catch (err) {
+				console.error('Ошибка загрузки типов публикаций:', err);
+				setError('Не удалось загрузить типы публикаций.');
+				setOpenError(true);
+			}
+		};
+		fetchPublicationTypes();
+	}, [csrfToken]);
 
 	const handleTabChange = (event, newValue) => {
 		setValue(newValue);
@@ -425,6 +442,9 @@ function Dashboard() {
 
 		entries.forEach((entry) => {
 			const type = entry.type || 'unknown';
+			if (!validPublicationTypes.includes(type)) {
+				console.warn(`Обнаружен неподдерживаемый тип публикации: ${type}`);
+			}
 			if (!grouped[type]) {
 				grouped[type] = {
 					type,
@@ -440,7 +460,9 @@ function Dashboard() {
 			grouped[type].entries.push(entry);
 		});
 
-		return Object.values(grouped);
+		const result = Object.values(grouped);
+		console.log('Сгруппированные записи:', result);
+		return result;
 	};
 
 	const fetchPlans = async (page = 1) => {
@@ -572,13 +594,16 @@ function Dashboard() {
 
 
 	const updateAnalytics = (allPublications) => {
-		const types = { article: 0, monograph: 0, conference: 0 };
+		const types = {};
 		const statuses = { draft: 0, needs_review: 0, published: 0 };
 		let citations = 0;
 
 		allPublications.forEach((pub) => {
-			const pubType = validPublicationTypes.includes(pub.type) ? pub.type : 'article';
-			types[pubType] = (types[pubType] || 0) + 1;
+			const pubType = pub.type; // Теперь это name из PublicationType
+			if (!types[pubType]) {
+				types[pubType] = 0;
+			}
+			types[pubType] += 1;
 			statuses[pub.status] = (statuses[pub.status] || 0) + 1;
 			if (pub.citations) citations += pub.citations;
 		});
@@ -727,7 +752,7 @@ function Dashboard() {
 			setTitle('');
 			setAuthors('');
 			setYear('');
-			setType('article');
+			setType(publicationTypes.length > 0 ? publicationTypes[0].name : ''); // Исправлено
 			setFile(null);
 			await fetchData();
 		} catch (err) {
@@ -788,46 +813,90 @@ function Dashboard() {
 	};
 
 	const handleEditClick = (publication) => {
-		console.log('Editing publication:', publication.id);
+		// Логируем действие для отладки
+		console.log('Editing publication:', publication?.id || 'unknown');
+
+		// Устанавливаем редактируемую публикацию
 		setEditPublication(publication || {});
+
+		// Устанавливаем поля формы
 		setEditTitle(publication?.title || '');
 		setEditAuthors(publication?.authors || '');
 		setEditYear(publication?.year || '');
-		setEditType(validPublicationTypes.includes(publication?.type) ? publication.type : 'article');
+
+		// Определяем значение для editType
+		let newEditType = '';
+		if (publication?.type && publicationTypes.some((t) => t.name === publication.type)) {
+			// Если тип публикации валиден, используем его
+			newEditType = publication.type;
+		} else if (publicationTypes.length > 0) {
+			// Иначе берем первый доступный тип
+			newEditType = publicationTypes[0].name;
+		}
+		// Если publicationTypes пуст, оставляем editType пустым (валидация будет в handleEditSubmit)
+		setEditType(newEditType);
+
+		// Сбрасываем файл
 		setEditFile(null);
+
+		// Открываем диалог редактирования
 		setOpenEditDialog(true);
 	};
 
 	const handleEditSubmit = async (e) => {
 		e.preventDefault();
-		if (!editPublication) return;
+
+		// Проверяем, что редактируемая публикация существует
+		if (!editPublication) {
+			setError('Публикация для редактирования не выбрана.');
+			setOpenError(true);
+			return;
+		}
+
+		// Проверяем, что тип публикации выбран и список типов не пуст
+		if (!editType || !publicationTypes.some((t) => t.name === editType)) {
+			setError('Пожалуйста, выберите тип публикации.');
+			setOpenError(true);
+			return;
+		}
+
+		// Валидация остальных обязательных полей
+		if (!editTitle.trim() || !editAuthors.trim() || !editYear) {
+			setError('Название, авторы и год обязательны для заполнения.');
+			setOpenError(true);
+			return;
+		}
 
 		let data;
-		let headers = {};
+		let headers = { 'X-CSRFToken': csrfToken };
+
+		// Если есть файл, используем FormData
 		if (editFile) {
 			data = new FormData();
 			data.append('file', editFile);
-			data.append('title', editTitle.trim() || '');
-			data.append('authors', editAuthors.trim() || '');
-			data.append('year', editYear ? parseInt(editYear, 10) : '');
-			data.append('type', editType || 'article');
+			data.append('title', editTitle.trim());
+			data.append('authors', editAuthors.trim());
+			data.append('year', parseInt(editYear, 10));
+			data.append('type', editType); // Используем выбранный тип
 			data.append('status', 'draft');
-			headers['Content-Type'] = 'multipart/form-data';
-			headers['X-CSRFToken'] = csrfToken;
+			// Content-Type для FormData устанавливается автоматически
 		} else {
+			// Иначе используем JSON
 			data = {
-				title: editTitle.trim() || '',
-				authors: editAuthors.trim() || '',
-				year: editYear ? parseInt(editYear, 10) : '',
-				type: editType || 'article',
+				title: editTitle.trim(),
+				authors: editAuthors.trim(),
+				year: parseInt(editYear, 10),
+				type: editType, // Используем выбранный тип
 				status: 'draft',
 			};
 			headers['Content-Type'] = 'application/json';
-			headers['X-CSRFToken'] = csrfToken;
 		}
 
 		try {
+			// Обновляем CSRF-токен перед запросом
 			await refreshCsrfToken();
+
+			// Логируем данные для отладки
 			console.log('Updating publication with:', {
 				title: editTitle,
 				authors: editAuthors,
@@ -836,16 +905,29 @@ function Dashboard() {
 				status: 'draft',
 				file: editFile ? editFile.name : 'No new file',
 			});
-			const response = await axios.put(`http://localhost:5000/api/publications/${editPublication.id || ''}`, data, {
-				withCredentials: true,
-				headers,
-			});
+
+			// Отправляем PUT-запрос
+			const response = await axios.put(
+				`http://localhost:5000/api/publications/${editPublication.id}`,
+				data,
+				{
+					withCredentials: true,
+					headers,
+				}
+			);
+
+			// Устанавливаем сообщение об успехе
 			setSuccess('Публикация успешно отредактирована!');
 			setOpenSuccess(true);
 			setError('');
+
+			// Обновляем данные на странице
 			await fetchData();
+
+			// Закрываем диалог редактирования
 			setOpenEditDialog(false);
 		} catch (err) {
+			// Обрабатываем ошибки
 			console.error('Ошибка редактирования публикации:', err.response?.data || err);
 			if (err.response) {
 				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`);
@@ -897,7 +979,7 @@ function Dashboard() {
 		setEditTitle('');
 		setEditAuthors('');
 		setEditYear('');
-		setEditType('article');
+		setEditType(publicationTypes.length > 0 ? publicationTypes[0].name : '');
 		setEditFile(null);
 	};
 
@@ -1208,18 +1290,18 @@ function Dashboard() {
 
 			const newGroupedEntries = [...prevTempPlan.groupedEntries];
 			selectedNewEntryType.forEach((type) => {
+				if (!publicationTypes.some(t => t.name === type)) {
+					console.warn(`Попытка добавить неподдерживаемый тип: ${type}`);
+					return;
+				}
 				const existingGroup = newGroupedEntries.find(
 					(group) => group.type === type && !group.isDeleted
 				);
 				if (!existingGroup) {
+					const typeData = publicationTypes.find(t => t.name === type);
 					const newEntry = {
 						id: `temp-${type}-${newGroupedEntries.length}`,
-						title: `Новая ${type === 'article'
-							? 'статья'
-							: type === 'monograph'
-								? 'монография'
-								: 'доклад/конференция'
-							}`,
+						title: `Новая ${typeData ? typeData.display_name : type}`,
 						type,
 						status: 'planned',
 						publication_id: null,
@@ -1235,9 +1317,10 @@ function Dashboard() {
 				}
 			});
 
+			console.log('Обновлённые записи плана:', newGroupedEntries);
 			return { ...prevTempPlan, groupedEntries: newGroupedEntries };
 		});
-		setSelectedNewEntryType([]); // Reset selection after adding
+		setSelectedNewEntryType([]);
 	};
 
 	const handleDeletePlanEntry = (planId, index) => {
@@ -1809,14 +1892,21 @@ function Dashboard() {
 													fullWidth
 													select
 													label="Тип публикации"
-													value={type}
-													onChange={(e) => setType(e.target.value)}
+													value={editType}
+													onChange={(e) => setEditType(e.target.value)}
 													margin="normal"
 													variant="outlined"
+													disabled={publicationTypes.length === 0}
 												>
-													<MenuItem value="article">Статья</MenuItem>
-													<MenuItem value="monograph">Монография</MenuItem>
-													<MenuItem value="conference">Доклад/конференция</MenuItem>
+													{publicationTypes.length === 0 ? (
+														<MenuItem value="" disabled>
+															Типы не доступны
+														</MenuItem>
+													) : (
+														publicationTypes.map(type => (
+															<MenuItem key={type.id} value={type.name}>{type.display_name}</MenuItem>
+														))
+													)}
 												</AppleTextField>
 												<Box sx={{ mt: 2 }}>
 													<input
@@ -1962,9 +2052,9 @@ function Dashboard() {
 												variant="outlined"
 											>
 												<MenuItem value="all">Все</MenuItem>
-												<MenuItem value="article">Статья</MenuItem>
-												<MenuItem value="monograph">Монография</MenuItem>
-												<MenuItem value="conference">Доклад/конференция</MenuItem>
+												{publicationTypes.map(type => (
+													<MenuItem key={type.id} value={type.name}>{type.display_name}</MenuItem>
+												))}
 											</AppleTextField>
 											<AppleTextField
 												select
@@ -2022,13 +2112,7 @@ function Dashboard() {
 															<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>
-																{pub.type === 'article'
-																	? 'Статья'
-																	: pub.type === 'monograph'
-																		? 'Монография'
-																		: pub.type === 'conference'
-																			? 'Доклад/конференция'
-																			: 'Неизвестный тип'}
+																{publicationTypes.find(t => t.name === pub.type)?.display_name || 'Неизвестный тип'}
 															</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>
 																<StatusChip
@@ -2214,17 +2298,20 @@ function Dashboard() {
 															Типы публикаций
 														</Typography>
 														<Grid container spacing={2} sx={{ mb: 4 }}>
-															{Object.entries(pubTypes).map(([type, count]) => (
-																<Grid item xs={12} sm={4} key={type}>
-																	<AppleCard elevation={1} sx={{ p: 2, borderRadius: '12px', backgroundColor: '#FFFFFF', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}>
-																		<CardContent>
-																			<Typography variant="body1" sx={{ color: '#1D1D1F' }}>
-																				{type === 'article' ? 'Статьи' : type === 'monograph' ? 'Монографии' : 'Доклады'}: {count}
-																			</Typography>
-																		</CardContent>
-																	</AppleCard>
-																</Grid>
-															))}
+															{Object.entries(pubTypes).map(([typeName, count]) => {
+																const type = publicationTypes.find(t => t.name === typeName);
+																return (
+																	<Grid item xs={12} sm={4} key={typeName}>
+																		<AppleCard elevation={1} sx={{ p: 2, borderRadius: '12px', backgroundColor: '#FFFFFF', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}>
+																			<CardContent>
+																				<Typography variant="body1" sx={{ color: '#1D1D1F' }}>
+																					{type ? type.display_name : typeName}: {count}
+																				</Typography>
+																			</CardContent>
+																		</AppleCard>
+																	</Grid>
+																);
+															})}
 														</Grid>
 
 														<Typography variant="h6" sx={{ color: '#1D1D1F', mb: 2 }}>
@@ -2352,51 +2439,48 @@ function Dashboard() {
 																		</TableRow>
 																	</TableHead>
 																	<TableBody>
-																		{tempPlan?.groupedEntries?.map((group, index) => (
-																			<TableRow key={index} sx={{ backgroundColor: group.isDeleted ? '#E5E5EA' : 'inherit' }}>
-																				<TableCell>
-																					{group.type === 'article'
-																						? 'Статья'
-																						: group.type === 'monograph'
-																							? 'Монография'
-																							: group.type === 'conference'
-																								? 'Доклад/конференция'
-																								: 'Неизвестный тип'}
-																				</TableCell>
-																				<TableCell>
-																					<AppleTextField
-																						sx={{ width: '70px' }}
-																						type="number"
-																						value={group.planCount}
-																						onChange={(e) => handlePlanEntryCountChange(plan.id, group.type, parseInt(e.target.value) || 1)}
-																						fullWidth
-																						variant="outlined"
-																						disabled={group.isDeleted}
-																					/>
-																				</TableCell>
-																				<TableCell>
-																					{group.isDeleted ? (
-																						<IconButton
-																							onClick={() => handleRestoreType(plan.id, group.type)}
-																							sx={{ color: '#34C759' }}
-																							title="Восстановить тип"
-																							disabled={plan.status === 'pending'}
-																						>
-																							<AddIcon />
-																						</IconButton>
-																					) : (
-																						<IconButton
-																							onClick={() => handleDeletePlanEntryByType(plan.id, group.type)}
-																							sx={{ color: '#FF3B30' }}
-																							title="Удалить тип"
-																							disabled={plan.status === 'pending'}
-																						>
-																							<DeleteIcon />
-																						</IconButton>
-																					)}
-																				</TableCell>
-																			</TableRow>
-																		))}
+																		{tempPlan?.groupedEntries?.map((group, index) => {
+																			const typeData = publicationTypes.find(t => t.name === group.type);
+																			return (
+																				<TableRow key={index} sx={{ backgroundColor: group.isDeleted ? '#E5E5EA' : 'inherit' }}>
+																					<TableCell>
+																						{typeData ? typeData.display_name : `Неизвестный тип (${group.type})`}
+																					</TableCell>
+																					<TableCell>
+																						<AppleTextField
+																							sx={{ width: '70px' }}
+																							type="number"
+																							value={group.planCount}
+																							onChange={(e) => handlePlanEntryCountChange(plan.id, group.type, parseInt(e.target.value) || 1)}
+																							fullWidth
+																							variant="outlined"
+																							disabled={group.isDeleted}
+																						/>
+																					</TableCell>
+																					<TableCell>
+																						{group.isDeleted ? (
+																							<IconButton
+																								onClick={() => handleRestoreType(plan.id, group.type)}
+																								sx={{ color: '#34C759' }}
+																								title="Восстановить тип"
+																								disabled={plan.status === 'pending'}
+																							>
+																								<AddIcon />
+																							</IconButton>
+																						) : (
+																							<IconButton
+																								onClick={() => handleDeletePlanEntryByType(plan.id, group.type)}
+																								sx={{ color: '#FF3B30' }}
+																								title="Удалить тип"
+																								disabled={plan.status === 'pending'}
+																							>
+																								<DeleteIcon />
+																							</IconButton>
+																						)}
+																					</TableCell>
+																				</TableRow>
+																			);
+																		})}
 																	</TableBody>
 																</PlanTable>
 															)}
@@ -2404,12 +2488,9 @@ function Dashboard() {
 																<FormControl sx={{ minWidth: 200 }}>
 																	<InputLabel>Типы публикаций</InputLabel>
 																	<AppleSelect
-																		className="debug-apple-select"
 																		multiple
 																		value={selectedNewEntryType}
 																		onChange={(e) => setSelectedNewEntryType(e.target.value)}
-																		onOpen={() => console.log('Выпадающий список открывается')} // Для отладки
-																		onClose={() => console.log('Выпадающий список закрывается')} // Для отладки
 																		renderValue={(selected) =>
 																			selected.length === 0 ? (
 																				<Typography sx={{ color: '#6E6E73' }}>Выберите типы</Typography>
@@ -2418,50 +2499,21 @@ function Dashboard() {
 																					{selected.map((value) => (
 																						<Chip
 																							key={value}
-																							label={
-																								value === 'article'
-																									? 'Статья'
-																									: value === 'monograph'
-																										? 'Монография'
-																										: 'Доклад/конференция'
-																							}
-																							onMouseDown={(event) => {
-																								event.stopPropagation(); // Останавливаем всплытие на этапе mouseDown для чипа
-																							}}
+																							label={publicationTypes.find(t => t.name === value)?.display_name || value}
+																							onMouseDown={(event) => event.stopPropagation()}
 																							onDelete={(event) => {
-																								event.stopPropagation(); // Останавливаем всплытие для крестика
+																								event.stopPropagation();
 																								setSelectedNewEntryType(selectedNewEntryType.filter((item) => item !== value));
-																							}}
-																							deleteIcon={
-																								<IconButton
-																									onMouseDown={(event) => {
-																										event.stopPropagation(); // Останавливаем всплытие на этапе mouseDown для крестика
-																									}}
-																								>
-																									<DeleteIcon />
-																								</IconButton>
-																							}
-																							onClick={(event) => {
-																								event.stopPropagation(); // Останавливаем всплытие для клика по чипу
 																							}}
 																						/>
 																					))}
 																				</Box>
 																			)
 																		}
-																		MenuProps={{
-																			PaperProps: {
-																				sx: {
-																					borderRadius: '12px',
-																					boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
-																					backgroundColor: '#FFFFFF',
-																				},
-																			},
-																		}}
 																	>
-																		<MenuItem value="article">Статья</MenuItem>
-																		<MenuItem value="monograph">Монография</MenuItem>
-																		<MenuItem value="conference">Доклад/конференция</MenuItem>
+																		{publicationTypes.map(type => (
+																			<MenuItem key={type.id} value={type.name}>{type.display_name}</MenuItem>
+																		))}
 																	</AppleSelect>
 																</FormControl>
 																<AppleButton
@@ -2534,43 +2586,40 @@ function Dashboard() {
 																		</TableRow>
 																	</TableHead>
 																	<TableBody>
-																		{groupedEntries.map((group) => (
-																			<TableRow key={group.type}>
-																				<TableCell>{`${group.planCount}/${group.factCount}`}</TableCell>
-																				<TableCell>
-																					{group.type === 'article'
-																						? 'Статья'
-																						: group.type === 'monograph'
-																							? 'Монография'
-																							: group.type === 'conference'
-																								? 'Доклад/конференция'
-																								: 'Неизвестный тип'}
-																				</TableCell>
-																				<TableCell>
-																					<IconButton
-																						onClick={() => handleOpenLinkDialog(plan.id, group)}
-																						sx={{ color: '#0071E3' }}
-																						title="Привязать публикацию"
-																						disabled={plan.status !== 'approved' || group.factCount >= group.planCount}
-																					>
-																						<LinkIcon />
-																					</IconButton>
-																					<IconButton
-																						onClick={() => handleOpenUnlinkDialog(plan.id, group)}
-																						sx={{
-																							color: group.factCount > 0 ? '#FF3B30' : '#D1D1D6',
-																							'&:hover': {
-																								color: group.factCount > 0 ? '#FF2D1A' : '#D1D1D6',
-																							},
-																						}}
-																						title="Отвязать публикацию"
-																						disabled={plan.status !== 'approved' || group.factCount === 0}
-																					>
-																						<UnlinkIcon />
-																					</IconButton>
-																				</TableCell>
-																			</TableRow>
-																		))}
+																		{groupedEntries.map((group) => {
+																			const typeData = publicationTypes.find(t => t.name === group.type);
+																			return (
+																				<TableRow key={group.type}>
+																					<TableCell>{`${group.planCount}/${group.factCount}`}</TableCell>
+																					<TableCell>
+																						{typeData ? typeData.display_name : `Неизвестный тип (${group.type})`}
+																					</TableCell>
+																					<TableCell>
+																						<IconButton
+																							onClick={() => handleOpenLinkDialog(plan.id, group)}
+																							sx={{ color: '#0071E3' }}
+																							title="Привязать публикацию"
+																							disabled={plan.status !== 'approved' || group.factCount >= group.planCount}
+																						>
+																							<LinkIcon />
+																						</IconButton>
+																						<IconButton
+																							onClick={() => handleOpenUnlinkDialog(plan.id, group)}
+																							sx={{
+																								color: group.factCount > 0 ? '#FF3B30' : '#D1D1D6',
+																								'&:hover': {
+																									color: group.factCount > 0 ? '#FF2D1A' : '#D1D1D6',
+																								},
+																							}}
+																							title="Отвязать публикацию"
+																							disabled={plan.status !== 'approved' || group.factCount === 0}
+																						>
+																							<UnlinkIcon />
+																						</IconButton>
+																					</TableCell>
+																				</TableRow>
+																			);
+																		})}
 																	</TableBody>
 																</PlanTable>
 															)}
@@ -2820,10 +2869,17 @@ function Dashboard() {
 							onChange={(e) => setEditType(e.target.value)}
 							margin="normal"
 							variant="outlined"
+							disabled={publicationTypes.length === 0}
 						>
-							<MenuItem value="article">Статья</MenuItem>
-							<MenuItem value="monograph">Монография</MenuItem>
-							<MenuItem value="conference">Доклад/конференция</MenuItem>
+							{publicationTypes.length === 0 ? (
+								<MenuItem value="" disabled>
+									Типы не доступны
+								</MenuItem>
+							) : (
+								publicationTypes.map(type => (
+									<MenuItem key={type.id} value={type.name}>{type.display_name}</MenuItem>
+								))
+							)}
 						</AppleTextField>
 						<Box sx={{ mt: 2 }}>
 							<input

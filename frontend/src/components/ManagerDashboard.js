@@ -32,6 +32,7 @@ import {
 	AccordionDetails,
 } from '@mui/material';
 import { styled, GlobalStyles } from '@mui/system';
+import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DownloadIcon from '@mui/icons-material/Download';
 import CheckIcon from '@mui/icons-material/Check';
@@ -199,6 +200,13 @@ function ManagerDashboard() {
 	const [planHistoryTransitionKey, setPlanHistoryTransitionKey] = useState(0);
 	// Новое состояние для поиска по ФИО
 	const [nameSearchQuery, setNameSearchQuery] = useState('');
+	const [publicationTypes, setPublicationTypes] = useState([]);
+	const [newTypeName, setNewTypeName] = useState('');
+	const [newTypeDisplayName, setNewTypeDisplayName] = useState('');
+	const [editingType, setEditingType] = useState(null);
+	const [editTypeName, setEditTypeName] = useState('');
+	const [editTypeDisplayName, setEditTypeDisplayName] = useState('');
+	const [openEditTypeDialog, setOpenEditTypeDialog] = useState(false);
 
 	// Функция сортировки и фильтрации статистики
 	const sortAndFilterStatistics = (stats, query) => {
@@ -334,6 +342,96 @@ function ManagerDashboard() {
 			setOpenError(true);
 		}
 	};
+
+	const fetchPublicationTypes = async () => {
+		try {
+			const response = await axios.get('http://localhost:5000/admin_api/admin/publication-types', {
+				withCredentials: true,
+				headers: { 'X-CSRFToken': csrfToken },
+			});
+			setPublicationTypes(response.data);
+		} catch (err) {
+			setError('Не удалось загрузить типы публикаций.');
+			setOpenError(true);
+		}
+	};
+
+	const handleAddType = async () => {
+		if (!newTypeName.trim() || !newTypeDisplayName.trim()) {
+			setError('Оба поля обязательны.');
+			setOpenError(true);
+			return;
+		}
+		try {
+			const response = await axios.post('http://localhost:5000/admin_api/admin/publication-types', {
+				name: newTypeName,
+				display_name: newTypeDisplayName,
+			}, {
+				withCredentials: true,
+				headers: { 'X-CSRFToken': csrfToken },
+			});
+			setPublicationTypes([...publicationTypes, response.data.type]);
+			setNewTypeName('');
+			setNewTypeDisplayName('');
+			setSuccess('Тип добавлен!');
+			setOpenSuccess(true);
+		} catch (err) {
+			setError(err.response?.data?.error || 'Не удалось добавить тип.');
+			setOpenError(true);
+		}
+	};
+
+	const handleEditType = (type) => {
+		setEditingType(type);
+		setEditTypeName(type.name);
+		setEditTypeDisplayName(type.display_name);
+		setOpenEditTypeDialog(true);
+	};
+
+	const handleUpdateType = async () => {
+		if (!editTypeName.trim() || !editTypeDisplayName.trim()) {
+			setError('Оба поля обязательны.');
+			setOpenError(true);
+			return;
+		}
+		try {
+			const response = await axios.put(`http://localhost:5000/admin_api/admin/publication-types/${editingType.id}`, {
+				name: editTypeName,
+				display_name: editTypeDisplayName,
+			}, {
+				withCredentials: true,
+				headers: { 'X-CSRFToken': csrfToken },
+			});
+			setPublicationTypes(publicationTypes.map(t => t.id === editingType.id ? response.data.type : t));
+			setOpenEditTypeDialog(false);
+			setSuccess('Тип обновлен!');
+			setOpenSuccess(true);
+		} catch (err) {
+			setError(err.response?.data?.error || 'Не удалось обновить тип.');
+			setOpenError(true);
+		}
+	};
+
+	const handleDeleteType = async (typeId) => {
+		if (!window.confirm('Вы уверены, что хотите удалить этот тип?')) return;
+		try {
+			await axios.delete(`http://localhost:5000/admin_api/admin/publication-types/${typeId}`, {
+				withCredentials: true,
+				headers: { 'X-CSRFToken': csrfToken },
+			});
+			setPublicationTypes(publicationTypes.filter(t => t.id !== typeId));
+			setSuccess('Тип удален!');
+			setOpenSuccess(true);
+		} catch (err) {
+			setError(err.response?.data?.error || 'Не удалось удалить тип.');
+			setOpenError(true);
+		}
+	};
+
+	// Загрузка типов при монтировании
+	useEffect(() => {
+		fetchPublicationTypes();
+	}, []);
 
 	const fetchPlans = async (page) => {
 		try {
@@ -821,6 +919,7 @@ function ManagerDashboard() {
 						<Tab label="Статистика по кафедре" />
 						<Tab label="Регистрация пользователей" />
 						<Tab label="Работа с планами" />
+						<Tab label="Управление типами" />
 					</Tabs>
 
 					{loadingInitial ? (
@@ -1694,6 +1793,53 @@ function ManagerDashboard() {
 									</Drawer>
 								</Box>
 							)}
+							{value === 4 && (
+								<Box sx={{ mt: 4 }}>
+									<Typography variant="h5" gutterBottom sx={{ color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
+										Управление типами публикаций
+									</Typography>
+									<Box sx={{ display: 'flex', gap: 2, mb: 4 }}>
+										<AppleTextField
+											label="Название (англ.)"
+											value={newTypeName}
+											onChange={(e) => setNewTypeName(e.target.value)}
+											sx={{ flex: 1 }}
+										/>
+										<AppleTextField
+											label="Отображаемое название"
+											value={newTypeDisplayName}
+											onChange={(e) => setNewTypeDisplayName(e.target.value)}
+											sx={{ flex: 1 }}
+										/>
+										<AppleButton onClick={handleAddType}>Добавить тип</AppleButton>
+									</Box>
+									<AppleTable>
+										<TableHead>
+											<TableRow>
+												<TableCell>Название (англ.)</TableCell>
+												<TableCell>Отображаемое название</TableCell>
+												<TableCell>Действия</TableCell>
+											</TableRow>
+										</TableHead>
+										<TableBody>
+											{publicationTypes.map((type) => (
+												<TableRow key={type.id}>
+													<TableCell>{type.name}</TableCell>
+													<TableCell>{type.display_name}</TableCell>
+													<TableCell>
+														<IconButton onClick={() => handleEditType(type)}>
+															<EditIcon />
+														</IconButton>
+														<IconButton onClick={() => handleDeleteType(type.id)}>
+															<DeleteIcon />
+														</IconButton>
+													</TableCell>
+												</TableRow>
+											))}
+										</TableBody>
+									</AppleTable>
+								</Box>
+							)}
 						</>
 					)}
 				</AppleCard>
@@ -1832,6 +1978,31 @@ function ManagerDashboard() {
 						>
 							Удалить
 						</AppleButton>
+					</DialogActions>
+				</Dialog>
+
+
+				<Dialog open={openEditTypeDialog} onClose={() => setOpenEditTypeDialog(false)}>
+					<DialogTitle>Редактировать тип публикации</DialogTitle>
+					<DialogContent>
+						<AppleTextField
+							label="Название (англ.)"
+							value={editTypeName}
+							onChange={(e) => setEditTypeName(e.target.value)}
+							fullWidth
+							margin="normal"
+						/>
+						<AppleTextField
+							label="Отображаемое название"
+							value={editTypeDisplayName}
+							onChange={(e) => setEditTypeDisplayName(e.target.value)}
+							fullWidth
+							margin="normal"
+						/>
+					</DialogContent>
+					<DialogActions>
+						<Button onClick={() => setOpenEditTypeDialog(false)}>Отмена</Button>
+						<Button onClick={handleUpdateType}>Сохранить</Button>
 					</DialogActions>
 				</Dialog>
 
