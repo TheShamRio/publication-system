@@ -3,14 +3,13 @@ from werkzeug.utils import secure_filename
 from flask_login import login_required, current_user
 from flask import current_app
 from app.extensions import db
-from app.models import Publication, User, Plan, PlanEntry, PlanActionHistory, PublicationActionHistory, PublicationType
+from app.models import Publication, User, Plan, PlanEntry, PlanActionHistory, PublicationActionHistory, PublicationType, PublicationTypeDisplayName
 import os
 import logging
 from io import BytesIO
 import bibtexparser
 from datetime import datetime
 from sqlalchemy import or_
-
 
 bp = Blueprint('admin_api', __name__, url_prefix='/admin_api')
 logger = logging.getLogger(__name__)
@@ -197,7 +196,9 @@ def get_publications():
         'type': {
             'id': pub.type.id,
             'name': pub.type.name,
-            'display_name': pub.type.display_name
+            'display_name': pub.display_name.display_name if pub.display_name else None,
+            'display_names': [dn.display_name for dn in pub.type.display_names],
+            'display_name_id': pub.display_name_id
         } if pub.type else None,
         'status': pub.status,
         'file_url': pub.file_url,
@@ -215,6 +216,7 @@ def get_publications():
         'pages': paginated_publications.pages,
         'total': paginated_publications.total
     }), 200
+
 @bp.route('/admin/publications/<int:pub_id>', methods=['PUT'])
 @admin_or_manager_required
 def update_publication(pub_id):
@@ -247,13 +249,28 @@ def update_publication(pub_id):
     publication.title = data.get('title', publication.title)
     publication.authors = data.get('authors', publication.authors)
     publication.year = int(data.get('year', publication.year))
-    type_name = data.get('type')  # Ожидаем name типа
-    if type_name:
-        type_ = PublicationType.query.filter_by(name=type_name).first()
-        if type_:
-            publication.type_id = type_.id
-        else:
-            return jsonify({'error': 'Invalid publication type'}), 400
+    type_id = data.get('type_id')  # Теперь ожидаем type_id
+    display_name_id = data.get('display_name_id')  # Новый параметр
+    if type_id:
+        try:
+            type_id = int(type_id)
+            type_ = PublicationType.query.get(type_id)
+            if not type_:
+                return jsonify({'error': 'Invalid publication type'}), 400
+            publication.type_id = type_id
+        except ValueError:
+            return jsonify({'error': 'type_id должен быть числом'}), 400
+
+    if display_name_id:
+        try:
+            display_name_id = int(display_name_id)
+            display_name = PublicationTypeDisplayName.query.get(display_name_id)
+            if not display_name or (type_id and display_name.publication_type_id != type_id):
+                return jsonify({'error': 'Недопустимое русское название'}), 400
+            publication.display_name_id = display_name_id
+        except ValueError:
+            return jsonify({'error': 'display_name_id должен быть числом'}), 400
+
     new_status = data.get('status', publication.status)
     comment = data.get('return_comment', '')
 
@@ -300,6 +317,7 @@ def update_publication(pub_id):
         db.session.rollback()
         logger.error(f"Ошибка при обновлении публикации {pub_id}: {str(e)}")
         return jsonify({"error": "Ошибка при обновлении публикации. Попробуйте позже."}), 500
+
 @bp.route('/admin/publications/<int:pub_id>', methods=['DELETE'])
 @admin_or_manager_required
 def delete_publication(pub_id):
@@ -341,7 +359,13 @@ def get_needs_review_publications():
         'title': pub.title,
         'authors': pub.authors,
         'year': pub.year,
-        'type': pub.type,
+        'type': {
+            'id': pub.type.id,
+            'name': pub.type.name,
+            'display_name': pub.display_name.display_name if pub.display_name else None,
+            'display_names': [dn.display_name for dn in pub.type.display_names],
+            'display_name_id': pub.display_name_id
+        } if pub.type else None,
         'status': pub.status,
         'file_url': pub.file_url,
         'user': {
@@ -356,7 +380,7 @@ def get_needs_review_publications():
         'publications': publications,
         'pages': paginated_publications.pages,
         'total': paginated_publications.total
-    }), 200 
+    }), 200
 
 @bp.route('/admin/register', methods=['POST'])
 @admin_or_manager_required
@@ -406,7 +430,6 @@ def check_username():
 def generate_password():
     import secrets
     import string
-    # Используем только буквы (строчные и заглавные) и цифры
     characters = string.ascii_letters + string.digits
     password = ''.join(secrets.choice(characters) for _ in range(12))
     return jsonify({'password': password})
@@ -486,18 +509,17 @@ def approve_plan(plan_id):
     plan = Plan.query.get_or_404(plan_id)
     plan.status = 'approved'
     plan.approved_at = datetime.utcnow()
-    # Не сбрасываем returned_at и return_comment
 
-    # Добавляем запись в историю
     action = PlanActionHistory(
         plan_id=plan.id,
         action_type='approved',
         timestamp=plan.approved_at,
-        user_id=current_user.id  # Кто утвердил
+        user_id=current_user.id
     )
     db.session.add(action)
     db.session.commit()
     return jsonify({"message": "План утверждён"}), 200
+
 @bp.route('/admin/plans/<int:plan_id>/return-for-revision', methods=['POST'])
 @admin_or_manager_required
 def return_plan_for_revision(plan_id):
@@ -507,19 +529,18 @@ def return_plan_for_revision(plan_id):
     plan.status = 'returned'
     plan.return_comment = comment
     plan.returned_at = datetime.utcnow()
-    # Не сбрасываем approved_at
 
-    # Добавляем запись в историю
     action = PlanActionHistory(
         plan_id=plan.id,
         action_type='returned',
         timestamp=plan.returned_at,
         comment=comment,
-        user_id=current_user.id  # Кто вернул
+        user_id=current_user.id
     )
     db.session.add(action)
     db.session.commit()
     return jsonify({"message": "План возвращён на доработку"}), 200
+
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in {'pdf', 'docx'}
 
@@ -531,7 +552,6 @@ def get_publications_by_year(user_id):
         yearly_counts[year] = yearly_counts.get(year, 0) + 1
     return sorted(yearly_counts.items(), key=lambda x: x[0])
 
-
 @bp.route('/admin/plan-action-history', methods=['GET'])
 @admin_or_manager_required
 def get_plan_action_history():
@@ -540,12 +560,10 @@ def get_plan_action_history():
     start_date = request.args.get('start_date', type=str)
     end_date = request.args.get('end_date', type=str)
 
-    # Базовый запрос к истории действий
     query = PlanActionHistory.query.join(Plan).filter(
         PlanActionHistory.action_type.in_(['approved', 'returned'])
     )
 
-    # Фильтрация по датам
     if start_date:
         try:
             start_datetime = datetime.strptime(start_date, '%Y-%m-%d')
@@ -562,21 +580,18 @@ def get_plan_action_history():
             logger.error(f"Некорректный формат end_date: {end_date}, ошибка: {str(e)}")
             return jsonify({"error": "Некорректный формат даты окончания"}), 400
 
-    # Сортировка по убыванию (новые действия первыми)
-    query = query.order_by(desc(PlanActionHistory.timestamp))
+    query = query.order_by(db.desc(PlanActionHistory.timestamp))
 
-    # Пагинация
     paginated_actions = query.paginate(page=page, per_page=per_page, error_out=False)
     
     logger.debug(f"Найдено действий: {paginated_actions.total}")
     for action in paginated_actions.items:
         logger.debug(f"Действие ID={action.id}, план ID={action.plan_id}, тип={action.action_type}, время={action.timestamp}")
 
-    # Формируем историю
     history = []
     for action in paginated_actions.items:
         history.append({
-            'id': action.plan_id,  # ID плана
+            'id': action.plan_id,
             'year': action.plan.year,
             'action_type': action.action_type,
             'timestamp': action.timestamp.isoformat(),
@@ -590,14 +605,12 @@ def get_plan_action_history():
         'total': paginated_actions.total
     }), 200
 
-
 @bp.route('admin/plans/needs-review', methods=['GET'])
 @login_required
 def get_needs_review_plans():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
     
-    # Запрос планов со статусом 'needs_review'
     plans_query = Plan.query.filter_by(status='needs_review')
     pagination = plans_query.paginate(page=page, per_page=per_page, error_out=False)
     
@@ -608,7 +621,6 @@ def get_needs_review_plans():
         'pages': pagination.pages,
         'total': pagination.total
     })
-
 
 from sqlalchemy import case, or_, desc, func
 
@@ -663,29 +675,23 @@ def get_statistics():
     logger.debug(f"Получен GET запрос для /admin_api/admin/statistics?year={year}")
 
     try:
-        # Получаем все типы публикаций из базы данных
         publication_types = PublicationType.query.all()
         type_names = [t.name for t in publication_types]
 
-        # Получаем всех пользователей с ролью 'user'
         users = User.query.filter_by(role='user').all()
         result = []
 
         for user in users:
-            # Инициализируем словари для плана и факта с динамическими типами
             plan_data = {type_name: 0 for type_name in type_names}
             actual_data = {type_name: 0 for type_name in type_names}
 
-            # Находим утверждённый план пользователя за указанный год
             plan = Plan.query.filter_by(user_id=user.id, year=year, status='approved').first()
 
             if plan:
-                # Подсчитываем записи плана по типам
                 for entry in plan.entries:
                     if entry.type and entry.type.name in plan_data:
                         plan_data[entry.type.name] += 1
 
-                # Подсчитываем привязанные опубликованные публикации
                 entries_with_publications = (
                     db.session.query(PlanEntry.type_id, func.count().label('count'))
                     .join(Publication, PlanEntry.publication_id == Publication.id)
@@ -698,13 +704,11 @@ def get_statistics():
                     .all()
                 )
 
-                # Обновляем actual_data на основе типа публикации
                 for type_id, count in entries_with_publications:
                     type_record = PublicationType.query.get(type_id)
                     if type_record and type_record.name in actual_data:
                         actual_data[type_record.name] = count
 
-            # Формируем результат для пользователя
             result.append({
                 'user_id': user.id,
                 'full_name': user.full_name or user.username,
@@ -719,32 +723,57 @@ def get_statistics():
     except Exception as e:
         logger.error(f"Ошибка в get_statistics: {str(e)}")
         return jsonify({"error": "Ошибка сервера при получении статистики. Попробуйте позже."}), 500
+
 @bp.route('/admin/publication-types', methods=['GET'])
 @admin_or_manager_required
 def get_publication_types():
-    types = PublicationType.query.all()
-    return jsonify([{
-        'id': t.id,
-        'name': t.name,
-        'display_name': t.display_name
-    } for t in types]), 200
+    """
+    Эндпоинт для получения типов публикаций для админов и менеджеров.
+    Возвращает каждый display_name как отдельный вариант.
+    """
+    try:
+        types = PublicationType.query.all()
+        response = []
+        for t in types:
+            for dn in t.display_names:
+                response.append({
+                    'id': t.id,
+                    'name': t.name,
+                    'display_name_id': dn.id,
+                    'display_name': dn.display_name
+                })
+        return jsonify(response), 200
+    except Exception as e:
+        logger.error(f"Ошибка получения типов публикаций: {str(e)}")
+        return jsonify({'error': 'Ошибка при получении типов публикаций.'}), 500
 
 @bp.route('/admin/publication-types', methods=['POST'])
 @admin_or_manager_required
 def create_publication_type():
     data = request.get_json()
     name = data.get('name')
-    display_name = data.get('display_name')
-    if not name or not display_name:
-        return jsonify({'error': 'Name and display_name are required'}), 400
+    display_names = data.get('display_names', [])
+    if not name or not display_names:
+        return jsonify({'error': 'Name and at least one display_name are required'}), 400
     if PublicationType.query.filter_by(name=name).first():
         return jsonify({'error': 'Type with this name already exists'}), 400
-    new_type = PublicationType(name=name, display_name=display_name)
+    new_type = PublicationType(name=name)
     db.session.add(new_type)
+    db.session.flush()  # Получаем ID нового типа
+    for display_name in display_names:
+        new_display_name = PublicationTypeDisplayName(
+            publication_type_id=new_type.id,
+            display_name=display_name
+        )
+        db.session.add(new_display_name)
     db.session.commit()
     return jsonify({
         'message': 'Type created',
-        'type': {'id': new_type.id, 'name': new_type.name, 'display_name': new_type.display_name}
+        'type': {
+            'id': new_type.id,
+            'name': new_type.name,
+            'display_names': [dn.display_name for dn in new_type.display_names]
+        }
     }), 201
 
 @bp.route('/admin/publication-types/<int:type_id>', methods=['PUT'])
@@ -753,15 +782,26 @@ def update_publication_type(type_id):
     type_ = PublicationType.query.get_or_404(type_id)
     data = request.get_json()
     name = data.get('name')
-    display_name = data.get('display_name')
+    display_names = data.get('display_names', [])
     if name and name != type_.name and PublicationType.query.filter_by(name=name).first():
         return jsonify({'error': 'Type with this name already exists'}), 400
     type_.name = name or type_.name
-    type_.display_name = display_name or type_.display_name
+    if display_names:
+        PublicationTypeDisplayName.query.filter_by(publication_type_id=type_.id).delete()
+        for display_name in display_names:
+            new_display_name = PublicationTypeDisplayName(
+                publication_type_id=type_.id,
+                display_name=display_name
+            )
+            db.session.add(new_display_name)
     db.session.commit()
     return jsonify({
         'message': 'Type updated',
-        'type': {'id': type_.id, 'name': type_.name, 'display_name': type_.display_name}
+        'type': {
+            'id': type_.id,
+            'name': type_.name,
+            'display_names': [dn.display_name for dn in type_.display_names]
+        }
     }), 200
 
 @bp.route('/admin/publication-types/<int:type_id>', methods=['DELETE'])

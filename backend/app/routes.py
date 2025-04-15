@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request, make_response, current_app, send_file
 from .extensions import db, login_manager, csrf
-from .models import User, Publication, Comment, Plan, PlanEntry, PublicationActionHistory, PublicationType
+from .models import User, Publication, Comment, Plan, PlanEntry, PublicationActionHistory, PublicationType, PublicationTypeDisplayName
 from .utils import allowed_file
 from flask_login import login_user, current_user, logout_user, login_required
 from werkzeug.utils import secure_filename
@@ -58,7 +58,13 @@ def get_publication(pub_id):
         'title': publication.title,
         'authors': publication.authors,
         'year': publication.year,
-        'type': publication.type.name if publication.type else 'Неизвестный тип',  # Используем name из PublicationType
+        'type': {
+            'id': publication.type.id,
+            'name': publication.type.name,
+            'display_name': publication.display_name.display_name if publication.display_name else None,
+            'display_names': [dn.display_name for dn in publication.type.display_names],
+            'display_name_id': publication.display_name_id
+        } if publication.type else None,
         'status': publication.status,
         'file_url': publication.file_url if publication.file_url else None,
         'user': {
@@ -146,13 +152,12 @@ def publish_publication(pub_id):
     publication.published_at = datetime.utcnow()
     publication.returned_for_revision = False
 
-    # Добавление записи в историю
     action = PublicationActionHistory(
         publication_id=publication.id,
         user_id=current_user.id,
         action_type='approved',
         timestamp=publication.published_at,
-        comment=None  # Комментарий можно добавить, если он передаётся в запросе
+        comment=None
     )
     db.session.add(action)
 
@@ -176,45 +181,37 @@ def publish_publication(pub_id):
 @bp.route('/publications/<int:pub_id>/return-for-revision', methods=['POST'])
 @login_required
 def return_for_revision(pub_id):
-    # Получаем публикацию или возвращаем 404, если она не найдена
     publication = Publication.query.get_or_404(pub_id)
 
-    # Проверяем права пользователя
     if current_user.role not in ['admin', 'manager']:
         logger.warning(f"Несанкционированная попытка вернуть публикацию {pub_id} на доработку пользователем {current_user.id} с ролью {current_user.role}")
         return jsonify({"error": "У вас нет прав для возврата этой работы на доработку."}), 403
 
-    # Проверяем статус публикации
     if publication.status != 'needs_review':
         return jsonify({"error": "Публикация не находится на стадии проверки."}), 400
 
-    # Читаем комментарий из тела запроса
     data = request.get_json()
     comment = data.get('comment', '')
 
-    # Проверяем, что комментарий не пустой
     if not comment.strip():
         return jsonify({"error": "Необходимо добавить комментарий перед возвратом на доработку."}), 400
 
-    # Обновляем поля публикации
     publication.status = 'returned_for_revision'
     publication.returned_for_revision = True
     publication.published_at = None
     publication.returned_at = datetime.utcnow()
-    publication.return_comment = comment  # Сохраняем комментарий в публикации
+    publication.return_comment = comment
 
-    # Создаем запись в истории действий без 'title'
     action = PublicationActionHistory(
         publication_id=publication.id,
         user_id=current_user.id,
         action_type='returned',
         timestamp=publication.returned_at,
-        comment=comment  # Сохраняем комментарий в истории
+        comment=comment
     )
     db.session.add(action)
 
     try:
-        # Фиксируем изменения в базе данных
         db.session.commit()
         logger.debug(f"Публикация {pub_id} возвращена на доработку пользователем {current_user.id}, returned_at: {publication.returned_at}")
         return jsonify({
@@ -229,10 +226,10 @@ def return_for_revision(pub_id):
             }
         }), 200
     except Exception as e:
-        # Откатываем изменения в случае ошибки
         db.session.rollback()
         logger.error(f"Ошибка при возврате публикации {pub_id} на доработку: {str(e)}")
         return jsonify({"error": "Ошибка при возврате на доработку. Попробуйте позже."}), 500
+
 @bp.route('/login', methods=['POST'])
 @csrf.exempt
 def login():
@@ -389,8 +386,10 @@ def get_public_publications():
         'type': {
             'id': pub.type.id,
             'name': pub.type.name,
-            'display_name': pub.type.display_name
-        } if pub.type else {'id': None, 'name': 'Неизвестный тип', 'display_name': 'Неизвестный тип'},
+            'display_name': pub.display_name.display_name if pub.display_name else None,
+            'display_names': [dn.display_name for dn in pub.type.display_names],
+            'display_name_id': pub.display_name_id
+        } if pub.type else {'id': None, 'name': 'Неизвестный тип', 'display_names': [], 'display_name': None, 'display_name_id': None},
         'status': pub.status,
         'file_url': pub.file_url,
         'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
@@ -419,6 +418,7 @@ def get_publications():
     per_page = request.args.get('per_page', 10, type=int)
     search = request.args.get('search', '').lower()
     pub_type = request.args.get('type', 'all')
+    display_name_id = request.args.get('display_name_id', type=int)
     status = request.args.get('status', 'all')
 
     query = Publication.query.filter_by(user_id=current_user.id)
@@ -432,7 +432,9 @@ def get_publications():
             )
         )
 
-    if pub_type != 'all':
+    if display_name_id:
+        query = query.filter(Publication.display_name_id == display_name_id)
+    elif pub_type != 'all':
         type_ = PublicationType.query.filter_by(name=pub_type).first()
         if type_:
             query = query.filter(Publication.type_id == type_.id)
@@ -452,7 +454,13 @@ def get_publications():
         'title': pub.title,
         'authors': pub.authors,
         'year': pub.year,
-        'type': pub.type.name if pub.type else 'Неизвестный тип',  # Используем name из PublicationType
+        'type': {
+            'id': pub.type.id,
+            'name': pub.type.name,
+            'display_name': pub.display_name.display_name if pub.display_name else None,
+            'display_names': [dn.display_name for dn in pub.type.display_names],
+            'display_name_id': pub.display_name_id
+        } if pub.type else None,
         'status': pub.status,
         'file_url': pub.file_url,
         'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
@@ -508,13 +516,28 @@ def manage_publication(pub_id):
         publication.title = data.get('title', publication.title)
         publication.authors = data.get('authors', publication.authors)
         publication.year = data.get('year', publication.year)
-        type_name = data.get('type', publication.type.name if publication.type else None)
-        if type_name:
-            type_ = PublicationType.query.filter_by(name=type_name).first()
-            if type_:
-                publication.type_id = type_.id
-            else:
-                return jsonify({'error': 'Недопустимый тип публикации'}), 400
+        type_id = data.get('type_id')  # Теперь ожидаем type_id
+        display_name_id = data.get('display_name_id')  # Новый параметр
+        if type_id:
+            try:
+                type_id = int(type_id)
+                type_ = PublicationType.query.get(type_id)
+                if not type_:
+                    return jsonify({'error': 'Недопустимый тип публикации'}), 400
+                publication.type_id = type_id
+            except ValueError:
+                return jsonify({'error': 'type_id должен быть числом'}), 400
+
+        if display_name_id:
+            try:
+                display_name_id = int(display_name_id)
+                display_name = PublicationTypeDisplayName.query.get(display_name_id)
+                if not display_name or (type_id and display_name.publication_type_id != type_id):
+                    return jsonify({'error': 'Недопустимое русское название'}), 400
+                publication.display_name_id = display_name_id
+            except ValueError:
+                return jsonify({'error': 'display_name_id должен быть числом'}), 400
+
         new_status = data.get('status', publication.status)
 
         if new_status == 'published' and not publication.file_url:
@@ -534,7 +557,13 @@ def manage_publication(pub_id):
                     'title': publication.title,
                     'authors': publication.authors,
                     'year': publication.year,
-                    'type': publication.type.name if publication.type else 'Неизвестный тип',  # Используем name
+                    'type': {
+                        'id': publication.type.id,
+                        'name': publication.type.name,
+                        'display_name': publication.display_name.display_name if publication.display_name else None,
+                        'display_names': [dn.display_name for dn in publication.type.display_names],
+                        'display_name_id': publication.display_name_id
+                    } if publication.type else None,
                     'status': publication.status,
                     'file_url': publication.file_url,
                     'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
@@ -547,20 +576,6 @@ def manage_publication(pub_id):
             logger.error(f"Ошибка обновления публикации {pub_id}: {str(e)}")
             return jsonify({"error": "Ошибка при обновлении публикации. Попробуйте позже."}), 500
 
-    elif request.method == 'DELETE':
-        # Логика удаления остается без изменений
-        try:
-            if publication.file_url:
-                file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
-                if os.path.exists(file_path):
-                    os.remove(file_path)
-            db.session.delete(publication)
-            db.session.commit()
-            return jsonify({'message': 'Публикация успешно удалена'}), 200
-        except Exception as e:
-            db.session.rollback()
-            logger.error(f"Ошибка удаления публикации {pub_id}: {str(e)}")
-            return jsonify({"error": "Ошибка при удалении публикации. Попробуйте позже."}), 500
 @bp.route('/publications/upload-file', methods=['POST'])
 @login_required
 def upload_file():
@@ -575,21 +590,29 @@ def upload_file():
     title = request.form.get('title')
     authors = request.form.get('authors')
     year = request.form.get('year')
-    type_name = request.form.get('type', 'article')  # Имя типа из формы
+    type_id = request.form.get('type_id')  # Теперь ожидаем type_id
+    display_name_id = request.form.get('display_name_id')  # Новый параметр
     
-    if not title or not authors or not year:
-        return jsonify({'error': 'Название, авторы и год обязательны'}), 400
+    if not title or not authors or not year or not type_id:
+        return jsonify({'error': 'Название, авторы, год и тип обязательны'}), 400
 
     try:
         year = int(year)
         if year < 1900 or year > datetime.now().year:
             return jsonify({'error': 'Недопустимый год'}), 400
+        type_id = int(type_id)
+        display_name_id = int(display_name_id) if display_name_id else None
     except ValueError:
-        return jsonify({'error': 'Год должен быть числом'}), 400
+        return jsonify({'error': 'Год, type_id и display_name_id должны быть числами'}), 400
 
-    type_ = PublicationType.query.filter_by(name=type_name).first()
+    type_ = PublicationType.query.get(type_id)
     if not type_:
         return jsonify({'error': 'Недопустимый тип публикации'}), 400
+
+    if display_name_id:
+        display_name = PublicationTypeDisplayName.query.get(display_name_id)
+        if not display_name or display_name.publication_type_id != type_id:
+            return jsonify({'error': 'Недопустимое русское название'}), 400
 
     filename = secure_filename(file.filename)
     file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
@@ -606,7 +629,8 @@ def upload_file():
         title=title,
         authors=authors,
         year=year,
-        type_id=type_.id,  # Используем type_id вместо type
+        type_id=type_id,
+        display_name_id=display_name_id,
         status='draft',
         file_url=f"/uploads/{filename}",
         user_id=current_user.id,
@@ -623,14 +647,19 @@ def upload_file():
             'title': publication.title,
             'authors': publication.authors,
             'year': publication.year,
-            'type': type_.name,  # Возвращаем имя типа
+            'type': {
+                'id': type_.id,
+                'name': type_.name,
+                'display_name': publication.display_name.display_name if publication.display_name else None,
+                'display_names': [dn.display_name for dn in type_.display_names],
+                'display_name_id': publication.display_name_id
+            },
             'status': publication.status,
             'file_url': publication.file_url,
             'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
             'returned_for_revision': publication.returned_for_revision,
         }
     }), 200
-
 @bp.route('/publications/upload-bibtex', methods=['POST'])
 @login_required
 def upload_bibtex():
@@ -657,13 +686,17 @@ def upload_bibtex():
                 
                 type_ = PublicationType.query.filter_by(name=type_name).first()
                 if not type_:
-                    continue  # Пропускаем, если тип не найден
+                    continue
+
+                # Для BibTeX выбираем первое display_name по умолчанию
+                display_name = PublicationTypeDisplayName.query.filter_by(publication_type_id=type_.id).first()
 
                 publication = Publication(
                     title=title,
                     authors=authors,
                     year=year,
-                    type_id=type_.id,  # Используем type_id
+                    type_id=type_.id,
+                    display_name_id=display_name.id if display_name else None,
                     status='draft',
                     user_id=current_user.id,
                     returned_for_revision=False,
@@ -711,16 +744,45 @@ def attach_file(pub_id):
         file.save(file_path)
         publication.file_url = f"/uploads/{filename}"
 
+        # Проверяем, есть ли type_id и display_name_id в форме
+        type_id = request.form.get('type_id')
+        display_name_id = request.form.get('display_name_id')
+        if type_id:
+            try:
+                type_id = int(type_id)
+                type_ = PublicationType.query.get(type_id)
+                if not type_:
+                    return jsonify({'error': 'Недопустимый тип публикации'}), 400
+                publication.type_id = type_id
+            except ValueError:
+                return jsonify({'error': 'type_id должен быть числом'}), 400
+
+        if display_name_id:
+            try:
+                display_name_id = int(display_name_id)
+                display_name = PublicationTypeDisplayName.query.get(display_name_id)
+                if not display_name or (type_id and display_name.publication_type_id != type_id):
+                    return jsonify({'error': 'Недопустимое русское название'}), 400
+                publication.display_name_id = display_name_id
+            except ValueError:
+                return jsonify({'error': 'display_name_id должен быть числом'}), 400
+
         try:
             db.session.commit()
             return jsonify({
-                'message': 'Файл успешно прикреплен',
+                'message': 'Файл успешно прикреплён',
                 'publication': {
                     'id': publication.id,
                     'title': publication.title,
                     'authors': publication.authors,
                     'year': publication.year,
-                    'type': publication.type,
+                    'type': {
+                        'id': publication.type.id,
+                        'name': publication.type.name,
+                        'display_name': publication.display_name.display_name if publication.display_name else None,
+                        'display_names': [dn.display_name for dn in publication.type.display_names],
+                        'display_name_id': publication.display_name_id
+                    } if publication.type else None,
                     'status': publication.status,
                     'file_url': publication.file_url,
                     'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
@@ -834,7 +896,7 @@ def create_plan():
 
         entry = PlanEntry(
             title=entry_data.get('title'),
-            type_id=type_.id if type_ else None,  # Используем type_id
+            type_id=type_.id if type_ else None,
             publication_id=entry_data.get('publication_id'),
             status=entry_data.get('status', 'planned'),
             isPostApproval=False,
@@ -884,7 +946,7 @@ def update_plan(plan_id):
             if entry_id and entry_id in existing_entries:
                 entry = existing_entries[entry_id]
                 entry.title = entry_data.get('title', entry.title)
-                entry.type_id = type_.id if type_ else None  # Используем type_id
+                entry.type_id = type_.id if type_ else None
                 entry.publication_id = entry_data.get('publication_id', entry.publication_id)
                 entry.status = entry_data.get('status', entry.status)
                 if entry.publication_id:
@@ -895,7 +957,7 @@ def update_plan(plan_id):
             else:
                 new_entry = PlanEntry(
                     title=entry_data.get('title', ''),
-                    type_id=type_.id if type_ else None,  # Используем type_id
+                    type_id=type_.id if type_ else None,
                     publication_id=entry_data.get('publication_id'),
                     status=entry_data.get('status', 'planned'),
                     isPostApproval=True,
@@ -921,7 +983,7 @@ def update_plan(plan_id):
 
             entry = PlanEntry(
                 title=entry_data.get('title'),
-                type_id=type_.id if type_ else None,  # Используем type_id
+                type_id=type_.id if type_ else None,
                 publication_id=entry_data.get('publication_id'),
                 status=entry_data.get('status', 'planned'),
                 isPostApproval=False,
@@ -974,35 +1036,30 @@ def submit_plan_for_review(plan_id):
 @login_required
 def get_publication_types():
     """
-    Эндпоинт для получения списка типов публикаций.
+    Эндпоинт для получения списка типов публикаций с отдельными русскими названиями.
     Доступен для всех аутентифицированных пользователей.
     """
-    # Логируем запрос
     logger.debug(f"Получен GET запрос для /api/publication-types от пользователя {current_user.id}")
     
     try:
-        # Запрашиваем все типы публикаций из таблицы PublicationType
         types = PublicationType.query.all()
+        response = []
+        # Для каждого типа создаём запись для каждого display_name
+        for type_ in types:
+            for dn in type_.display_names:
+                response.append({
+                    'id': type_.id,  # ID типа публикации
+                    'name': type_.name,  # Английское название (например, 'article')
+                    'display_name_id': dn.id,  # ID русского названия
+                    'display_name': dn.display_name  # Русское название (например, 'Статья')
+                })
         
-        # Формируем ответ в виде списка словарей
-        response = [{
-            'id': type_.id,
-            'name': type_.name,
-            'display_name': type_.display_name
-        } for type_ in types]
-        
-        # Логируем успешное выполнение
-        logger.debug(f"Возвращено {len(response)} типов публикаций")
-        
-        # Возвращаем JSON-ответ
+        logger.debug(f"Возвращено {len(response)} вариантов типов публикаций")
         return jsonify(response), 200
     
     except Exception as e:
-        # Логируем ошибку
         logger.error(f"Ошибка получения типов публикаций: {str(e)}")
-        # Возвращаем сообщение об ошибке
         return jsonify({'error': 'Ошибка при получении типов публикаций. Попробуйте позже.'}), 500
-
 @bp.route('/plans/<int:plan_id>/entries/<int:entry_id>/link', methods=['POST'])
 @login_required
 def link_publication_to_plan_entry(plan_id, entry_id):

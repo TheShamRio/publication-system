@@ -48,25 +48,49 @@ class User(db.Model, UserMixin):
     
     def get_id(self):
         return str(self.id)
-    
-		
 
 class PublicationType(db.Model):
+    __tablename__ = 'publication_type'
+    
+    # Поля таблицы
     id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(50), unique=True, nullable=False)  # Например, 'article'
-    display_name = db.Column(db.String(100), nullable=False)      # Например, 'Статья'
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
-    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    name = db.Column(db.String(50), unique=True, nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow(), nullable=False)
+    
+    # Отношение к PublicationTypeDisplayName
+    display_names = db.relationship(
+        'PublicationTypeDisplayName',
+        back_populates='publication_type',  # Явная обратная связь
+        lazy='dynamic',
+        cascade='all, delete-orphan'       # Каскадное удаление
+    )
 
-# Обновляем модель Publication
+class PublicationTypeDisplayName(db.Model):
+    __tablename__ = 'publication_type_display_name'
+    
+    # Поля таблицы
+    id = db.Column(db.Integer, primary_key=True)
+    publication_type_id = db.Column(db.Integer, db.ForeignKey('publication_type.id', ondelete='CASCADE'), nullable=False)
+    display_name = db.Column(db.String(100), nullable=False)
+    created_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), nullable=False)
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow(), nullable=False)
+    
+    # Отношение к PublicationType
+    publication_type = db.relationship(
+        'PublicationType',
+        back_populates='display_names'  # Явная обратная связь
+    )
 class Publication(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
     authors = db.Column(db.String(200), nullable=False)
     year = db.Column(db.Integer, nullable=False)
-    # Заменяем type на type_id и добавляем связь
     type_id = db.Column(db.Integer, db.ForeignKey('publication_type.id'), nullable=False)
     type = db.relationship('PublicationType', backref='publications')
+    # Новое поле для связи с конкретным русским названием
+    display_name_id = db.Column(db.Integer, db.ForeignKey('publication_type_display_name.id'), nullable=True)
+    display_name = db.relationship('PublicationTypeDisplayName', backref='publications', lazy=True)
     status = db.Column(db.String(50), nullable=False, default='draft')
     file_url = db.Column(db.String(200), nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)
@@ -78,7 +102,6 @@ class Publication(db.Model):
 
     user = db.relationship('User', back_populates='publications', lazy=True)
     plan_entries = db.relationship('PlanEntry', back_populates='publication', lazy=True)
-
 
     @property
     def status_ru(self):
@@ -97,7 +120,10 @@ class Publication(db.Model):
             'type': {
                 'id': self.type.id,
                 'name': self.type.name,
-                'display_name': self.type.display_name
+                # Возвращаем конкретное русское название, если есть
+                'display_name': self.display_name.display_name if self.display_name else None,
+                # Для совместимости возвращаем список всех display_names
+                'display_names': [dn.display_name for dn in self.type.display_names] if self.type else []
             } if self.type else None,
             'status': self.status,
             'file_url': self.file_url,
@@ -108,7 +134,9 @@ class Publication(db.Model):
             'return_comment': self.return_comment,
             'user': {
                 'full_name': self.user.full_name if self.user else None
-            } if self.user else None
+            } if self.user else None,
+            # Добавляем display_name_id для API
+            'display_name_id': self.display_name_id
         }
 
 class PlanActionHistory(db.Model):
@@ -131,7 +159,8 @@ class PublicationActionHistory(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)  # Кто выполнил действие
 
     publication = db.relationship('Publication', backref=db.backref('action_history', lazy='dynamic'))
-    user = db.relationship('User', backref='publication_actions')		
+    user = db.relationship('User', backref='publication_actions')     
+
 class Achievement(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
@@ -164,8 +193,8 @@ class Plan(db.Model):
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
     status = db.Column(db.String(20), nullable=False, default='draft')
     return_comment = db.Column(db.Text, nullable=True)
-    approved_at = db.Column(db.DateTime, nullable=True)  # Новое поле
-    returned_at = db.Column(db.DateTime, nullable=True)  # Новое поле
+    approved_at = db.Column(db.DateTime, nullable=True)
+    returned_at = db.Column(db.DateTime, nullable=True)
 
     user = db.relationship('User', backref='plans', lazy=True)
     entries = db.relationship('PlanEntry', back_populates='plan', lazy=True, cascade='all, delete-orphan')
@@ -186,15 +215,14 @@ class Plan(db.Model):
             'return_comment': self.return_comment,
             'plan_count': plan_count,
             'fact_count': fact_count,
-            'approved_at': self.approved_at.isoformat() if self.approved_at else None,  # Добавляем в ответ
-            'returned_at': self.returned_at.isoformat() if self.returned_at else None,  # Добавляем в ответ
+            'approved_at': self.approved_at.isoformat() if self.approved_at else None,
+            'returned_at': self.returned_at.isoformat() if self.returned_at else None,
         }
 
 class PlanEntry(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     plan_id = db.Column(db.Integer, db.ForeignKey('plan.id'), nullable=False)
     title = db.Column(db.String(200), nullable=True)
-    # Заменяем type на type_id и добавляем связь
     type_id = db.Column(db.Integer, db.ForeignKey('publication_type.id'), nullable=True)
     type = db.relationship('PublicationType', backref='plan_entries')
     publication_id = db.Column(db.Integer, db.ForeignKey('publication.id'), nullable=True)
@@ -212,7 +240,7 @@ class PlanEntry(db.Model):
             'type': {
                 'id': self.type.id,
                 'name': self.type.name,
-                'display_name': self.type.display_name
+                'display_names': [dn.display_name for dn in self.type.display_names]
             } if self.type else None,
             'publication_id': self.publication_id,
             'status': self.status,

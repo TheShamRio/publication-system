@@ -53,7 +53,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
-import { styled } from '@mui/system';
+import { minWidth, styled } from '@mui/system';
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 import StatusChip from './StatusChip'; // Заменяем PlanStatusChip на StatusChip
@@ -288,7 +288,7 @@ function Dashboard() {
 	const [pubStatuses, setPubStatuses] = useState({ draft: 0, needs_review: 0, published: 0 });
 	const [totalCitations, setTotalCitations] = useState(0);
 	const [searchQuery, setSearchQuery] = useState('');
-	const [filterType, setFilterType] = useState('all');
+	const [filterDisplayNameId, setFilterDisplayNameId] = useState('all');
 	const [filterStatus, setFilterStatus] = useState('all');
 	const [linkDialogOpen, setLinkDialogOpen] = useState(false);
 	const [selectedNewEntryType, setSelectedNewEntryType] = useState([]);
@@ -324,6 +324,9 @@ function Dashboard() {
 	const [openDeleteTypeDialog, setOpenDeleteTypeDialog] = useState(false);
 	const [typeToDelete, setTypeToDelete] = useState(null);
 	const [planIdForTypeDelete, setPlanIdForTypeDelete] = useState(null);
+
+	const [selectedDisplayNameId, setSelectedDisplayNameId] = useState('');
+	const [editSelectedDisplayNameId, setEditSelectedDisplayNameId] = useState('');
 
 	// Временное состояние для редактируемого плана
 	const [tempPlan, setTempPlan] = useState(null);
@@ -402,8 +405,7 @@ function Dashboard() {
 		}
 	};
 
-	const fetchData = async (page = 1, search = '', pubType = 'all', status = 'all') => {
-		// Устанавливаем загрузку только для таблицы
+	const fetchData = async (page = 1, search = '', displayNameId = '', status = 'all') => {
 		setIsTableLoading(true);
 		try {
 			const pubResponse = await axios.get('http://localhost:5000/api/publications', {
@@ -412,12 +414,11 @@ function Dashboard() {
 					page,
 					per_page: publicationsPerPage,
 					search: search || undefined,
-					type: pubType === 'all' ? undefined : pubType,
+					display_name_id: displayNameId || undefined,
 					status: validStatuses.includes(status) ? status : 'all',
 				},
 			});
 
-			// Обновляем публикации
 			setPublications(pubResponse.data.publications || []);
 			setFilteredPublications(pubResponse.data.publications || []);
 			setCurrentPage(page);
@@ -425,14 +426,12 @@ function Dashboard() {
 			const calculatedTotalPages = Math.ceil(total / publicationsPerPage);
 			setTotalPages(calculatedTotalPages);
 
-			// Проверяем, если страница недоступна, возвращаемся на первую
 			if (page > calculatedTotalPages && calculatedTotalPages > 0) {
 				setCurrentPage(1);
-				fetchData(1, search, pubType, status);
+				fetchData(1, search, displayNameId, status);
 				return;
 			}
 
-			// Загружаем все публикации для аналитики (выполняется в фоне)
 			const allPublications = await fetchAllPublications();
 			updateAnalytics(allPublications);
 
@@ -608,11 +607,12 @@ function Dashboard() {
 		let citations = 0;
 
 		allPublications.forEach((pub) => {
-			const pubType = pub.type; // Теперь это name из PublicationType
-			if (!types[pubType]) {
-				types[pubType] = 0;
+			// Используем display_name вместо name для группировки
+			const pubDisplayName = pub.type?.display_name || 'Неизвестный тип';
+			if (!types[pubDisplayName]) {
+				types[pubDisplayName] = 0;
 			}
-			types[pubType] += 1;
+			types[pubDisplayName] += 1;
 			statuses[pub.status] = (statuses[pub.status] || 0) + 1;
 			if (pub.citations) citations += pub.citations;
 		});
@@ -642,16 +642,16 @@ function Dashboard() {
 	}, []);
 
 	useEffect(() => {
-		fetchData(1, searchQuery, filterType, filterStatus);
-		setPublicationsTransitionKey(prev => prev + 1); // перезапуск анимации
-	}, [searchQuery, filterType, filterStatus]);
+		fetchData(1, searchQuery, filterDisplayNameId, filterStatus);
+		setPublicationsTransitionKey(prev => prev + 1);
+	}, [searchQuery, filterDisplayNameId, filterStatus]);
 
 	const currentPublications = useMemo(() => {
 		return filteredPublications;
 	}, [filteredPublications]);
 
 	const handlePageChange = (event, newPage) => {
-		fetchData(newPage, searchQuery, filterType, filterStatus);
+		fetchData(newPage, searchQuery, filterDisplayNameId, filterStatus);
 	};
 
 	const handlePlanPageChange = (event, newPage) => {
@@ -731,8 +731,8 @@ function Dashboard() {
 			setOpenError(true);
 			return;
 		}
-		if (!title.trim() || !authors.trim() || !year) {
-			setError('Пожалуйста, заполните все обязательные поля (название, авторы, год).');
+		if (!title.trim() || !authors.trim() || !year || !selectedDisplayNameId) {
+			setError('Пожалуйста, заполните все обязательные поля (название, авторы, год, тип).');
 			setOpenError(true);
 			return;
 		}
@@ -750,16 +750,30 @@ function Dashboard() {
 			return;
 		}
 
+		const selectedType = publicationTypes.find(t => t.display_name_id === selectedDisplayNameId);
+		if (!selectedType) {
+			setError('Пожалуйста, выберите корректный тип публикации.');
+			setOpenError(true);
+			return;
+		}
+
 		const formData = new FormData();
 		formData.append('file', file);
 		formData.append('title', title.trim());
 		formData.append('authors', authors.trim());
 		formData.append('year', parseInt(year, 10));
-		formData.append('type', type);
+		formData.append('type_id', selectedType.id); // Передаём type_id
+		formData.append('display_name_id', selectedDisplayNameId); // Передаём display_name_id
 
 		try {
 			await refreshCsrfToken();
-			console.log('Uploading file with data:', { title, authors, year, type });
+			console.log('Uploading file with data:', {
+				title,
+				authors,
+				year,
+				type_id: selectedType.id,
+				display_name_id: selectedDisplayNameId
+			});
 			const response = await axios.post('http://localhost:5000/api/publications/upload-file', formData, {
 				withCredentials: true,
 				headers: {
@@ -773,7 +787,7 @@ function Dashboard() {
 			setTitle('');
 			setAuthors('');
 			setYear('');
-			setType(publicationTypes.length > 0 ? publicationTypes[0].name : ''); // Исправлено
+			setSelectedDisplayNameId(''); // Сбрасываем выбор
 			setFile(null);
 			await fetchData();
 		} catch (err) {
@@ -834,56 +848,31 @@ function Dashboard() {
 	};
 
 	const handleEditClick = (publication) => {
-		// Логируем действие для отладки
 		console.log('Editing publication:', publication?.id || 'unknown');
-
-		// Устанавливаем редактируемую публикацию
 		setEditPublication(publication || {});
-
-		// Устанавливаем поля формы
 		setEditTitle(publication?.title || '');
 		setEditAuthors(publication?.authors || '');
 		setEditYear(publication?.year || '');
-
-		// Определяем значение для editType
-		let newEditType = '';
-		if (publication?.type && publicationTypes.some((t) => t.name === publication.type)) {
-			// Если тип публикации валиден, используем его
-			newEditType = publication.type;
-		} else if (publicationTypes.length > 0) {
-			// Иначе берем первый доступный тип
-			newEditType = publicationTypes[0].name;
-		}
-		// Если publicationTypes пуст, оставляем editType пустым (валидация будет в handleEditSubmit)
-		setEditType(newEditType);
-
-		// Сбрасываем файл
+		setEditSelectedDisplayNameId(publication?.type?.display_name_id || '');
 		setEditFile(null);
-
-		// Открываем диалог редактирования
 		setOpenEditDialog(true);
 	};
-
 	const handleEditSubmit = async (e) => {
 		e.preventDefault();
-
-		// Проверяем, что редактируемая публикация существует
 		if (!editPublication) {
 			setError('Публикация для редактирования не выбрана.');
 			setOpenError(true);
 			return;
 		}
-
-		// Проверяем, что тип публикации выбран и список типов не пуст
-		if (!editType || !publicationTypes.some((t) => t.name === editType)) {
-			setError('Пожалуйста, выберите тип публикации.');
+		if (!editTitle.trim() || !editAuthors.trim() || !editYear || !editSelectedDisplayNameId) {
+			setError('Название, авторы, год и тип обязательны для заполнения.');
 			setOpenError(true);
 			return;
 		}
 
-		// Валидация остальных обязательных полей
-		if (!editTitle.trim() || !editAuthors.trim() || !editYear) {
-			setError('Название, авторы и год обязательны для заполнения.');
+		const selectedType = publicationTypes.find(t => t.display_name_id === editSelectedDisplayNameId);
+		if (!selectedType) {
+			setError('Пожалуйста, выберите корректный тип публикации.');
 			setOpenError(true);
 			return;
 		}
@@ -891,43 +880,38 @@ function Dashboard() {
 		let data;
 		let headers = { 'X-CSRFToken': csrfToken };
 
-		// Если есть файл, используем FormData
 		if (editFile) {
 			data = new FormData();
 			data.append('file', editFile);
 			data.append('title', editTitle.trim());
 			data.append('authors', editAuthors.trim());
 			data.append('year', parseInt(editYear, 10));
-			data.append('type', editType); // Используем выбранный тип
+			data.append('type_id', selectedType.id);
+			data.append('display_name_id', editSelectedDisplayNameId);
 			data.append('status', 'draft');
-			// Content-Type для FormData устанавливается автоматически
 		} else {
-			// Иначе используем JSON
 			data = {
 				title: editTitle.trim(),
 				authors: editAuthors.trim(),
 				year: parseInt(editYear, 10),
-				type: editType, // Используем выбранный тип
+				type_id: selectedType.id,
+				display_name_id: editSelectedDisplayNameId,
 				status: 'draft',
 			};
 			headers['Content-Type'] = 'application/json';
 		}
 
 		try {
-			// Обновляем CSRF-токен перед запросом
 			await refreshCsrfToken();
-
-			// Логируем данные для отладки
 			console.log('Updating publication with:', {
 				title: editTitle,
 				authors: editAuthors,
 				year: editYear,
-				type: editType,
+				type_id: selectedType.id,
+				display_name_id: editSelectedDisplayNameId,
 				status: 'draft',
 				file: editFile ? editFile.name : 'No new file',
 			});
-
-			// Отправляем PUT-запрос
 			const response = await axios.put(
 				`http://localhost:5000/api/publications/${editPublication.id}`,
 				data,
@@ -936,19 +920,12 @@ function Dashboard() {
 					headers,
 				}
 			);
-
-			// Устанавливаем сообщение об успехе
 			setSuccess('Публикация успешно отредактирована!');
 			setOpenSuccess(true);
 			setError('');
-
-			// Обновляем данные на странице
 			await fetchData();
-
-			// Закрываем диалог редактирования
 			setOpenEditDialog(false);
 		} catch (err) {
-			// Обрабатываем ошибки
 			console.error('Ошибка редактирования публикации:', err.response?.data || err);
 			if (err.response) {
 				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`);
@@ -2007,8 +1984,8 @@ function Dashboard() {
 													fullWidth
 													select
 													label="Тип публикации"
-													value={editType}
-													onChange={(e) => setEditType(e.target.value)}
+													value={selectedDisplayNameId}
+													onChange={(e) => setSelectedDisplayNameId(e.target.value)}
 													margin="normal"
 													variant="outlined"
 													disabled={publicationTypes.length === 0}
@@ -2018,8 +1995,10 @@ function Dashboard() {
 															Типы не доступны
 														</MenuItem>
 													) : (
-														publicationTypes.map(type => (
-															<MenuItem key={type.id} value={type.name}>{type.display_name}</MenuItem>
+														publicationTypes.map((type) => (
+															<MenuItem key={type.display_name_id} value={type.display_name_id}>
+																{type.display_name}
+															</MenuItem>
 														))
 													)}
 												</AppleTextField>
@@ -2170,14 +2149,14 @@ function Dashboard() {
 											<AppleTextField
 												select
 												label="Тип публикации"
-												value={filterType}
-												onChange={(e) => setFilterType(e.target.value)}
+												value={filterDisplayNameId}
+												onChange={(e) => setFilterDisplayNameId(e.target.value)}
 												margin="normal"
 												variant="outlined"
-											>
+												sx={{ minWidth: "120px" }}>
 												<MenuItem value="all">Все</MenuItem>
 												{publicationTypes.map((type) => (
-													<MenuItem key={type.id} value={type.name}>
+													<MenuItem key={type.display_name_id} value={type.display_name_id}>
 														{type.display_name}
 													</MenuItem>
 												))}
@@ -2189,7 +2168,7 @@ function Dashboard() {
 												onChange={(e) => setFilterStatus(e.target.value)}
 												margin="normal"
 												variant="outlined"
-											>
+												sx={{ minWidth: "70px" }}>
 												<MenuItem value="all">Все</MenuItem>
 												<MenuItem value="draft">Черновик</MenuItem>
 												<MenuItem value="needs_review">Нуждается в проверке</MenuItem>
@@ -2252,8 +2231,7 @@ function Dashboard() {
 														<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
 														<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
 														<TableCell sx={{ color: '#1D1D1F' }}>
-															{publicationTypes.find((t) => t.name === pub.type)?.display_name ||
-																'Неизвестный тип'}
+															{pub.type?.display_name || 'Неизвестный тип'}
 														</TableCell>
 														<TableCell sx={{ color: '#1D1D1F' }}>
 															<StatusChip
@@ -3009,8 +2987,8 @@ function Dashboard() {
 							fullWidth
 							select
 							label="Тип публикации"
-							value={editType}
-							onChange={(e) => setEditType(e.target.value)}
+							value={editSelectedDisplayNameId}
+							onChange={(e) => setEditSelectedDisplayNameId(e.target.value)}
 							margin="normal"
 							variant="outlined"
 							disabled={publicationTypes.length === 0}
@@ -3020,8 +2998,10 @@ function Dashboard() {
 									Типы не доступны
 								</MenuItem>
 							) : (
-								publicationTypes.map(type => (
-									<MenuItem key={type.id} value={type.name}>{type.display_name}</MenuItem>
+								publicationTypes.map((type) => (
+									<MenuItem key={type.display_name_id} value={type.display_name_id}>
+										{type.display_name}
+									</MenuItem>
 								))
 							)}
 						</AppleTextField>

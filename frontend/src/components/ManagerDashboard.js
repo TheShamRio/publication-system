@@ -207,6 +207,9 @@ function ManagerDashboard() {
 	const [editTypeName, setEditTypeName] = useState('');
 	const [editTypeDisplayName, setEditTypeDisplayName] = useState('');
 	const [openEditTypeDialog, setOpenEditTypeDialog] = useState(false);
+	const [newTypeDisplayNames, setNewTypeDisplayNames] = useState(['']);
+	const [editTypeDisplayNames, setEditTypeDisplayNames] = useState(['']);
+
 
 	// Функция сортировки и фильтрации статистики
 	const sortAndFilterStatistics = (stats, query) => {
@@ -298,6 +301,17 @@ function ManagerDashboard() {
 		}
 	};
 
+	const renderDisplayNames = (displayNames) => {
+		// Проверяем, является ли displayNames массивом и содержит ли элементы
+		if (Array.isArray(displayNames) && displayNames.length > 0) {
+			// Фильтруем пустые строки и объединяем с запятой
+			const validNames = displayNames.filter((name) => name && name.trim());
+			return validNames.length > 0 ? validNames.join(', ') : 'Не указано';
+		}
+		// Возвращаем запасной текст для некорректных данных
+		return 'Не указано';
+	};
+
 	const fetchPlanActionHistory = async (page, startDate = '', endDate = '') => {
 		try {
 			const response = await axios.get(`http://localhost:5000/admin_api/admin/plan-action-history`, {
@@ -345,35 +359,82 @@ function ManagerDashboard() {
 
 	const fetchPublicationTypes = async () => {
 		try {
+			// Выполняем GET-запрос к API
 			const response = await axios.get('http://localhost:5000/admin_api/admin/publication-types', {
 				withCredentials: true,
 				headers: { 'X-CSRFToken': csrfToken },
 			});
-			setPublicationTypes(response.data);
+
+			// Проверяем, что данные — массив
+			if (!Array.isArray(response.data)) {
+				throw new Error('Данные API должны быть массивом');
+			}
+
+			// Группируем записи по id, собирая display_name в массив
+			const typeMap = new Map();
+			response.data.forEach((item) => {
+				// Пропускаем некорректные записи
+				if (!item || !item.id || !item.name) return;
+
+				if (!typeMap.has(item.id)) {
+					typeMap.set(item.id, {
+						id: item.id,
+						name: item.name,
+						display_names: [],
+					});
+				}
+
+				// Добавляем display_name, если оно существует и не пустое
+				if (item.display_name && item.display_name.trim()) {
+					typeMap.get(item.id).display_names.push(item.display_name);
+				}
+			});
+
+			// Преобразуем Map в массив
+			const normalizedTypes = Array.from(typeMap.values()).map((type) => ({
+				...type,
+				// Убеждаемся, что display_names всегда массив
+				display_names: Array.isArray(type.display_names) ? type.display_names : [],
+			}));
+
+			// Сохраняем нормализованные данные в состояние
+			setPublicationTypes(normalizedTypes);
 		} catch (err) {
+			// Логируем ошибку и показываем уведомление
+			console.error('Ошибка загрузки типов публикаций:', err);
 			setError('Не удалось загрузить типы публикаций.');
 			setOpenError(true);
+			setPublicationTypes([]);
 		}
 	};
 
 	const handleAddType = async () => {
-		if (!newTypeName.trim() || !newTypeDisplayName.trim()) {
-			setError('Оба поля обязательны.');
+		// Проверяем, что название и хотя бы одно отображаемое название заполнены
+		if (!newTypeName.trim() || newTypeDisplayNames.every(name => !name.trim())) {
+			setError('Название (англ.) и хотя бы одно отображаемое название обязательны.');
 			setOpenError(true);
 			return;
 		}
 		try {
-			const response = await axios.post('http://localhost:5000/admin_api/admin/publication-types', {
-				name: newTypeName,
-				display_name: newTypeDisplayName,
-			}, {
-				withCredentials: true,
-				headers: { 'X-CSRFToken': csrfToken },
-			});
+			// Фильтруем пустые строки из отображаемых названий
+			const validDisplayNames = newTypeDisplayNames.filter(name => name.trim());
+			const response = await axios.post(
+				'http://localhost:5000/admin_api/admin/publication-types',
+				{
+					name: newTypeName,
+					display_names: validDisplayNames,
+				},
+				{
+					withCredentials: true,
+					headers: { 'X-CSRFToken': csrfToken },
+				}
+			);
+			// Обновляем список типов, добавляя новый тип
 			setPublicationTypes([...publicationTypes, response.data.type]);
+			// Сбрасываем форму
 			setNewTypeName('');
-			setNewTypeDisplayName('');
-			setSuccess('Тип добавлен!');
+			setNewTypeDisplayNames(['']);
+			setSuccess('Тип успешно добавлен!');
 			setOpenSuccess(true);
 		} catch (err) {
 			setError(err.response?.data?.error || 'Не удалось добавить тип.');
@@ -383,35 +444,44 @@ function ManagerDashboard() {
 
 	const handleEditType = (type) => {
 		setEditingType(type);
-		setEditTypeName(type.name);
-		setEditTypeDisplayName(type.display_name);
+		setEditTypeName(type.name || '');
+		// Устанавливаем display_names как массив, с пустой строкой по умолчанию
+		setEditTypeDisplayNames(Array.isArray(type.display_names) && type.display_names.length > 0 ? type.display_names : ['']);
 		setOpenEditTypeDialog(true);
 	};
 
 	const handleUpdateType = async () => {
-		if (!editTypeName.trim() || !editTypeDisplayName.trim()) {
-			setError('Оба поля обязательны.');
+		// Проверяем, что поля заполнены
+		if (!editTypeName.trim() || editTypeDisplayNames.every(name => !name.trim())) {
+			setError('Название (англ.) и хотя бы одно отображаемое название обязательны.');
 			setOpenError(true);
 			return;
 		}
 		try {
-			const response = await axios.put(`http://localhost:5000/admin_api/admin/publication-types/${editingType.id}`, {
-				name: editTypeName,
-				display_name: editTypeDisplayName,
-			}, {
-				withCredentials: true,
-				headers: { 'X-CSRFToken': csrfToken },
-			});
+			// Фильтруем пустые строки
+			const validDisplayNames = editTypeDisplayNames.filter(name => name.trim());
+			const response = await axios.put(
+				`http://localhost:5000/admin_api/admin/publication-types/${editingType.id}`,
+				{
+					name: editTypeName,
+					display_names: validDisplayNames,
+				},
+				{
+					withCredentials: true,
+					headers: { 'X-CSRFToken': csrfToken },
+				}
+			);
+			// Обновляем список типов
 			setPublicationTypes(publicationTypes.map(t => t.id === editingType.id ? response.data.type : t));
+			// Закрываем диалог и показываем уведомление
 			setOpenEditTypeDialog(false);
-			setSuccess('Тип обновлен!');
+			setSuccess('Тип успешно обновлён!');
 			setOpenSuccess(true);
 		} catch (err) {
 			setError(err.response?.data?.error || 'Не удалось обновить тип.');
 			setOpenError(true);
 		}
 	};
-
 	const handleDeleteType = async (typeId) => {
 		if (!window.confirm('Вы уверены, что хотите удалить этот тип?')) return;
 		try {
@@ -1764,46 +1834,139 @@ function ManagerDashboard() {
 									<Typography variant="h5" gutterBottom sx={{ color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
 										Управление типами публикаций
 									</Typography>
-									<Box sx={{ display: 'flex', gap: 2, mb: 4 }}>
+									<Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mb: 4 }}>
 										<AppleTextField
 											label="Название (англ.)"
 											value={newTypeName}
 											onChange={(e) => setNewTypeName(e.target.value)}
 											sx={{ flex: 1 }}
 										/>
-										<AppleTextField
-											label="Отображаемое название"
-											value={newTypeDisplayName}
-											onChange={(e) => setNewTypeDisplayName(e.target.value)}
-											sx={{ flex: 1 }}
-										/>
+										<Typography variant="subtitle1" sx={{ color: '#1D1D1F', fontWeight: 600 }}>
+											Отображаемые названия
+										</Typography>
+										{newTypeDisplayNames.map((displayName, index) => (
+											<Box key={index} sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+												<AppleTextField
+													label={`Отображаемое название ${index + 1}`}
+													value={displayName}
+													onChange={(e) => {
+														const updatedNames = [...newTypeDisplayNames];
+														updatedNames[index] = e.target.value;
+														setNewTypeDisplayNames(updatedNames);
+													}}
+													sx={{ flex: 1 }}
+												/>
+												{newTypeDisplayNames.length > 1 && (
+													<IconButton
+														onClick={() => {
+															const updatedNames = newTypeDisplayNames.filter((_, i) => i !== index);
+															setNewTypeDisplayNames(updatedNames);
+														}}
+													>
+														<DeleteIcon />
+													</IconButton>
+												)}
+											</Box>
+										))}
+										<AppleButton
+											onClick={() => setNewTypeDisplayNames([...newTypeDisplayNames, ''])}
+											sx={{ alignSelf: 'flex-start' }}
+										>
+											Добавить ещё название
+										</AppleButton>
 										<AppleButton onClick={handleAddType}>Добавить тип</AppleButton>
 									</Box>
 									<AppleTable>
 										<TableHead>
 											<TableRow>
-												<TableCell>Название (англ.)</TableCell>
-												<TableCell>Отображаемое название</TableCell>
-												<TableCell>Действия</TableCell>
+												<TableCell sx={{ fontWeight: 600 }}>Название (англ.)</TableCell>
+												<TableCell sx={{ fontWeight: 600 }}>Отображаемые названия</TableCell>
+												<TableCell sx={{ fontWeight: 600 }}>Действия</TableCell>
 											</TableRow>
 										</TableHead>
 										<TableBody>
-											{publicationTypes.map((type) => (
-												<TableRow key={type.id}>
-													<TableCell>{type.name}</TableCell>
-													<TableCell>{type.display_name}</TableCell>
-													<TableCell>
-														<IconButton onClick={() => handleEditType(type)}>
-															<EditIcon />
-														</IconButton>
-														<IconButton onClick={() => handleDeleteType(type.id)}>
-															<DeleteIcon />
-														</IconButton>
+											{publicationTypes.length > 0 ? (
+												publicationTypes.map((type) => (
+													<TableRow key={`type-${type.id}`}>
+														{/* Используем префикс для гарантии уникальности ключа */}
+														<TableCell>{type.name || 'Не указано'}</TableCell>
+														<TableCell>{renderDisplayNames(type.display_names)}</TableCell>
+														<TableCell>
+															<IconButton onClick={() => handleEditType(type)}>
+																<EditIcon />
+															</IconButton>
+															<IconButton onClick={() => handleDeleteType(type.id)}>
+																<DeleteIcon />
+															</IconButton>
+														</TableCell>
+													</TableRow>
+												))
+											) : (
+												<TableRow>
+													<TableCell colSpan={3} sx={{ textAlign: 'center', color: '#6E6E73' }}>
+														Нет типов публикаций.
 													</TableCell>
 												</TableRow>
-											))}
+											)}
 										</TableBody>
 									</AppleTable>
+									<Dialog
+										open={openEditTypeDialog}
+										onClose={() => setOpenEditTypeDialog(false)}
+										PaperProps={{
+											sx: { borderRadius: '16px', p: 2, backgroundColor: '#FFFFFF' },
+										}}
+									>
+										<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600 }}>
+											Редактировать тип публикации
+										</DialogTitle>
+										<DialogContent>
+											<AppleTextField
+												label="Название (англ.)"
+												value={editTypeName}
+												onChange={(e) => setEditTypeName(e.target.value)}
+												fullWidth
+												margin="normal"
+											/>
+											<Typography variant="subtitle1" sx={{ color: '#1D1D1F', fontWeight: 600, mt: 2 }}>
+												Отображаемые названия
+											</Typography>
+											{editTypeDisplayNames.map((displayName, index) => (
+												<Box key={index} sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 1 }}>
+													<AppleTextField
+														label={`Отображаемое название ${index + 1}`}
+														value={displayName}
+														onChange={(e) => {
+															const updatedNames = [...editTypeDisplayNames];
+															updatedNames[index] = e.target.value;
+															setEditTypeDisplayNames(updatedNames);
+														}}
+														fullWidth
+													/>
+													{editTypeDisplayNames.length > 1 && (
+														<IconButton
+															onClick={() => {
+																const updatedNames = editTypeDisplayNames.filter((_, i) => i !== index);
+																setEditTypeDisplayNames(updatedNames);
+															}}
+														>
+															<DeleteIcon />
+														</IconButton>
+													)}
+												</Box>
+											))}
+											<AppleButton
+												onClick={() => setEditTypeDisplayNames([...editTypeDisplayNames, ''])}
+												sx={{ mt: 2 }}
+											>
+												Добавить ещё название
+											</AppleButton>
+										</DialogContent>
+										<DialogActions sx={{ p: 2 }}>
+											<CancelButton onClick={() => setOpenEditTypeDialog(false)}>Отмена</CancelButton>
+											<AppleButton onClick={handleUpdateType}>Сохранить</AppleButton>
+										</DialogActions>
+									</Dialog>
 								</Box>
 							)}
 						</>
@@ -1948,29 +2111,7 @@ function ManagerDashboard() {
 				</Dialog>
 
 
-				<Dialog open={openEditTypeDialog} onClose={() => setOpenEditTypeDialog(false)}>
-					<DialogTitle>Редактировать тип публикации</DialogTitle>
-					<DialogContent>
-						<AppleTextField
-							label="Название (англ.)"
-							value={editTypeName}
-							onChange={(e) => setEditTypeName(e.target.value)}
-							fullWidth
-							margin="normal"
-						/>
-						<AppleTextField
-							label="Отображаемое название"
-							value={editTypeDisplayName}
-							onChange={(e) => setEditTypeDisplayName(e.target.value)}
-							fullWidth
-							margin="normal"
-						/>
-					</DialogContent>
-					<DialogActions>
-						<Button onClick={() => setOpenEditTypeDialog(false)}>Отмена</Button>
-						<Button onClick={handleUpdateType}>Сохранить</Button>
-					</DialogActions>
-				</Dialog>
+
 
 				{/* Диалог возврата плана на доработку */}
 				<Dialog
