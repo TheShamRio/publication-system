@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Line } from 'react-chartjs-2';
 import { Snackbar, Slide } from '@mui/material';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler } from 'chart.js';
@@ -318,8 +318,8 @@ function Dashboard() {
 	const [openPlanSnackbar, setOpenPlanSnackbar] = useState(false); // Управление видимостью Snackbar
 	const [loadingPublicationTypes, setLoadingPublicationTypes] = useState(true); // Новое состояние для типов
 	const [initializing, setInitializing] = useState(true);
-
-
+	const validStatuses = ['all', 'draft', 'needs_review', 'published'];
+	const [isTableLoading, setIsTableLoading] = useState(false);
 	// Добавляем состояния для управления диалогом удаления типа
 	const [openDeleteTypeDialog, setOpenDeleteTypeDialog] = useState(false);
 	const [typeToDelete, setTypeToDelete] = useState(null);
@@ -403,31 +403,36 @@ function Dashboard() {
 	};
 
 	const fetchData = async (page = 1, search = '', pubType = 'all', status = 'all') => {
+		// Устанавливаем загрузку только для таблицы
+		setIsTableLoading(true);
 		try {
 			const pubResponse = await axios.get('http://localhost:5000/api/publications', {
 				withCredentials: true,
 				params: {
 					page,
 					per_page: publicationsPerPage,
-					search,
-					type: pubType,
-					status,
+					search: search || undefined,
+					type: pubType === 'all' ? undefined : pubType,
+					status: validStatuses.includes(status) ? status : 'all',
 				},
 			});
-			setPublications(pubResponse.data.publications);
-			setFilteredPublications(pubResponse.data.publications);
+
+			// Обновляем публикации
+			setPublications(pubResponse.data.publications || []);
+			setFilteredPublications(pubResponse.data.publications || []);
 			setCurrentPage(page);
 			const total = pubResponse.data.total || 0;
 			const calculatedTotalPages = Math.ceil(total / publicationsPerPage);
 			setTotalPages(calculatedTotalPages);
-			setPublicationsTransitionKey((prev) => prev + 1);
 
+			// Проверяем, если страница недоступна, возвращаемся на первую
 			if (page > calculatedTotalPages && calculatedTotalPages > 0) {
 				setCurrentPage(1);
 				fetchData(1, search, pubType, status);
 				return;
 			}
 
+			// Загружаем все публикации для аналитики (выполняется в фоне)
 			const allPublications = await fetchAllPublications();
 			updateAnalytics(allPublications);
 
@@ -438,7 +443,7 @@ function Dashboard() {
 			setError('Произошла ошибка сервера. Попробуйте позже.');
 			setOpenError(true);
 		} finally {
-			
+			setIsTableLoading(false);
 		}
 	};
 
@@ -626,17 +631,24 @@ function Dashboard() {
 	};
 
 	useEffect(() => {
-		const loadAll = async () => {
+		const loadInitialData = async () => {
 			setInitializing(true);
-			await fetchData(1, searchQuery, filterType, filterStatus);
-			await fetchPlans(1);
-			await fetchAllPublications();
+			await fetchPlans(1);             // планы
+			await fetchAllPublications();    // опубликованные публикации
+			await fetchData(1);              // публикации по умолчанию (без фильтров)
 			setInitializing(false);
 		};
-		loadAll();
-	}, [navigate, searchQuery, filterType, filterStatus]);
+		loadInitialData();
+	}, []);
 
-	const currentPublications = filteredPublications;
+	useEffect(() => {
+		fetchData(1, searchQuery, filterType, filterStatus);
+		setPublicationsTransitionKey(prev => prev + 1); // перезапуск анимации
+	}, [searchQuery, filterType, filterStatus]);
+
+	const currentPublications = useMemo(() => {
+		return filteredPublications;
+	}, [filteredPublications]);
 
 	const handlePageChange = (event, newPage) => {
 		fetchData(newPage, searchQuery, filterType, filterStatus);
@@ -1621,13 +1633,14 @@ function Dashboard() {
 			}
 
 			// Обновляем список доступных публикаций для привязки
-			const linkedPublicationIds = new Set(
-				plans.flatMap((plan) =>
+			const linkedPublicationIds = new Set([
+				...plans.flatMap((plan) =>
 					plan.entries
 						.filter((entry) => entry.publication_id)
 						.map((entry) => entry.publication_id)
-				)
-			);
+				),
+				publicationId, // добавляем только что привязанный ID
+			]);
 
 			const updatedFilteredPublications = publishedPublications.filter(
 				(pub) =>
@@ -2132,7 +2145,16 @@ function Dashboard() {
 									>
 										Ваши публикации
 									</Typography>
-									<AppleCard sx={{ mt: 2, mb: 2, p: 2, backgroundColor: '#F5F5F7', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
+									<AppleCard
+										sx={{
+											mt: 2,
+											mb: 2,
+											p: 2,
+											backgroundColor: '#F5F5F7',
+											borderRadius: '16px',
+											boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+										}}
+									>
 										<AppleTextField
 											fullWidth
 											label="Поиск по названию, авторам или году"
@@ -2154,8 +2176,10 @@ function Dashboard() {
 												variant="outlined"
 											>
 												<MenuItem value="all">Все</MenuItem>
-												{publicationTypes.map(type => (
-													<MenuItem key={type.id} value={type.name}>{type.display_name}</MenuItem>
+												{publicationTypes.map((type) => (
+													<MenuItem key={type.id} value={type.name}>
+														{type.display_name}
+													</MenuItem>
 												))}
 											</AppleTextField>
 											<AppleTextField
@@ -2176,113 +2200,78 @@ function Dashboard() {
 									<AppleTable sx={{ mt: 2, boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
 										<TableHead>
 											<TableRow sx={{ backgroundColor: '#0071E3' }}>
-												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>ID</TableCell>
+												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', borderRadius: '12px 0 0 0' }}>
+													ID
+												</TableCell>
 												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Название</TableCell>
 												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Авторы</TableCell>
 												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Год</TableCell>
 												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Тип</TableCell>
 												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF' }}>Статус</TableCell>
-												<TableCell sx={{ fontWeight: 600, color: '#FFFFFF', textAlign: 'center', borderRadius: '0 12px 0 0' }}>
+												<TableCell
+													sx={{
+														fontWeight: 600,
+														color: '#FFFFFF',
+														textAlign: 'center',
+														borderRadius: '0 12px 0 0',
+													}}
+												>
 													Действия
 												</TableCell>
 											</TableRow>
 										</TableHead>
-										<Fade in={true} timeout={500} key={publicationsTransitionKey}>
-											<TableBody>
-												{currentPublications.length > 0 ? (
-													currentPublications.map((pub) => (
-														<TableRow
-															key={pub.id}
-															sx={{
-																'&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' },
-															}}
-														>
-															<TableCell sx={{ color: '#1D1D1F' }}>{pub.id}</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>
-																<Typography
-																	sx={{
-																		color: '#0071E3',
-																		textDecoration: 'underline',
-																		cursor: 'pointer',
-																		'&:hover': { textDecoration: 'none' },
-																	}}
-																	onClick={() => navigate(`/publication/${pub.id}`)}
-																>
-																	{pub.title}
-																</Typography>
-															</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>
-																{publicationTypes.find(t => t.name === pub.type)?.display_name || 'Неизвестный тип'}
-															</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>
-																<StatusChip
-																	status={
-																		pub.status === 'returned_for_revision' && pub.returned_for_revision
-																			? 'returned_for_revision'
-																			: pub.status
-																	}
-																	role={user.role} // Передаем роль пользователя
-																/>
-															</TableCell>
-															<TableCell sx={{ textAlign: 'center' }}>
-																<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-																	{(pub.status === 'draft' || pub.status === 'returned_for_revision') && (
-																		<>
-																			<IconButton
-																				aria-label="edit"
-																				onClick={() => handleEditClick(pub)}
-																				sx={{
-																					color: '#0071E3',
-																					borderRadius: '8px',
-																					'&:hover': {
-																						color: '#FFFFFF',
-																						backgroundColor: '#0071E3',
-																						boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																					},
-																				}}
-																			>
-																				<EditIcon />
-																			</IconButton>
-																			<IconButton
-																				aria-label="delete"
-																				onClick={() => handleDeleteClick(pub)}
-																				sx={{
-																					color: '#0071E3',
-																					borderRadius: '8px',
-																					'&:hover': {
-																						color: '#FFFFFF',
-																						backgroundColor: '#0071E3',
-																						boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																					},
-																				}}
-																			>
-																				<DeleteIcon />
-																			</IconButton>
-																			{pub.file_url && (
-																				<IconButton
-																					aria-label="submit-for-review"
-																					onClick={() => handleSubmitForReview(pub.id)}
-																					sx={{
-																						color: 'green',
-																						borderRadius: '8px',
-																						'&:hover': {
-																							color: '#FFFFFF',
-																							backgroundColor: 'green',
-																							boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																						},
-																					}}
-																				>
-																					<PublishIcon />
-																				</IconButton>
-																			)}
-																		</>
-																	)}
-																	{pub.file_url && pub.status !== 'draft' && pub.status !== 'returned_for_revision' && (
+										<TableBody>
+											{isTableLoading ? (
+												<TableRow>
+													<TableCell colSpan={7} sx={{ textAlign: 'center', color: '#6E6E73' }}>
+														Загрузка...
+													</TableCell>
+												</TableRow>
+											) : currentPublications.length > 0 ? (
+												currentPublications.map((pub) => (
+													<TableRow
+														key={pub.id}
+														sx={{
+															'&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' },
+														}}
+													>
+														<TableCell sx={{ color: '#1D1D1F' }}>{pub.id}</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>
+															<Typography
+																sx={{
+																	color: '#0071E3',
+																	textDecoration: 'underline',
+																	cursor: 'pointer',
+																	'&:hover': { textDecoration: 'none' },
+																}}
+																onClick={() => navigate(`/publication/${pub.id}`)}
+															>
+																{pub.title}
+															</Typography>
+														</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>
+															{publicationTypes.find((t) => t.name === pub.type)?.display_name ||
+																'Неизвестный тип'}
+														</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>
+															<StatusChip
+																status={
+																	pub.status === 'returned_for_revision' && pub.returned_for_revision
+																		? 'returned_for_revision'
+																		: pub.status
+																}
+																role={user.role}
+															/>
+														</TableCell>
+														<TableCell sx={{ textAlign: 'center' }}>
+															<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
+																{(pub.status === 'draft' || pub.status === 'returned_for_revision') && (
+																	<>
 																		<IconButton
-																			aria-label="download"
-																			onClick={() => handleDownloadClick(pub)}
+																			aria-label="edit"
+																			onClick={() => handleEditClick(pub)}
 																			sx={{
 																				color: '#0071E3',
 																				borderRadius: '8px',
@@ -2293,13 +2282,11 @@ function Dashboard() {
 																				},
 																			}}
 																		>
-																			<DownloadIcon />
+																			<EditIcon />
 																		</IconButton>
-																	)}
-																	{!pub.file_url && (pub.status === 'draft' || pub.status === 'returned_for_revision') && (
 																		<IconButton
-																			aria-label="attach"
-																			onClick={() => handleAttachFileClick(pub)}
+																			aria-label="delete"
+																			onClick={() => handleDeleteClick(pub)}
 																			sx={{
 																				color: '#0071E3',
 																				borderRadius: '8px',
@@ -2310,22 +2297,73 @@ function Dashboard() {
 																				},
 																			}}
 																		>
-																			<AttachFileIcon />
+																			<DeleteIcon />
 																		</IconButton>
-																	)}
-																</Box>
-															</TableCell>
-														</TableRow>
-													))
-												) : (
-													<TableRow>
-														<TableCell colSpan={7} sx={{ textAlign: 'center', color: '#6E6E73' }}>
-															Нет доступных публикаций на этой странице.
+																		{pub.file_url && (
+																			<IconButton
+																				aria-label="submit-for-review"
+																				onClick={() => handleSubmitForReview(pub.id)}
+																				sx={{
+																					color: 'green',
+																					borderRadius: '8px',
+																					'&:hover': {
+																						color: '#FFFFFF',
+																						backgroundColor: 'green',
+																						boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+																					},
+																				}}
+																			>
+																				<PublishIcon />
+																			</IconButton>
+																		)}
+																	</>
+																)}
+																{pub.file_url && pub.status !== 'draft' && pub.status !== 'returned_for_revision' && (
+																	<IconButton
+																		aria-label="download"
+																		onClick={() => handleDownloadClick(pub)}
+																		sx={{
+																			color: '#0071E3',
+																			borderRadius: '8px',
+																			'&:hover': {
+																				color: '#FFFFFF',
+																				backgroundColor: '#0071E3',
+																				boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+																			},
+																		}}
+																	>
+																		<DownloadIcon />
+																	</IconButton>
+																)}
+																{!pub.file_url && (pub.status === 'draft' || pub.status === 'returned_for_revision') && (
+																	<IconButton
+																		aria-label="attach"
+																		onClick={() => handleAttachFileClick(pub)}
+																		sx={{
+																			color: '#0071E3',
+																			borderRadius: '8px',
+																			'&:hover': {
+																				color: '#FFFFFF',
+																				backgroundColor: '#0071E3',
+																				boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
+																			},
+																		}}
+																	>
+																		<AttachFileIcon />
+																	</IconButton>
+																)}
+															</Box>
 														</TableCell>
 													</TableRow>
-												)}
-											</TableBody>
-										</Fade>
+												))
+											) : (
+												<TableRow>
+													<TableCell colSpan={7} sx={{ textAlign: 'center', color: '#6E6E73' }}>
+														Нет доступных публикаций на этой странице.
+													</TableCell>
+												</TableRow>
+											)}
+										</TableBody>
 									</AppleTable>
 									<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
 										<Pagination
@@ -2338,7 +2376,11 @@ function Dashboard() {
 													borderRadius: 20,
 													transition: 'all 0.3s ease',
 													'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
-													'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
+													'&.Mui-selected': {
+														backgroundColor: '#1976D2',
+														color: 'white',
+														boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)',
+													},
 												},
 											}}
 										/>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
 	Container,
 	Typography,
@@ -24,6 +24,7 @@ import { useNavigate } from 'react-router-dom';
 import SearchIcon from '@mui/icons-material/Search';
 import { styled } from '@mui/system';
 
+// Стили для поля поиска
 const SearchInput = styled(TextField)({
 	'& .MuiInputBase-root': {
 		borderRadius: 16,
@@ -46,8 +47,7 @@ function Home() {
 	const [filterType, setFilterType] = useState('');
 	const [filterYear, setFilterYear] = useState('');
 	const [publications, setPublications] = useState([]);
-	const [allPublications, setAllPublications] = useState([]);
-	const [filteredPublications, setFilteredPublications] = useState([]);
+	const [publicationTypes, setPublicationTypes] = useState([]);
 	const [error, setError] = useState('');
 	const [success, setSuccess] = useState('');
 	const [openError, setOpenError] = useState(false);
@@ -57,6 +57,7 @@ function Home() {
 	const publicationsPerPage = 10;
 	const navigate = useNavigate();
 
+	// Функция форматирования времени
 	const formatTimeAgo = (dateStr) => {
 		if (!dateStr) return 'Неизвестное время';
 
@@ -70,10 +71,6 @@ function Home() {
 		if (diffMinutes < 60) {
 			if (diffMinutes === 1) return '1 минуту назад';
 			if (diffMinutes >= 2 && diffMinutes <= 4) return `${diffMinutes} минуты назад`;
-			if (diffMinutes >= 5 && diffMinutes <= 20) return `${diffMinutes} минут назад`;
-			if (diffMinutes % 10 === 1 && diffMinutes !== 11) return `${diffMinutes} минуту назад`;
-			if (diffMinutes % 10 >= 2 && diffMinutes % 10 <= 4 && (diffMinutes < 10 || diffMinutes > 20))
-				return `${diffMinutes} минуты назад`;
 			return `${diffMinutes} минут назад`;
 		}
 
@@ -87,24 +84,42 @@ function Home() {
 		return `${diffDays} дней назад`;
 	};
 
+	// Загрузка типов публикаций
 	useEffect(() => {
-		const fetchPublishedPublications = async (page = 1) => {
+		const fetchPublicationTypes = async () => {
+			try {
+				const response = await axios.get('http://localhost:5000/api/publication-types', {
+					withCredentials: true,
+				});
+				setPublicationTypes(response.data);
+			} catch (err) {
+				console.error('Ошибка загрузки типов публикаций:', err);
+				setError('Не удалось загрузить типы публикаций.');
+				setOpenError(true);
+			}
+		};
+
+		fetchPublicationTypes();
+	}, []);
+
+	// Загрузка публикаций
+	useEffect(() => {
+		const fetchPublishedPublications = async () => {
 			try {
 				const response = await axios.get('http://localhost:5000/api/public/publications', {
 					withCredentials: true,
 					params: {
-						page: 1,
-						per_page: 9999,
-						search: searchTerm,
+						page: currentPage,
+						per_page: publicationsPerPage,
+						search: searchTerm || undefined,
 						type: filterType || undefined,
 						year: filterYear || undefined,
 					},
 				});
-				console.log('Server response for all publications:', response.data);
-				setAllPublications(response.data.publications || []);
+				console.log('Server response for publications:', response.data);
 				setPublications(response.data.publications || []);
-				const total = response.data.total || response.data.publications.length;
-				setTotalPages(Math.ceil(total / publicationsPerPage));
+				setTotalPages(response.data.pages || 1);
+				setCurrentPage(response.data.current_page || 1);
 			} catch (err) {
 				console.error('Ошибка загрузки публикаций:', err);
 				setError('Произошла ошибка при загрузке данных. Попробуйте позже.');
@@ -113,32 +128,14 @@ function Home() {
 		};
 
 		fetchPublishedPublications();
-	}, [searchTerm, filterType, filterYear]);
+	}, [searchTerm, filterType, filterYear, currentPage]);
 
-	const filteredPublicationsMemo = useMemo(() => {
-		return allPublications.filter(
-			(pub) =>
-				(pub.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-					pub.authors.toLowerCase().includes(searchTerm.toLowerCase())) &&
-				(!filterType || pub.type === filterType) &&
-				(!filterYear || pub.year.toString() === filterYear)
-		);
-	}, [searchTerm, filterType, filterYear, allPublications]);
-
-	useEffect(() => {
-		setTotalPages(Math.ceil(filteredPublicationsMemo.length / publicationsPerPage));
-	}, [filteredPublicationsMemo]);
-
-	const paginatedPublications = useMemo(() => {
-		const startIndex = (currentPage - 1) * publicationsPerPage;
-		const endIndex = startIndex + publicationsPerPage;
-		return filteredPublicationsMemo.slice(startIndex, endIndex);
-	}, [currentPage, filteredPublicationsMemo]);
-
+	// Обработчик смены страницы
 	const handlePageChange = (event, newPage) => {
 		setCurrentPage(newPage);
 	};
 
+	// Обработчик применения фильтров
 	const handleFilterChange = () => {
 		setCurrentPage(1);
 	};
@@ -181,9 +178,11 @@ function Home() {
 									sx={{ borderRadius: 16, '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
 								>
 									<MenuItem value="">Все</MenuItem>
-									<MenuItem value="article">Статья</MenuItem>
-									<MenuItem value="monograph">Монография</MenuItem>
-									<MenuItem value="conference">Доклад/конференция</MenuItem>
+									{publicationTypes.map((type) => (
+										<MenuItem key={type.id} value={type.name}>
+											{type.display_name}
+										</MenuItem>
+									))}
 								</Select>
 							</FormControl>
 						</Grid>
@@ -228,7 +227,7 @@ function Home() {
 					Последние опубликованные работы
 				</Typography>
 				<Card sx={{ mt: 2, mb: 4, borderRadius: 20, boxShadow: '0 12px 32px rgba(0, 0, 0, 0.15)', backgroundColor: 'white' }}>
-					{paginatedPublications.length === 0 ? (
+					{publications.length === 0 ? (
 						<Box sx={{ p: 3, textAlign: 'center', color: '#757575' }}>
 							<Typography variant="h6" sx={{ fontWeight: 500 }}>
 								Увы, ничего не нашлось
@@ -236,7 +235,7 @@ function Home() {
 						</Box>
 					) : (
 						<List sx={{ width: '100%', backgroundColor: 'white', p: 3 }}>
-							{paginatedPublications.map((pub) => (
+							{publications.map((pub) => (
 								<ListItem
 									key={pub.id}
 									sx={{
@@ -262,6 +261,9 @@ function Home() {
 													Автор: {pub.authors}
 												</Typography>
 												<Typography variant="body2" component="span" sx={{ color: '#757575', display: 'block', mt: 0.5 }}>
+													Тип: {pub.type.display_name}
+												</Typography>
+												<Typography variant="body2" component="span" sx={{ color: '#757575', display: 'block', mt: 0.5 }}>
 													Опубликовал: {pub.user?.full_name || 'Не указан'}
 												</Typography>
 												<Typography variant="body2" component="span" sx={{ color: '#757575', display: 'block', mt: 0.5 }}>
@@ -276,7 +278,7 @@ function Home() {
 					)}
 				</Card>
 
-				{filteredPublicationsMemo.length > 0 && (
+				{publications.length > 0 && (
 					<Box sx={{ display: 'flex', justifyContent: 'center', mt: 4, mb: 4 }}>
 						<Pagination
 							count={totalPages}

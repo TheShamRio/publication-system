@@ -340,17 +340,43 @@ def get_public_publications():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
     pub_type = request.args.get('type', 'all')
+    search = request.args.get('search', '').lower()
+    year = request.args.get('year', type=str)
 
-    query = Publication.query.filter_by(status='published').order_by(
-        db.func.coalesce(Publication.published_at, Publication.updated_at).desc()
-    )
+    query = Publication.query.filter_by(status='published')
 
-    if pub_type != 'all':
+    if pub_type and pub_type != 'all':
         type_ = PublicationType.query.filter_by(name=pub_type).first()
         if type_:
+            logger.debug(f"Фильтр по типу: {pub_type}, type_id: {type_.id}")
             query = query.filter(Publication.type_id == type_.id)
         else:
-            return jsonify({'error': 'Недопустимый тип публикации'}), 400
+            logger.warning(f"Тип публикации не найден: {pub_type}")
+            return jsonify({
+                'publications': [],
+                'total': 0,
+                'pages': 0,
+                'current_page': page
+            }), 200
+
+    if search:
+        query = query.filter(
+            db.or_(
+                Publication.title.ilike(f'%{search}%'),
+                Publication.authors.ilike(f'%{search}%')
+            )
+        )
+
+    if year:
+        try:
+            year_int = int(year)
+            query = query.filter(Publication.year == year_int)
+        except ValueError:
+            logger.warning(f"Недопустимый год: {year}")
+
+    query = query.order_by(
+        db.func.coalesce(Publication.published_at, Publication.updated_at).desc()
+    )
 
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     publications = pagination.items
@@ -360,7 +386,11 @@ def get_public_publications():
         'title': pub.title,
         'authors': pub.authors,
         'year': pub.year,
-        'type': pub.type.name if pub.type else 'Неизвестный тип',  # Используем name из PublicationType
+        'type': {
+            'id': pub.type.id,
+            'name': pub.type.name,
+            'display_name': pub.type.display_name
+        } if pub.type else {'id': None, 'name': 'Неизвестный тип', 'display_name': 'Неизвестный тип'},
         'status': pub.status,
         'file_url': pub.file_url,
         'updated_at': pub.updated_at.isoformat() if pub.updated_at else None,
@@ -370,6 +400,8 @@ def get_public_publications():
             'full_name': pub.user.full_name if pub.user else 'Не указан'
         } if pub.user else None
     } for pub in publications]
+
+    logger.debug(f"Возвращено {len(response)} публикаций, всего: {pagination.total}")
 
     return jsonify({
         'publications': response,
