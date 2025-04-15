@@ -346,6 +346,60 @@ function Dashboard() {
 		}
 	}, [user]);
 
+
+	const fetchPublishedPublications = async () => {
+		try {
+			// Запрос к API с параметром status='published'
+			const pubResponse = await axios.get('http://localhost:5000/api/publications', {
+				withCredentials: true,
+				params: {
+					page: 1,
+					per_page: 9999, // Загружаем все публикации
+					search: '',
+					type: 'all',
+					status: 'published',
+				},
+			});
+			// Извлекаем публикации из ответа или возвращаем пустой массив
+			const publishedPubs = pubResponse.data.publications || [];
+			// Сохраняем в состояние
+			setPublishedPublications(publishedPubs);
+			return publishedPubs;
+		} catch (err) {
+			// Обработка ошибок
+			console.error('Ошибка загрузки опубликованных публикаций:', err);
+			setError('Произошла ошибка сервера. Попробуйте позже.');
+			setOpenError(true);
+			return [];
+		}
+	};
+
+
+	const fetchAllStatusesPublications = async () => {
+		try {
+			// Запрос к API с параметром status='all'
+			const pubResponse = await axios.get('http://localhost:5000/api/publications', {
+				withCredentials: true,
+				params: {
+					page: 1,
+					per_page: 9999,
+					search: '',
+					type: 'all',
+					status: 'all',
+				},
+			});
+			// Извлекаем публикации
+			const allPubs = pubResponse.data.publications || [];
+			return allPubs;
+		} catch (err) {
+			// Обработка ошибок
+			console.error('Ошибка загрузки всех публикаций:', err);
+			setError('Произошла ошибка сервера. Попробуйте позже.');
+			setOpenError(true);
+			return [];
+		}
+	};
+
 	useEffect(() => {
 		const fetchPublicationTypes = async () => {
 			setLoadingPublicationTypes(true);
@@ -601,41 +655,54 @@ function Dashboard() {
 	};
 
 
-	const updateAnalytics = (allPublications) => {
+	const updateAnalytics = (publishedPublications, allPublications) => {
+		// Объект для типов публикаций
 		const types = {};
+		// Объект для статусов публикаций
 		const statuses = { draft: 0, needs_review: 0, published: 0 };
-		let citations = 0;
 
-		allPublications.forEach((pub) => {
-			// Используем display_name вместо name для группировки
+		// Подсчёт типов для опубликованных публикаций
+		publishedPublications.forEach((pub) => {
+			// Используем display_name для группировки
 			const pubDisplayName = pub.type?.display_name || 'Неизвестный тип';
-			if (!types[pubDisplayName]) {
-				types[pubDisplayName] = 0;
-			}
-			types[pubDisplayName] += 1;
-			statuses[pub.status] = (statuses[pub.status] || 0) + 1;
-			if (pub.citations) citations += pub.citations;
+			types[pubDisplayName] = (types[pubDisplayName] || 0) + 1;
 		});
 
+		// Подсчёт статусов для всех публикаций
+		allPublications.forEach((pub) => {
+			// Увеличиваем счётчик для соответствующего статуса
+			statuses[pub.status] = (statuses[pub.status] || 0) + 1;
+		});
+
+		// Сохраняем результаты в состояния
 		setPubTypes(types);
 		setPubStatuses(statuses);
-		setTotalCitations(citations);
 
-		const yearlyAnalytics = allPublications.reduce((acc, pub) => {
+		// Подсчёт динамики публикаций по годам (только опубликованные)
+		const yearlyAnalytics = publishedPublications.reduce((acc, pub) => {
 			acc[pub.year] = (acc[pub.year] || 0) + 1;
 			return acc;
 		}, {});
-		const analyticsData = Object.entries(yearlyAnalytics).map(([year, count]) => ({ year: parseInt(year), count }));
+		// Преобразуем в массив для сортировки
+		const analyticsData = Object.entries(yearlyAnalytics).map(([year, count]) => ({
+			year: parseInt(year),
+			count,
+		}));
+		// Сортируем по году
 		analyticsData.sort((a, b) => a.year - b.year);
 		setAnalytics(analyticsData);
 	};
 
 	useEffect(() => {
 		const loadInitialData = async () => {
+			// Устанавливаем индикатор загрузки
 			setInitializing(true);
-			await fetchPlans(1);             // планы
-			await fetchAllPublications();    // опубликованные публикации
-			await fetchData(1);              // публикации по умолчанию (без фильтров)
+			// Загружаем оба набора данных
+			const publishedPubs = await fetchPublishedPublications();
+			const allPubs = await fetchAllStatusesPublications();
+			// Обновляем аналитику
+			updateAnalytics(publishedPubs, allPubs);
+			// Снимаем индикатор загрузки
 			setInitializing(false);
 		};
 		loadInitialData();
@@ -2457,7 +2524,7 @@ function Dashboard() {
 															Общая статистика
 														</Typography>
 														<Typography variant="body1" sx={{ color: '#6E6E73' }}>
-															Всего публикаций: {analytics.reduce((sum, item) => sum + item.count, 0)}
+															Всего опубликованных публикаций: {analytics.reduce((sum, item) => sum + item.count, 0)}
 															{totalCitations > 0 && ` | Общее количество цитирований: ${totalCitations}`}
 														</Typography>
 													</>
