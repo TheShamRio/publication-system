@@ -1495,7 +1495,6 @@ function Dashboard() {
 			setPlans(plans.map(p => (p.id === plan.id ? { ...response.data.plan, isSaved: true } : p)));
 			setEditingPlanId(null);
 			setTempPlan(null);
-			setExpandedPlanId(null);
 			setSuccess('План успешно сохранен!');
 			setOpenSuccess(true);
 		} catch (err) {
