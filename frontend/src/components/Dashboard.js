@@ -486,8 +486,10 @@ function Dashboard() {
 				return;
 			}
 
-			const allPublications = await fetchAllPublications();
-			updateAnalytics(allPublications);
+			// Загружаем оба набора публикаций
+			const publishedPubs = await fetchAllPublications();
+			const allPubs = await fetchAllStatusesPublications();
+			updateAnalytics(publishedPubs, allPubs);
 
 			console.log('Server response for page', page, ':', pubResponse.data);
 			setError('');
@@ -501,29 +503,44 @@ function Dashboard() {
 	};
 
 
+
+
 	const groupEntriesByType = (entries) => {
 		const grouped = {};
-		entries.forEach((entry) => {
-			const type = entry.type && typeof entry.type === 'object' && entry.type.name
-				? entry.type.name
-				: (typeof entry.type === 'string' ? entry.type : 'unknown');
-			console.log('Обработка записи с типом:', type);
-			if (!grouped[type]) {
-				grouped[type] = {
-					type,
+		entries.forEach((entry, index) => {
+			const displayNameId = entry.display_name_id || entry.type?.id || `unknown-${index}`;
+			const typeName = entry.type?.name || entry.type || 'unknown';
+			const displayName = entry.display_name ||
+				publicationTypes.find(t => t.display_name_id === displayNameId)?.display_name ||
+				'Неизвестный тип';
+			const key = displayNameId;
+			if (!grouped[key]) {
+				grouped[key] = {
+					display_name_id: displayNameId,
+					type: typeName,
+					display_name: displayName,
 					planCount: 0,
 					factCount: 0,
 					entries: [],
 				};
 			}
-			grouped[type].planCount += 1;
+
+			// Обновляем счётчики
+			grouped[key].planCount += 1;
 			if (entry.publication_id) {
-				grouped[type].factCount += 1;
+				grouped[key].factCount += 1;
 			}
-			grouped[type].entries.push(entry);
+
+			// Добавляем запись в группу
+			grouped[key].entries.push(entry);
 		});
+
+		// Преобразуем объект в массив
 		const result = Object.values(grouped);
+
+		// Логируем результат для отладки
 		console.log('Сгруппированные записи:', result);
+
 		return result;
 	};
 
@@ -695,15 +712,45 @@ function Dashboard() {
 
 	useEffect(() => {
 		const loadInitialData = async () => {
-			// Устанавливаем индикатор загрузки
 			setInitializing(true);
-			// Загружаем оба набора данных
-			const publishedPubs = await fetchPublishedPublications();
-			const allPubs = await fetchAllStatusesPublications();
-			// Обновляем аналитику
-			updateAnalytics(publishedPubs, allPubs);
-			// Снимаем индикатор загрузки
-			setInitializing(false);
+			try {
+				// Параллельная загрузка всех данных
+				const [publishedPubs, allPubs, plansResponse] = await Promise.all([
+					fetchPublishedPublications(),
+					fetchAllStatusesPublications(),
+					axios.get('http://localhost:5000/api/plans', {
+						withCredentials: true,
+						params: {
+							page: 1,
+							per_page: plansPerPage,
+						},
+					}),
+				]);
+
+				// Обновление аналитики
+				updateAnalytics(publishedPubs, allPubs);
+
+				// Обработка планов
+				const sortedPlans = (plansResponse.data.plans || []).map(plan => ({
+					...plan,
+					isSaved: true,
+					entries: plan.entries.map(entry => ({
+						...entry,
+						publication_id: entry.publication_id || null,
+						isPostApproval: entry.isPostApproval || false,
+					})),
+				})).sort((a, b) => b.year - a.year);
+				setPlans(sortedPlans);
+				setPlanPage(1);
+				const total = plansResponse.data.total || 0;
+				setPlanTotalPages(Math.ceil(total / plansPerPage));
+			} catch (err) {
+				console.error('Ошибка начальной загрузки данных:', err);
+				setError('Произошла ошибка сервера. Попробуйте позже.');
+				setOpenError(true);
+			} finally {
+				setInitializing(false);
+			}
 		};
 		loadInitialData();
 	}, []);
@@ -1350,44 +1397,63 @@ function Dashboard() {
 
 
 	const handleAddPlanEntry = (planId) => {
+		if (!publicationTypes.length) {
+			console.warn('Типы публикаций ещё не загружены');
+			return;
+		}
 		setTempPlan((prevTempPlan) => {
 			if (prevTempPlan.id !== planId) return prevTempPlan;
 
 			const newGroupedEntries = [...prevTempPlan.groupedEntries];
-			selectedNewEntryType.forEach((type) => {
-				if (!publicationTypes.some(t => t.name === type)) {
-					console.warn(`Попытка добавить неподдерживаемый тип: ${type}`);
+			selectedNewEntryType.forEach((displayNameId) => {
+				const typeItem = publicationTypes.find(t => t.display_name_id === displayNameId);
+				if (!typeItem) {
+					console.warn(`Тип с display_name_id: ${displayNameId} не найден`);
 					return;
 				}
-				const existingGroup = newGroupedEntries.find(
-					(group) => group.type === type && !group.isDeleted
-				);
-				if (!existingGroup) {
-					const typeData = publicationTypes.find(t => t.name === type);
-					const newEntry = {
-						id: `temp-${type}-${newGroupedEntries.length}`,
-						title: `Новая ${typeData ? typeData.display_name : type}`,
-						type,
+				const typeId = typeItem.id;
+				const typeName = typeItem.name;
+
+				const existingGroup = newGroupedEntries.find(g => g.display_name_id === displayNameId && !g.isDeleted);
+				if (existingGroup) {
+					const i = existingGroup.entries.length;
+					existingGroup.entries.push({
+						id: `temp-${displayNameId}-${i}`,
+						title: `${typeItem.display_name} ${i + 1}`,
+						type: typeName,
+						type_id: typeId,
+						display_name_id: displayNameId,
 						status: 'planned',
 						publication_id: null,
 						isPostApproval: false,
-					};
+					});
+					existingGroup.planCount += 1;
+				} else {
 					newGroupedEntries.push({
-						type,
+						display_name_id: displayNameId,
+						type: typeName,
+						type_id: typeId,
+						display_name: typeItem.display_name,
 						planCount: 1,
 						factCount: 0,
-						entries: [newEntry],
+						entries: [{
+							id: `temp-${displayNameId}-0`,
+							title: `${typeItem.display_name} 1`,
+							type: typeName,
+							type_id: typeId,
+							display_name_id: displayNameId,
+							status: 'planned',
+							publication_id: null,
+							isPostApproval: false,
+						}],
 						isDeleted: false,
 					});
 				}
 			});
-
-			console.log('Обновлённые записи плана:', newGroupedEntries);
 			return { ...prevTempPlan, groupedEntries: newGroupedEntries };
 		});
 		setSelectedNewEntryType([]);
 	};
-
 	const handleDeletePlanEntry = (planId, index) => {
 		setPlans(prevPlans =>
 			prevPlans.map(plan =>
@@ -1401,93 +1467,71 @@ function Dashboard() {
 			)
 		);
 	};
-	const handleSavePlan = async (plan) => {
-		// Проверяем, что редактируем правильный план
-		if (!tempPlan || tempPlan.id !== plan.id) {
-			setError('Ошибка: несоответствие редактируемого плана.');
-			setOpenError(true);
+	const handleSavePlan = async () => {
+		if (!tempPlan || !tempPlan.id) {
+			console.error('tempPlan отсутствует или не имеет id');
+			alert('Ошибка: План не выбран или недействителен.');
 			return;
 		}
 
 		try {
-			// Обновляем CSRF-токен
-			await refreshCsrfToken();
+			const entriesToSave = tempPlan.groupedEntries
+				.filter(group => !group.isDeleted)
+				.flatMap(group => {
+					if (!group || !group.entries) {
+						console.warn('Группа или её entries отсутствуют:', group);
+						return [];
+					}
 
-			// Формируем данные для сохранения
-			const planData = {
-				year: plan.year,
-				expectedCount: tempPlan.groupedEntries.reduce(
-					(sum, group) => sum + (group.isDeleted ? 0 : group.planCount),
-					0
-				),
-				fillType: 'manual',
-				entries: tempPlan.groupedEntries
-					.filter((group) => !group.isDeleted)
-					.flatMap((group) =>
-						group.entries.map((entry) => ({
-							id: typeof entry.id === 'string' && entry.id.startsWith('temp-') ? undefined : entry.id,
-							title: entry.title || `Публикация ${group.type}`,
-							// Передаём строку name вместо объекта
-							type: typeof entry.type === 'string' ? entry.type : entry.type?.name || group.type,
-							status: validPlanStatuses.includes(entry.status)
-								? entry.status
-								: 'planned',
-							publication_id: entry.publication_id || null,
-							isPostApproval: !!entry.isPostApproval,
-						}))
-					),
-			};
+					return group.entries
+						.filter(entry => !entry.isDeleted)
+						.map(entry => {
+							if (!entry) {
+								console.warn('Запись отсутствует:', entry);
+								return null;
+							}
 
-			// Логируем данные для отладки
-			console.log('Сохранение плана:', planData);
-
-			// Отправляем запрос на сервер
-			const response = await axios.put(
-				`http://localhost:5000/api/plans/${plan.id}`,
-				planData,
-				{
-					withCredentials: true,
-					headers: {
-						'X-CSRFToken': csrfToken,
-						'Content-Type': 'application/json',
-					},
-				}
-			);
-
-			// Обновляем только текущий план в состоянии plans
-			setPlans((prevPlans) =>
-				prevPlans.map((p) =>
-					p.id === plan.id
-						? {
-							...response.data.plan,
-							isSaved: true,
-							entries: response.data.plan.entries.map((entry) => ({
-								...entry,
+							return {
+								id: entry.id || null,
+								title: entry.title || '',
+								type_id: entry.type?.id || entry.type_id || null,
+								display_name_id: entry.display_name_id || null,
+								status: entry.status || 'planned',
 								publication_id: entry.publication_id || null,
-								isPostApproval: !!entry.isPostApproval,
-							})),
-						}
-						: p
+								isPostApproval: entry.isPostApproval || false,
+							};
+						})
+						.filter(entry => entry !== null);
+				});
+
+			if (entriesToSave.length === 0) {
+				console.warn('Нет записей для сохранения');
+				alert('Ошибка: Нет активных записей для сохранения. Добавьте типы в план.');
+				return;
+			}
+
+			console.log('Entries to save:', entriesToSave);
+
+			const response = await axios.put(`/api/plans/${tempPlan.id}/entries`, {
+				entries: entriesToSave,
+			});
+
+			setPlans(prevPlans =>
+				prevPlans.map(plan =>
+					plan.id === tempPlan.id
+						? { ...plan, groupedEntries: groupEntriesByType(response.data.entries) }
+						: plan
 				)
 			);
 
-			// Устанавливаем уведомление об успехе
-			setSuccess('План успешно сохранён!');
-			setOpenSuccess(true);
-			setError('');
-
-			// Сбрасываем состояние редактирования, но сохраняем аккордеон открытым
-			setEditingPlanId(null);
 			setTempPlan(null);
-		} catch (err) {
-			console.error('Ошибка сохранения плана:', err.response?.data || err);
-			setError(
-				err.response
-					? `Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`
-					: 'Ошибка сети. Проверьте подключение и сервер.'
-			);
-			setOpenError(true);
-			setSuccess('');
+		} catch (error) {
+			console.error('Ошибка при сохранении плана:', error);
+			if (error.response?.status === 404) {
+				alert('Ошибка: План не найден на сервере или эндпоинт недоступен.');
+			} else {
+				alert('Ошибка при сохранении плана. Пожалуйста, попробуйте снова.');
+			}
 		}
 	};
 	const handleSubmitPlanForReview = async (plan) => {
@@ -2568,13 +2612,17 @@ function Dashboard() {
 													boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
 												}}
 											>
-												<AccordionSummary expandIcon={<ExpandMoreIcon />}>
+												<AccordionSummary
+													expandIcon={<ExpandMoreIcon />}
+													component="div" // Заменяем <button> на <div>
+													sx={{ cursor: 'pointer' }} // Добавляем курсор для сохранения интерактивности
+												>
 													<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
 														<Typography variant="h6" sx={{ color: '#1D1D1F' }}>
 															План на {plan.year} год (План: {plan.plan_count} | Факт: {plan.fact_count})
 														</Typography>
 														<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-															<StatusChip status={plan.status} />
+															<StatusChip status={plan.status} role={user.role} />
 															{(plan.status === 'draft' || plan.status === 'returned') && (
 																<>
 																	<IconButton
@@ -2633,7 +2681,7 @@ function Dashboard() {
 																			return (
 																				<TableRow key={index} sx={{ backgroundColor: group.isDeleted ? '#E5E5EA' : 'inherit' }}>
 																					<TableCell>
-																						{typeData ? typeData.display_name : group.type}
+																						{group.display_name || (publicationTypes.find(t => t.name === group.type)?.display_name) || group.type}
 																					</TableCell>
 																					<TableCell>
 																						<AppleTextField
@@ -2688,7 +2736,7 @@ function Dashboard() {
 																					{selected.map((value) => (
 																						<Chip
 																							key={value}
-																							label={publicationTypes.find(t => t.name === value)?.display_name || value}
+																							label={publicationTypes.find(t => t.display_name_id === value)?.display_name || value}
 																							onMouseDown={(event) => event.stopPropagation()}
 																							onDelete={(event) => {
 																								event.stopPropagation();
@@ -2701,7 +2749,9 @@ function Dashboard() {
 																		}
 																	>
 																		{publicationTypes.map(type => (
-																			<MenuItem key={type.id} value={type.name}>{type.display_name}</MenuItem>
+																			<MenuItem key={type.display_name_id} value={type.display_name_id}>
+																				{type.display_name}
+																			</MenuItem>
 																		))}
 																	</AppleSelect>
 																</FormControl>
@@ -2775,40 +2825,32 @@ function Dashboard() {
 																		</TableRow>
 																	</TableHead>
 																	<TableBody>
-																		{groupedEntries.map((group) => {
-																			const typeData = publicationTypes.find(t => t.name === group.type);
-																			return (
-																				<TableRow key={group.type}>
-																					<TableCell>{`${group.planCount}/${group.factCount}`}</TableCell>
-																					<TableCell>
-																						{typeData ? typeData.display_name : group.type}
-																					</TableCell>
-																					<TableCell>
-																						<IconButton
-																							onClick={() => handleOpenLinkDialog(plan.id, group)}
-																							sx={{ color: '#0071E3' }}
-																							title="Привязать публикацию"
-																							disabled={plan.status !== 'approved' || group.factCount >= group.planCount}
-																						>
-																							<LinkIcon />
-																						</IconButton>
-																						<IconButton
-																							onClick={() => handleOpenUnlinkDialog(plan.id, group)}
-																							sx={{
-																								color: group.factCount > 0 ? '#FF3B30' : '#D1D1D6',
-																								'&:hover': {
-																									color: group.factCount > 0 ? '#FF2D1A' : '#D1D1D6',
-																								},
-																							}}
-																							title="Отвязать публикацию"
-																							disabled={plan.status !== 'approved' || group.factCount === 0}
-																						>
-																							<UnlinkIcon />
-																						</IconButton>
-																					</TableCell>
-																				</TableRow>
-																			);
-																		})}
+																		{groupedEntries.map((group) => (
+																			<TableRow key={group.display_name_id}>
+																				<TableCell>{`${group.planCount}/${group.factCount}`}</TableCell>
+																				<TableCell>
+																					{group.display_name || (publicationTypes.find(t => t.name === group.type)?.display_name) || group.type}
+																				</TableCell>
+																				<TableCell>
+																					<IconButton
+																						onClick={() => handleOpenLinkDialog(plan.id, group)}
+																						sx={{ color: '#0071E3' }}
+																						title="Привязать публикацию"
+																						disabled={plan.status !== 'approved' || group.factCount >= group.planCount}
+																					>
+																						<LinkIcon />
+																					</IconButton>
+																					<IconButton
+																						onClick={() => handleOpenUnlinkDialog(plan.id, group)}
+																						sx={{ color: group.factCount > 0 ? '#FF3B30' : '#D1D1D6' }}
+																						title="Отвязать публикацию"
+																						disabled={plan.status !== 'approved' || group.factCount === 0}
+																					>
+																						<UnlinkIcon />
+																					</IconButton>
+																				</TableCell>
+																			</TableRow>
+																		))}
 																	</TableBody>
 																</PlanTable>
 															)}

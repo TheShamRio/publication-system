@@ -224,7 +224,9 @@ class PlanEntry(db.Model):
     plan_id = db.Column(db.Integer, db.ForeignKey('plan.id'), nullable=False)
     title = db.Column(db.String(200), nullable=True)
     type_id = db.Column(db.Integer, db.ForeignKey('publication_type.id'), nullable=True)
+    display_name_id = db.Column(db.Integer, db.ForeignKey('publication_type_display_name.id'), nullable=True)  # Новое поле
     type = db.relationship('PublicationType', backref='plan_entries')
+    display_name = db.relationship('PublicationTypeDisplayName', backref='plan_entries', lazy=True)  # Связь
     publication_id = db.Column(db.Integer, db.ForeignKey('publication.id'), nullable=True)
     status = db.Column(db.String(50), nullable=False, default='planned')
     isPostApproval = db.Column(db.Boolean, nullable=False, default=False)
@@ -233,7 +235,7 @@ class PlanEntry(db.Model):
     publication = db.relationship('Publication', back_populates='plan_entries', lazy=True)
 
     def to_dict(self):
-        from flask_login import current_user
+        # Существующие поля
         result = {
             'id': self.id,
             'title': self.title,
@@ -245,11 +247,10 @@ class PlanEntry(db.Model):
             'publication_id': self.publication_id,
             'status': self.status,
             'isPostApproval': self.isPostApproval,
-            'publication': {
-                'id': self.publication.id,
-                'title': self.publication.title
-            } if self.publication else None
+            'plan_id': self.plan_id
         }
-        if current_user.is_authenticated and current_user.role in ['admin', 'manager']:
-            result['status'] = self.status
+        # Добавляем новые поля для display_name_id и display_name
+        if self.display_name_id:
+            result['display_name_id'] = self.display_name_id
+            result['display_name'] = self.display_name.display_name if self.display_name else None
         return result

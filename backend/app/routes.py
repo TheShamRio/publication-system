@@ -861,16 +861,21 @@ def get_plans():
 @bp.route('/plans', methods=['POST'])
 @login_required
 def create_plan():
+    # Получаем данные из запроса
     data = request.get_json()
+    # Проверяем наличие обязательных полей
     if not data.get('year') or not data.get('fillType') or 'entries' not in data:
         return jsonify({'error': 'Отсутствуют обязательные поля'}), 400
     
+    # Валидация года
     if not isinstance(data['year'], int) or data['year'] < 1900 or data['year'] > 2100:
         return jsonify({'error': 'Недопустимый год'}), 400
     
+    # Валидация типа заполнения
     if data['fillType'] not in ['manual', 'link']:
         return jsonify({'error': 'Недопустимый тип заполнения'}), 400
 
+    # Проверяем, нет ли уже утверждённого плана на этот год
     existing_approved_plan = Plan.query.filter_by(
         user_id=current_user.id,
         year=data['year'],
@@ -879,6 +884,7 @@ def create_plan():
     if existing_approved_plan:
         return jsonify({'error': f'У вас уже есть утверждённый план на {data["year"]} год.'}), 403
 
+    # Создаём новый план
     plan = Plan(
         year=data['year'],
         fillType=data['fillType'],
@@ -887,21 +893,40 @@ def create_plan():
     )
     db.session.add(plan)
 
+    # Обрабатываем записи плана
     for entry_data in data['entries']:
         type_name = entry_data.get('type')
+        display_name_id = entry_data.get('display_name_id')  # Новое поле
+        # Проверяем тип публикации
         type_ = PublicationType.query.filter_by(name=type_name).first() if type_name else None
         if type_name and not type_:
             db.session.rollback()
             return jsonify({'error': f'Недопустимый тип публикации: {type_name}'}), 400
+        
+        # Проверяем display_name_id
+        display_name = None
+        if display_name_id:
+            try:
+                display_name_id = int(display_name_id)
+                display_name = PublicationTypeDisplayName.query.get(display_name_id)
+                if not display_name or (type_ and display_name.publication_type_id != type_.id):
+                    db.session.rollback()
+                    return jsonify({'error': f'Недопустимое русское название с ID: {display_name_id}'}), 400
+            except ValueError:
+                db.session.rollback()
+                return jsonify({'error': 'display_name_id должен быть числом'}), 400
 
+        # Создаём запись плана
         entry = PlanEntry(
             title=entry_data.get('title'),
             type_id=type_.id if type_ else None,
+            display_name_id=display_name_id if display_name else None,  # Сохраняем display_name_id
             publication_id=entry_data.get('publication_id'),
             status=entry_data.get('status', 'planned'),
             isPostApproval=False,
             plan=plan
         )
+        # Проверяем публикацию, если указан publication_id
         if entry.publication_id:
             publication = Publication.query.filter_by(id=entry.publication_id, user_id=current_user.id, status='published').first()
             if not publication:
@@ -909,95 +934,80 @@ def create_plan():
                 return jsonify({'error': f'Публикация с ID {entry.publication_id} не найдена или не опубликована'}), 404
         db.session.add(entry)
 
-    db.session.commit()
-    return jsonify({'message': f'План создан с ID {plan.id}', 'plan': plan.to_dict()}), 201
+    # Сохраняем изменения в базе данных
+    try:
+        db.session.commit()
+        logger.debug(f"План создан с ID {plan.id}")
+        return jsonify({'message': f'План создан с ID {plan.id}', 'plan': plan.to_dict()}), 201
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Ошибка при создании плана: {str(e)}")
+        return jsonify({'error': 'Ошибка при создании плана. Попробуйте позже.'}), 500
 
 @bp.route('/plans/<int:plan_id>', methods=['PUT'])
 @login_required
 def update_plan(plan_id):
-    plan = Plan.query.filter_by(id=plan_id, user_id=current_user.id).first()
-    if not plan:
-        return jsonify({'error': 'План не найден или доступ запрещён'}), 404
-    
-    if plan.status not in ['draft', 'returned', 'approved']:
-        return jsonify({'error': 'Нельзя редактировать план на проверке'}), 403
+    plan = Plan.query.get_or_404(plan_id)
+    if plan.user_id != current_user.id:
+        return jsonify({'error': 'Unauthorized'}), 403
 
     data = request.get_json()
-    if not all(k in data for k in ('year', 'fillType', 'entries')):
-        return jsonify({'error': 'Отсутствуют обязательные поля'}), 400
-    
-    if not isinstance(data['year'], int) or data['year'] < 1900 or data['year'] > 2100:
-        return jsonify({'error': 'Недопустимый год'}), 400
-    
-    if data['fillType'] not in ['manual', 'link']:
-        return jsonify({'error': 'Недопустимый тип заполнения'}), 400
+    plan.year = data.get('year', plan.year)
+    plan.fillType = data.get('fillType', plan.fillType)  # Исправлено
 
-    if plan.status == 'approved':
-        existing_entries = {entry.id: entry for entry in plan.entries}
-        new_entries = []
-        for entry_data in data['entries']:
-            entry_id = entry_data.get('id')
-            type_name = entry_data.get('type')
-            type_ = PublicationType.query.filter_by(name=type_name).first() if type_name else None
-            if type_name and not type_:
-                db.session.rollback()
-                return jsonify({'error': f'Недопустимый тип публикации: {type_name}'}), 400
+    existing_entries = {entry.id: entry for entry in plan.entries}
+    new_entries_data = data.get('entries', [])
 
-            if entry_id and entry_id in existing_entries:
-                entry = existing_entries[entry_id]
-                entry.title = entry_data.get('title', entry.title)
-                entry.type_id = type_.id if type_ else None
-                entry.publication_id = entry_data.get('publication_id', entry.publication_id)
-                entry.status = entry_data.get('status', entry.status)
-                if entry.publication_id:
-                    publication = Publication.query.filter_by(id=entry.publication_id, user_id=current_user.id, status='published').first()
-                    if not publication:
-                        db.session.rollback()
-                        return jsonify({'error': f'Публикация с ID {entry.publication_id} не найдена или не опубликована'}), 404
-            else:
-                new_entry = PlanEntry(
-                    title=entry_data.get('title', ''),
-                    type_id=type_.id if type_ else None,
-                    publication_id=entry_data.get('publication_id'),
-                    status=entry_data.get('status', 'planned'),
-                    isPostApproval=True,
-                    plan=plan
-                )
-                if new_entry.publication_id:
-                    publication = Publication.query.filter_by(id=new_entry.publication_id, user_id=current_user.id, status='published').first()
-                    if not publication:
-                        db.session.rollback()
-                        return jsonify({'error': f'Публикация с ID {new_entry.publication_id} не найдена или не опубликована'}), 404
-                new_entries.append(new_entry)
-                db.session.add(new_entry)
-    else:
-        plan.year = data['year']
-        plan.fillType = data['fillType']
-        PlanEntry.query.filter_by(plan_id=plan.id).delete()
-        for entry_data in data['entries']:
-            type_name = entry_data.get('type')
-            type_ = PublicationType.query.filter_by(name=type_name).first() if type_name else None
-            if type_name and not type_:
-                db.session.rollback()
-                return jsonify({'error': f'Недопустимый тип публикации: {type_name}'}), 400
+    for entry_data in new_entries_data:
+        entry_id = entry_data.get('id')
+        type_id = entry_data.get('type_id')  # Ожидаем type_id
+        display_name_id = entry_data.get('display_name_id')  # Ожидаем display_name_id
 
-            entry = PlanEntry(
+        # Валидация type_id
+        if type_id is not None:
+            type_ = PublicationType.query.get(type_id)
+            if not type_:
+                return jsonify({'error': f'Invalid type_id: {type_id}'}), 400
+
+        # Валидация display_name_id
+        if display_name_id is not None:
+            display_name = PublicationTypeDisplayName.query.get(display_name_id)
+            if not display_name or (type_id and display_name.publication_type_id != type_id):
+                return jsonify({'error': f'Invalid display_name_id: {display_name_id}'}), 400
+
+        if entry_id and entry_id in existing_entries:
+            entry = existing_entries[entry_id]
+            entry.title = entry_data.get('title', entry.title)
+            entry.type_id = type_id if type_id is not None else entry.type_id
+            entry.display_name_id = display_name_id if display_name_id is not None else entry.display_name_id
+            entry.publication_id = entry_data.get('publication_id', entry.publication_id)
+            entry.status = entry_data.get('status', entry.status)
+            entry.isPostApproval = entry_data.get('isPostApproval', entry.isPostApproval)
+        else:
+            new_entry = PlanEntry(
                 title=entry_data.get('title'),
-                type_id=type_.id if type_ else None,
+                type_id=type_id,
+                display_name_id=display_name_id,
                 publication_id=entry_data.get('publication_id'),
                 status=entry_data.get('status', 'planned'),
-                isPostApproval=False,
-                plan=plan
+                isPostApproval=entry_data.get('isPostApproval', False),
+                plan_id=plan.id
             )
-            if entry.publication_id:
-                publication = Publication.query.filter_by(id=entry.publication_id, user_id=current_user.id, status='published').first()
-                if not publication:
-                    db.session.rollback()
-                    return jsonify({'error': f'Публикация с ID {entry.publication_id} не найдена или не опубликована'}), 404
-            db.session.add(entry)
+            db.session.add(new_entry)
 
-    db.session.commit()
-    return jsonify({'message': 'План успешно обновлён', 'plan': plan.to_dict()}), 200
+    # Удаление записей, отсутствующих в новом списке
+    entry_ids = [entry_data.get('id') for entry_data in new_entries_data if entry_data.get('id')]
+    for entry_id, entry in existing_entries.items():
+        if entry_id not in entry_ids:
+            db.session.delete(entry)
+
+    try:
+        db.session.commit()
+        return jsonify({'plan': plan.to_dict()}), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Error updating plan {plan_id}: {str(e)}")
+        return jsonify({'error': 'Error updating plan'}), 500
 
 @bp.route('/plans/<int:plan_id>', methods=['DELETE'])
 @login_required
