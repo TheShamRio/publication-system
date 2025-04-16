@@ -324,7 +324,7 @@ function Dashboard() {
 	const [openDeleteTypeDialog, setOpenDeleteTypeDialog] = useState(false);
 	const [typeToDelete, setTypeToDelete] = useState(null);
 	const [planIdForTypeDelete, setPlanIdForTypeDelete] = useState(null);
-
+	const [displayNameIdToDelete, setDisplayNameIdToDelete] = useState(null);
 	const [selectedDisplayNameId, setSelectedDisplayNameId] = useState('');
 	const [editSelectedDisplayNameId, setEditSelectedDisplayNameId] = useState('');
 
@@ -546,7 +546,7 @@ function Dashboard() {
 
 	const fetchPlans = async (page = 1) => {
 		try {
-			const response = await axios.get('http://localhost:5000/api/plans', {
+			const response = await axios.get(`http://localhost:5000/api/plans`, {
 				withCredentials: true,
 				params: {
 					page,
@@ -593,11 +593,11 @@ function Dashboard() {
 	};
 
 	// Изменение количества записей для типа
-	const handlePlanEntryCountChange = (planId, type, count) => {
+	const handlePlanEntryCountChange = (planId, type, display_name_id, count) => {
 		setTempPlan((prevTempPlan) => {
 			if (prevTempPlan.id !== planId) return prevTempPlan;
 			const updatedGroupedEntries = prevTempPlan.groupedEntries.map((group) => {
-				if (group.type === type) {
+				if (group.type === type && group.display_name_id === display_name_id) {
 					const currentEntries = group.entries;
 					const currentCount = currentEntries.length;
 					let updatedEntries = [...currentEntries];
@@ -626,9 +626,10 @@ function Dashboard() {
 	};
 
 	// Удаление всех записей определённого типа
-	const handleDeletePlanEntryByType = (planId, type) => {
+	const handleDeletePlanEntryByType = (planId, type, display_name_id) => {
 		setPlanIdForTypeDelete(planId);
 		setTypeToDelete(type);
+		setDisplayNameIdToDelete(display_name_id);
 		setOpenDeleteTypeDialog(true);
 	};
 
@@ -638,7 +639,7 @@ function Dashboard() {
 		setTempPlan((prevTempPlan) => {
 			if (prevTempPlan.id !== planIdForTypeDelete) return prevTempPlan;
 			const updatedGroupedEntries = prevTempPlan.groupedEntries.map((group) => {
-				if (group.type === typeToDelete) {
+				if (group.type === typeToDelete && group.display_name_id === displayNameIdToDelete) {
 					return { ...group, isDeleted: true };
 				}
 				return group;
@@ -651,11 +652,11 @@ function Dashboard() {
 		setTypeToDelete(null);
 	};
 
-	const handleRestoreType = (planId, type) => {
+	const handleRestoreType = (planId, type, display_name_id) => {
 		setTempPlan((prevTempPlan) => {
 			if (prevTempPlan.id !== planId) return prevTempPlan;
 			const updatedGroupedEntries = prevTempPlan.groupedEntries.map((group) => {
-				if (group.type === type) {
+				if (group.type === type && group.display_name_id === display_name_id) {
 					return { ...group, isDeleted: false };
 				}
 				return group;
@@ -1467,71 +1468,40 @@ function Dashboard() {
 			)
 		);
 	};
-	const handleSavePlan = async () => {
-		if (!tempPlan || !tempPlan.id) {
-			console.error('tempPlan отсутствует или не имеет id');
-			alert('Ошибка: План не выбран или недействителен.');
-			return;
-		}
-
+	const handleSavePlan = async (plan) => {
 		try {
-			const entriesToSave = tempPlan.groupedEntries
-				.filter(group => !group.isDeleted)
-				.flatMap(group => {
-					if (!group || !group.entries) {
-						console.warn('Группа или её entries отсутствуют:', group);
-						return [];
-					}
-
-					return group.entries
-						.filter(entry => !entry.isDeleted)
-						.map(entry => {
-							if (!entry) {
-								console.warn('Запись отсутствует:', entry);
-								return null;
-							}
-
-							return {
-								id: entry.id || null,
-								title: entry.title || '',
-								type_id: entry.type?.id || entry.type_id || null,
-								display_name_id: entry.display_name_id || null,
-								status: entry.status || 'planned',
-								publication_id: entry.publication_id || null,
-								isPostApproval: entry.isPostApproval || false,
-							};
-						})
-						.filter(entry => entry !== null);
-				});
-
-			if (entriesToSave.length === 0) {
-				console.warn('Нет записей для сохранения');
-				alert('Ошибка: Нет активных записей для сохранения. Добавьте типы в план.');
-				return;
-			}
-
-			console.log('Entries to save:', entriesToSave);
-
-			const response = await axios.put(`/api/plans/${tempPlan.id}/entries`, {
-				entries: entriesToSave,
+			await refreshCsrfToken();
+			const updatedPlan = {
+				year: tempPlan.year,
+				fillType: tempPlan.fillType,
+				entries: tempPlan.groupedEntries
+					.filter(group => !group.isDeleted)
+					.flatMap(group =>
+						group.entries.map(entry => ({
+							id: typeof entry.id === 'string' && entry.id.startsWith('temp') ? null : entry.id,
+							title: entry.title,
+							type_id: entry.type_id,
+							display_name_id: group.display_name_id,
+							status: entry.status,
+							publication_id: entry.publication_id,
+							isPostApproval: entry.isPostApproval || false,
+						}))
+					),
+			};
+			const response = await axios.put(`http://localhost:5000/api/plans/${plan.id}`, updatedPlan, {
+				withCredentials: true,
+				headers: { 'X-CSRFToken': csrfToken },
 			});
-
-			setPlans(prevPlans =>
-				prevPlans.map(plan =>
-					plan.id === tempPlan.id
-						? { ...plan, groupedEntries: groupEntriesByType(response.data.entries) }
-						: plan
-				)
-			);
-
+			setPlans(plans.map(p => (p.id === plan.id ? { ...response.data.plan, isSaved: true } : p)));
+			setEditingPlanId(null);
 			setTempPlan(null);
-		} catch (error) {
-			console.error('Ошибка при сохранении плана:', error);
-			if (error.response?.status === 404) {
-				alert('Ошибка: План не найден на сервере или эндпоинт недоступен.');
-			} else {
-				alert('Ошибка при сохранении плана. Пожалуйста, попробуйте снова.');
-			}
+			setExpandedPlanId(null);
+			setSuccess('План успешно сохранен!');
+			setOpenSuccess(true);
+		} catch (err) {
+			console.error('Ошибка при сохранении плана:', err);
+			setError('Произошла ошибка при сохранении плана. Попробуйте позже.');
+			setOpenError(true);
 		}
 	};
 	const handleSubmitPlanForReview = async (plan) => {
@@ -2697,7 +2667,7 @@ function Dashboard() {
 																					<TableCell>
 																						{group.isDeleted ? (
 																							<IconButton
-																								onClick={() => handleRestoreType(plan.id, group.type)}
+																								onClick={() => handleRestoreType(plan.id, group.type, group.display_name_id)}
 																								sx={{ color: '#34C759' }}
 																								title="Восстановить тип"
 																								disabled={plan.status === 'pending'}
@@ -2706,7 +2676,7 @@ function Dashboard() {
 																							</IconButton>
 																						) : (
 																							<IconButton
-																								onClick={() => handleDeletePlanEntryByType(plan.id, group.type)}
+																								onClick={() => handleDeletePlanEntryByType(plan.id, group.type, group.display_name_id)}
 																								sx={{ color: '#FF3B30' }}
 																								title="Удалить тип"
 																								disabled={plan.status === 'pending'}
