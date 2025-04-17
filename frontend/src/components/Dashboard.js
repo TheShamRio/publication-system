@@ -468,7 +468,10 @@ function Dashboard() {
 					page,
 					per_page: publicationsPerPage,
 					search: search || undefined,
-					display_name_id: displayNameId || undefined,
+					display_name_id:
+						displayNameId && displayNameId !== 'all'
+							? parseInt(displayNameId, 10)
+							: undefined,
 					status: validStatuses.includes(status) ? status : 'all',
 				},
 			});
@@ -1597,23 +1600,32 @@ function Dashboard() {
 
 	// Функция для открытия диалога привязки публикации
 	const handleOpenLinkDialog = (planId, entry) => {
+		console.log("Выбранная запись плана:", entry);
+		console.log("display_name_id записи:", entry.display_name_id);
 		// Собираем все publication_id из записей всех планов, чтобы исключить уже привязанные публикации
 		const linkedPublicationIds = new Set(
 			plans.flatMap(plan =>
 				plan.entries
 					.filter(entry => entry.publication_id) // Фильтруем записи с publication_id
 					.map(entry => entry.publication_id)
+
 			)
 		);
+
+		console.log("Всего опубликованных публикаций:", publishedPublications.length);
+		console.log("Пример публикации:", publishedPublications[0]);
 
 		// Фильтруем публикации:
 		// 1. Оставляем только те, которые соответствуют типу записи плана (entry.type)
 		// 2. Исключаем уже привязанные публикации
 		const availablePublications = publishedPublications.filter(
 			pub =>
-				pub.type === entry.type && // Фильтрация по типу записи плана
-				!linkedPublicationIds.has(pub.id) // Исключаем уже привязанные
+				Number(pub.display_name_id) === Number(entry.display_name_id) &&
+				!linkedPublicationIds.has(pub.id)
+
 		);
+		console.log("Все опубликованные display_name_id:", publishedPublications.map(p => p.display_name_id));
+		console.log("Подходящие публикации:", availablePublications);
 
 		// Устанавливаем выбранную запись плана и открываем диалог
 		setSelectedPlanEntry({ planId, ...entry });
@@ -1701,10 +1713,10 @@ function Dashboard() {
 
 			const updatedFilteredPublications = publishedPublications.filter(
 				(pub) =>
-					pub.type === entryGroup.type &&
+					Number(pub.display_name_id) === Number(entryGroup.display_name_id) &&
 					!linkedPublicationIds.has(pub.id) &&
 					(pub.title.toLowerCase().includes(linkSearchQuery.toLowerCase()) ||
-						pub.authors.toLowerCase().includes(linkSearchQuery.toLowerCase()))
+					pub.authors.toLowerCase().includes(linkSearchQuery.toLowerCase()))
 			);
 			setFilteredPublishedPublications(updatedFilteredPublications);
 

@@ -383,6 +383,7 @@ def get_public_publications():
         'title': pub.title,
         'authors': pub.authors,
         'year': pub.year,
+        'display_name_id': pub.display_name_id,
         'type': {
             'id': pub.type.id,
             'name': pub.type.name,
@@ -454,12 +455,12 @@ def get_publications():
         'title': pub.title,
         'authors': pub.authors,
         'year': pub.year,
+        'display_name_id': pub.display_name_id,
         'type': {
             'id': pub.type.id,
             'name': pub.type.name,
             'display_name': pub.display_name.display_name if pub.display_name else None,
-            'display_names': [dn.display_name for dn in pub.type.display_names],
-            'display_name_id': pub.display_name_id
+            'display_names': [dn.display_name for dn in pub.type.display_names]
         } if pub.type else None,
         'status': pub.status,
         'file_url': pub.file_url,
