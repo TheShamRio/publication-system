@@ -383,7 +383,6 @@ def get_public_publications():
         'title': pub.title,
         'authors': pub.authors,
         'year': pub.year,
-        'display_name_id': pub.display_name_id,
         'type': {
             'id': pub.type.id,
             'name': pub.type.name,
