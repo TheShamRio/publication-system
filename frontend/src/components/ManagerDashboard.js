@@ -805,16 +805,14 @@ function ManagerDashboard() {
 
 	const handleCloseHistoryDrawer = () => setOpenHistoryDrawer(false);
 
-	const UserStatisticsChart = ({ user, publicationTypes }) => {
-		// Шаг 1: Безопасная проверка данных
+	const UserStatisticsChart = ({ user }) => {
+		// Защита от пустых данных
 		const safeUser = user || { plan: {}, actual: {}, username: '' };
 		const plan = safeUser.plan || {};
 		const actual = safeUser.actual || {};
 
-		// Шаг 2: Проверка наличия плана
+		// Проверяем, есть ли план
 		const hasPlan = Object.values(plan).some((value) => value > 0);
-
-		// Если плана нет, показываем сообщение
 		if (!hasPlan) {
 			return (
 				<Box sx={{ mt: 2, textAlign: 'center' }}>
@@ -825,50 +823,24 @@ function ManagerDashboard() {
 			);
 		}
 
-		// Шаг 3: Определяем типы, присутствующие в плане
-		const planTypes = Object.keys(plan).filter((type) => plan[type] > 0);
-
-		// Шаг 4: Формируем данные для диаграммы и текстового блока
-		const data = [
-			{
-				name: 'Итог',
-				План: planTypes.reduce((sum, type) => sum + (plan[type] || 0), 0),
-				Факт: planTypes.reduce((sum, type) => sum + (actual[type] || 0), 0),
-				planDetails: planTypes.reduce((obj, type) => {
-					const typeRecord = publicationTypes.find((t) => t.name === type);
-					obj[typeRecord ? typeRecord.display_name : type] = plan[type] || 0;
-					return obj;
-				}, {}),
-				actualDetails: planTypes.reduce((obj, type) => {
-					const typeRecord = publicationTypes.find((t) => t.name === type);
-					obj[typeRecord ? typeRecord.display_name : type] = actual[type] || 0;
-					return obj;
-				}, {}),
-			},
-		];
-
-		// Шаг 5: Вычисляем прогресс выполнения плана
-		const totalPlan = data[0].План;
-		const totalActual = data[0].Факт;
+		// Подсчитываем общие итоги
+		const totalPlan = Object.values(plan).reduce((sum, value) => sum + value, 0);
+		const totalActual = Object.values(actual).reduce((sum, value) => sum + value, 0);
 		const progress = totalPlan > 0 ? (totalActual / totalPlan) * 100 : 0;
 
+		// Данные для графика
+		const data = [{
+			name: 'Итог',
+			План: totalPlan,
+			Факт: totalActual
+		}];
+
 		return (
-			<Box
-				sx={{
-					mt: 2,
-					height: 200,
-					display: 'flex',
-					gap: 2,
-					alignItems: 'center',
-				}}
-			>
-				{/* Контейнер для диаграммы */}
+			<Box sx={{ mt: 2, height: 200, display: 'flex', gap: 2, alignItems: 'center' }}>
+				{/* График */}
 				<Box sx={{ width: '40%', height: '100%', minWidth: 200 }}>
 					<ResponsiveContainer width="100%" height="100%">
-						<BarChart
-							data={data}
-							margin={{ top: 10, right: 30, left: 0, bottom: 0 }}
-						>
+						<BarChart data={data} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
 							<CartesianGrid strokeDasharray="3 3" />
 							<XAxis dataKey="name" />
 							<YAxis allowDecimals={false} />
@@ -879,11 +851,9 @@ function ManagerDashboard() {
 					</ResponsiveContainer>
 				</Box>
 
-				{/* Контейнер для прогресса и текстового блока */}
+				{/* Детали */}
 				<Box sx={{ width: '60%' }}>
-					<Typography sx={{ mb: 1, color: '#1D1D1F' }}>
-						Прогресс выполнения:
-					</Typography>
+					<Typography sx={{ mb: 1, color: '#1D1D1F' }}>Прогресс выполнения:</Typography>
 					<Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
 						<LinearProgress
 							variant="determinate"
@@ -898,45 +868,22 @@ function ManagerDashboard() {
 								},
 							}}
 						/>
-						<Typography
-							variant="body2"
-							sx={{
-								minWidth: '50px',
-								textAlign: 'right',
-								color: progress > 100 ? '#FF9500' : '#1D1D1F',
-							}}
-						>
+						<Typography variant="body2" sx={{ minWidth: '50px', textAlign: 'right', color: progress > 100 ? '#FF9500' : '#1D1D1F' }}>
 							{Math.round(progress)}%
 						</Typography>
 					</Box>
-
-					<Box
-						sx={{
-							display: 'flex',
-							gap: 4,
-							backgroundColor: '#FFFFFF',
-							border: '1px solid #D1D1D6',
-							borderRadius: '8px',
-							p: 2,
-							boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-							transform: 'translateY(-2px)',
-						}}
-					>
+					<Box sx={{ display: 'flex', gap: 4, backgroundColor: '#FFFFFF', border: '1px solid #D1D1D6', borderRadius: '8px', p: 2 }}>
 						<Box sx={{ flex: 1 }}>
-							<Typography sx={{ fontWeight: 600, color: '#0071E3', mb: 1 }}>
-								План
-							</Typography>
-							{Object.entries(data[0].planDetails).map(([key, value]) => (
+							<Typography sx={{ fontWeight: 600, color: '#0071E3', mb: 1 }}>План</Typography>
+							{Object.entries(plan).map(([key, value]) => (
 								<Typography key={key} sx={{ color: '#1D1D1F' }}>
 									{key}: {value}
 								</Typography>
 							))}
 						</Box>
 						<Box sx={{ flex: 1 }}>
-							<Typography sx={{ fontWeight: 600, color: '#00A94F', mb: 1 }}>
-								Факт
-							</Typography>
-							{Object.entries(data[0].actualDetails).map(([key, value]) => (
+							<Typography sx={{ fontWeight: 600, color: '#00A94F', mb: 1 }}>Факт</Typography>
+							{Object.entries(actual).map(([key, value]) => (
 								<Typography key={key} sx={{ color: '#1D1D1F' }}>
 									{key}: {value}
 								</Typography>
@@ -947,6 +894,7 @@ function ManagerDashboard() {
 			</Box>
 		);
 	};
+
 
 
 	return (
@@ -1054,7 +1002,7 @@ function ManagerDashboard() {
 															<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>
-																{publicationTypes.find(t => t.name === pub.type.name)?.display_name || 'Неизвестный тип'}
+																{pub.type?.display_name || pub.type?.display_names?.[0] || 'Неизвестный тип'}
 															</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>
 																<StatusChip status={pub.status} role={user.role} />

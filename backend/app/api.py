@@ -672,57 +672,38 @@ def get_publication_action_history():
 @admin_or_manager_required
 def get_statistics():
     year = request.args.get('year', type=int, default=datetime.utcnow().year)
-    logger.debug(f"Получен GET запрос для /admin_api/admin/statistics?year={year}")
+    users = User.query.filter_by(role='user').all()
+    result = []
 
-    try:
-        publication_types = PublicationType.query.all()
-        type_names = [t.name for t in publication_types]
+    for user in users:
+        # Инициализируем словари для плана и фактических данных
+        plan_data = defaultdict(int)
+        actual_data = defaultdict(int)
 
-        users = User.query.filter_by(role='user').all()
-        result = []
+        # Получаем утверждённый план пользователя за указанный год
+        plan = Plan.query.filter_by(user_id=user.id, year=year, status='approved').first()
 
-        for user in users:
-            plan_data = {type_name: 0 for type_name in type_names}
-            actual_data = {type_name: 0 for type_name in type_names}
+        if plan:
+            # Собираем данные плана по display_name
+            for entry in plan.entries:
+                display_name = entry.display_name.display_name if entry.display_name else "Не указано"
+                plan_data[display_name] += 1
 
-            plan = Plan.query.filter_by(user_id=user.id, year=year, status='approved').first()
+                # Проверяем, есть ли связанная публикация
+                if entry.publication and entry.publication.status == 'published':
+                    actual_data[display_name] += 1
 
-            if plan:
-                for entry in plan.entries:
-                    if entry.type and entry.type.name in plan_data:
-                        plan_data[entry.type.name] += 1
+        # Формируем результат для пользователя
+        result.append({
+            'user_id': user.id,
+            'full_name': user.full_name or user.username,
+            'username': user.username,
+            'plan': dict(plan_data),  # Преобразуем в обычный словарь
+            'actual': dict(actual_data)
+        })
 
-                entries_with_publications = (
-                    db.session.query(PlanEntry.type_id, func.count().label('count'))
-                    .join(Publication, PlanEntry.publication_id == Publication.id)
-                    .join(PublicationType, PlanEntry.type_id == PublicationType.id)
-                    .filter(
-                        PlanEntry.plan_id == plan.id,
-                        Publication.status == 'published'
-                    )
-                    .group_by(PlanEntry.type_id)
-                    .all()
-                )
+    return jsonify(result), 200
 
-                for type_id, count in entries_with_publications:
-                    type_record = PublicationType.query.get(type_id)
-                    if type_record and type_record.name in actual_data:
-                        actual_data[type_record.name] = count
-
-            result.append({
-                'user_id': user.id,
-                'full_name': user.full_name or user.username,
-                'username': user.username,
-                'plan': plan_data,
-                'actual': actual_data
-            })
-
-        logger.debug(f"Возвращаем статистику: {result}")
-        return jsonify(result), 200
-
-    except Exception as e:
-        logger.error(f"Ошибка в get_statistics: {str(e)}")
-        return jsonify({"error": "Ошибка сервера при получении статистики. Попробуйте позже."}), 500
 
 @bp.route('/admin/publication-types', methods=['GET'])
 @admin_or_manager_required
