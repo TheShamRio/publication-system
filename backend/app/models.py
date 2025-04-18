@@ -86,10 +86,10 @@ class Publication(db.Model):
     title = db.Column(db.String(200), nullable=False)
     authors = db.Column(db.String(200), nullable=False)
     year = db.Column(db.Integer, nullable=False)
-    type_id = db.Column(db.Integer, db.ForeignKey('publication_type.id'), nullable=False)
+    type_id = db.Column(db.Integer, db.ForeignKey('publication_type.id', ondelete='SET NULL'), nullable=True)
     type = db.relationship('PublicationType', backref='publications')
     # Новое поле для связи с конкретным русским названием
-    display_name_id = db.Column(db.Integer, db.ForeignKey('publication_type_display_name.id'), nullable=True)
+    display_name_id = db.Column(db.Integer, db.ForeignKey('publication_type_display_name.id', ondelete='SET NULL'), nullable=True)
     display_name = db.relationship('PublicationTypeDisplayName', backref='publications', lazy=True)
     status = db.Column(db.String(50), nullable=False, default='draft')
     file_url = db.Column(db.String(200), nullable=True)
@@ -223,8 +223,8 @@ class PlanEntry(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     plan_id = db.Column(db.Integer, db.ForeignKey('plan.id'), nullable=False)
     title = db.Column(db.String(200), nullable=True)
-    type_id = db.Column(db.Integer, db.ForeignKey('publication_type.id'), nullable=True)
-    display_name_id = db.Column(db.Integer, db.ForeignKey('publication_type_display_name.id'), nullable=True)  # Новое поле
+    type_id = db.Column(db.Integer, db.ForeignKey('publication_type.id', ondelete='SET NULL'), nullable=True)
+    display_name_id = db.Column(db.Integer, db.ForeignKey('publication_type_display_name.id', ondelete='SET NULL'), nullable=True)
     type = db.relationship('PublicationType', backref='plan_entries')
     display_name = db.relationship('PublicationTypeDisplayName', backref='plan_entries', lazy=True)  # Связь
     publication_id = db.Column(db.Integer, db.ForeignKey('publication.id'), nullable=True)

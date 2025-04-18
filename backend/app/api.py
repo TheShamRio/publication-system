@@ -2,6 +2,7 @@ from flask import Blueprint, jsonify, request, send_file
 from werkzeug.utils import secure_filename
 from flask_login import login_required, current_user
 from flask import current_app
+from collections import defaultdict
 from app.extensions import db
 from app.models import Publication, User, Plan, PlanEntry, PlanActionHistory, PublicationActionHistory, PublicationType, PublicationTypeDisplayName
 import os
@@ -671,39 +672,56 @@ def get_publication_action_history():
 @bp.route('/admin/statistics', methods=['GET'])
 @admin_or_manager_required
 def get_statistics():
+    from collections import defaultdict
+
     year = request.args.get('year', type=int, default=datetime.utcnow().year)
     users = User.query.filter_by(role='user').all()
     result = []
 
-    for user in users:
-        # Инициализируем словари для плана и фактических данных
-        plan_data = defaultdict(int)
-        actual_data = defaultdict(int)
+    try:
+        for user in users:
+            plan_data = defaultdict(int)
+            actual_data = defaultdict(int)
 
-        # Получаем утверждённый план пользователя за указанный год
-        plan = Plan.query.filter_by(user_id=user.id, year=year, status='approved').first()
+            plan = Plan.query.filter_by(user_id=user.id, year=year, status='approved').first()
 
-        if plan:
-            # Собираем данные плана по display_name
-            for entry in plan.entries:
-                display_name = entry.display_name.display_name if entry.display_name else "Не указано"
-                plan_data[display_name] += 1
+            if plan:
+                for entry in plan.entries:
+                    # Получаем display_name (русское или fallback)
+                    if entry.display_name:
+                        display_name = entry.display_name.display_name
+                    elif entry.type and entry.type.display_names.count() > 0:
+                        display_name = entry.type.display_names.first().display_name
+                    elif entry.type:
+                        display_name = entry.type.name
+                    else:
+                        display_name = 'Не указано'
 
-                # Проверяем, есть ли связанная публикация
-                if entry.publication and entry.publication.status == 'published':
-                    actual_data[display_name] += 1
+                    # Считаем план
+                    plan_data[display_name] += 1
 
-        # Формируем результат для пользователя
-        result.append({
-            'user_id': user.id,
-            'full_name': user.full_name or user.username,
-            'username': user.username,
-            'plan': dict(plan_data),  # Преобразуем в обычный словарь
-            'actual': dict(actual_data)
-        })
+                    # Считаем факт, если есть опубликованная публикация
+                    if entry.publication and entry.publication.status == 'published':
+                        actual_data[display_name] += 1
 
-    return jsonify(result), 200
+                # Гарантируем, что в actual будут все ключи из plan
+                for key in plan_data:
+                    if key not in actual_data:
+                        actual_data[key] = 0
 
+            result.append({
+                'user_id': user.id,
+                'full_name': user.full_name or user.username,
+                'username': user.username,
+                'plan': dict(plan_data),
+                'actual': dict(actual_data)
+            })
+
+        return jsonify(result), 200
+
+    except Exception as e:
+        current_app.logger.exception("Ошибка при генерации статистики:")
+        return jsonify({"error": "Ошибка при обработке статистики."}), 500
 
 @bp.route('/admin/publication-types', methods=['GET'])
 @admin_or_manager_required
@@ -789,8 +807,15 @@ def update_publication_type(type_id):
 @admin_or_manager_required
 def delete_publication_type(type_id):
     type_ = PublicationType.query.get_or_404(type_id)
-    if Publication.query.filter_by(type_id=type_id).first() or PlanEntry.query.filter_by(type_id=type_id).first():
-        return jsonify({'error': 'Cannot delete type that is in use'}), 400
+    logger.info(f"Attempting to delete publication type {type_id}")
+    publications = Publication.query.filter_by(type_id=type_id).count()
+    plan_entries = PlanEntry.query.filter_by(type_id=type_id).count()
+    if publications or plan_entries:
+        logger.warning(f"Cannot delete type {type_id}: used in {publications} publications and {plan_entries} plan entries")
+        return jsonify({
+            'error': f'Cannot delete type: it is used in {publications} publication(s) and {plan_entries} plan entry(ies).'
+        }), 400
     db.session.delete(type_)
     db.session.commit()
+    logger.info(f"Publication type {type_id} deleted successfully")
     return jsonify({'message': 'Type deleted'}), 200

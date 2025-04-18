@@ -836,19 +836,21 @@ function ManagerDashboard() {
 		}];
 
 		return (
-			<Box sx={{ mt: 2, height: 200, display: 'flex', gap: 2, alignItems: 'center' }}>
+			<Box sx={{ mt: 2, display: 'flex', gap: 2 }}>
 				{/* График */}
-				<Box sx={{ width: '40%', height: '100%', minWidth: 200 }}>
-					<ResponsiveContainer width="100%" height="100%">
-						<BarChart data={data} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
-							<CartesianGrid strokeDasharray="3 3" />
-							<XAxis dataKey="name" />
-							<YAxis allowDecimals={false} />
-							<Legend />
-							<Bar dataKey="План" fill="#0071E3" barSize={20} />
-							<Bar dataKey="Факт" fill="#00A94F" barSize={20} />
-						</BarChart>
-					</ResponsiveContainer>
+				<Box sx={{ width: '40%', minWidth: 200, display: 'flex', alignItems: 'center' }}>
+					<Box sx={{ width: '100%', height: 200 }}>
+						<ResponsiveContainer width="100%" height="100%">
+							<BarChart data={data} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+								<CartesianGrid strokeDasharray="3 3" />
+								<XAxis dataKey="name" />
+								<YAxis allowDecimals={false} />
+								<Legend />
+								<Bar dataKey="План" fill="#0071E3" barSize={20} />
+								<Bar dataKey="Факт" fill="#00A94F" barSize={20} />
+							</BarChart>
+						</ResponsiveContainer>
+					</Box>
 				</Box>
 
 				{/* Детали */}
@@ -1192,29 +1194,41 @@ function ManagerDashboard() {
 											value={selectedYear}
 											onChange={(e) => {
 												const value = e.target.value;
+												// Ограничиваем ввод до 4 символов
+												if (value.length > 4) return;
+
 												if (value === '') {
 													setSelectedYear('');
 													return;
 												}
+
 												const numValue = parseInt(value, 10);
-												if (!isNaN(numValue) && numValue >= 1900 && numValue <= new Date().getFullYear() + 1) {
+												if (!isNaN(numValue)) {
 													setSelectedYear(numValue);
 												}
 											}}
 											onBlur={() => {
-												if (!selectedYear || selectedYear < 1900 || selectedYear > new Date().getFullYear() + 1) {
+												// Восстанавливаем текущий год, если пусто или меньше 1900
+												if (!selectedYear || selectedYear < 1900) {
 													setSelectedYear(new Date().getFullYear());
 												}
 											}}
 											InputProps={{
-												inputProps: { min: 1900, max: new Date().getFullYear() + 1 },
+												inputProps: {
+													min: 1900,
+													maxLength: 4 // <-- не работает в type="number", но оставим для совместимости
+												},
 											}}
 											sx={{
 												width: 200,
 												'& .MuiOutlinedInput-root': {
 													height: '40px',
 													padding: '0 14px',
-													'& input': { padding: '12px 0' },
+													'& input': {
+														padding: '12px 0',
+														// Ограничим визуально 4 цифрами (на случай type="text")
+														MozAppearance: 'textfield',
+													},
 												},
 											}}
 										/>
@@ -1546,11 +1560,11 @@ function ManagerDashboard() {
 									{plans.length > 0 ? (
 										plans.map((plan) => {
 											const entriesByType = plan.entries.reduce((acc, entry) => {
-												const typeName = entry.type?.name || 'unknown';
-												if (!acc[typeName]) {
-													acc[typeName] = { count: 0, type: entry.type };
+												const displayName = entry.display_name || 'Не указано';
+												if (!acc[displayName]) {
+													acc[displayName] = { count: 0, display_name: displayName };
 												}
-												acc[typeName].count += 1;
+												acc[displayName].count += 1;
 												return acc;
 											}, {});
 											const groupedEntries = Object.values(entriesByType);
@@ -1590,7 +1604,7 @@ function ManagerDashboard() {
 																			<TableRow key={index}>
 																				<TableCell sx={{ padding: '16px' }}>{group.count}</TableCell>
 																				<TableCell sx={{ color: '#1D1D1F' }}>
-																					{group.type?.display_name || 'Не указано'}
+																					{group.display_name}
 																				</TableCell>
 																			</TableRow>
 																		))
@@ -2134,3 +2148,7 @@ function ManagerDashboard() {
 }
 
 export default ManagerDashboard;
+
+
+
+
