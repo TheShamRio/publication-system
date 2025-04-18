@@ -209,6 +209,8 @@ function ManagerDashboard() {
 	const [openEditTypeDialog, setOpenEditTypeDialog] = useState(false);
 	const [newTypeDisplayNames, setNewTypeDisplayNames] = useState(['']);
 	const [editTypeDisplayNames, setEditTypeDisplayNames] = useState(['']);
+	const [openDeleteTypeConfirmDialog, setOpenDeleteTypeConfirmDialog] = useState(false);
+	const [typeToDelete, setTypeToDelete] = useState(null); // Храним весь объект типа для сообщения
 
 
 	// Функция сортировки и фильтрации статистики
@@ -482,22 +484,73 @@ function ManagerDashboard() {
 			setOpenError(true);
 		}
 	};
-	const handleDeleteType = async (typeId) => {
-		if (!window.confirm('Вы уверены, что хотите удалить этот тип?')) return;
+
+
+	const handleConfirmDeleteType = async () => {
+		// Проверка, что есть тип для удаления
+		if (!typeToDelete) {
+			// Можно добавить логирование или сообщение об ошибке, если это происходит
+			console.error("Attempted to confirm delete without a type selected.");
+			return;
+		}
+
+		const typeIdToDelete = typeToDelete.id; // Получаем ID из сохраненного объекта типа
+		const typeNameToDelete = typeToDelete.name || 'выбранный тип'; // Получаем имя для сообщения
+
+		// Закрываем диалог подтверждения перед началом операции
+		setOpenDeleteTypeConfirmDialog(false);
+		// Очищаем состояние typeToDelete сразу после закрытия диалога
+		setTypeToDelete(null);
+
 		try {
-			await axios.delete(`http://localhost:5000/admin_api/admin/publication-types/${typeId}`, {
+			// Выполняем DELETE запрос к API
+			const response = await axios.delete(`http://localhost:5000/admin_api/admin/publication-types/${typeIdToDelete}`, {
 				withCredentials: true,
 				headers: { 'X-CSRFToken': csrfToken },
 			});
-			setPublicationTypes(publicationTypes.filter(t => t.id !== typeId));
-			setSuccess('Тип удален!');
+
+			// Если запрос успешен (статус 200 OK)
+			// Обновляем список типов, удаляя из него успешно удаленный тип
+			setPublicationTypes(publicationTypes.filter(t => t.id !== typeIdToDelete));
+			// Устанавливаем сообщение об успехе и делаем success alert видимым
+			setSuccess(response.data.message || `Тип "${typeNameToDelete}" успешно удалён!`);
 			setOpenSuccess(true);
+
 		} catch (err) {
-			setError(err.response?.data?.error || 'Не удалось удалить тип.');
+			// Если произошла ошибка при выполнении запроса
+			let errorMessage = `Не удалось удалить тип "${typeNameToDelete}".`;
+
+			if (err.response) {
+				// Если ошибка пришла от сервера с конкретным статусом
+				if (err.response.status === 400) {
+					// Если бэкенд вернул специфичную ошибку (например, тип используется)
+					errorMessage = err.response.data?.error || errorMessage + ' Тип используется в публикациях или планах.';
+				} else if (err.response.status === 404) {
+					// Если тип не найден (например, уже был удален)
+					errorMessage = `Тип "${typeNameToDelete}" не найден.`;
+				} else {
+					// Для других ошибок сервера
+					errorMessage = `${errorMessage} Ошибка сервера: ${err.response.status}`;
+				}
+			} else {
+				// Если произошла ошибка сети или сервер недоступен
+				errorMessage = `${errorMessage} Ошибка сети или сервер недоступен.`;
+			}
+
+			// Устанавливаем сообщение об ошибке и делаем error alert видимым
+			// Это произойдет уже после того, как диалог закрылся,
+			// что должно обеспечить правильное отображение Alert'а.
+			setError(errorMessage);
 			setOpenError(true);
+			console.error("Ошибка при удалении типа:", err); // Логируем ошибку для отладки
 		}
 	};
-
+	const handleDeleteType = (type) => { // *** Принимает ВЕСЬ ОБЪЕКТ типа ***
+		console.log("Attempting to delete type:", type); // Добавим лог для отладки
+		setTypeToDelete(type); // *** Сохраняем ВЕСЬ ОБЪЕКТ типа ***
+		setOpenDeleteTypeConfirmDialog(true); // Открываем диалог подтверждения
+		// !!! УДАЛИТЕ ОТСЮДА try...catch БЛОК С axios.delete !!!
+	};
 	// Загрузка типов при монтировании
 	useEffect(() => {
 		fetchPublicationTypes();
@@ -1516,28 +1569,7 @@ function ManagerDashboard() {
 													Создать
 												</AppleButton>
 											</Box>
-											<Collapse in={openError}>
-												{error && (
-													<Alert
-														severity="error"
-														sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#FFF1F0', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
-														onClose={() => setOpenError(false)}
-													>
-														{error}
-													</Alert>
-												)}
-											</Collapse>
-											<Collapse in={openSuccess}>
-												{success && (
-													<Alert
-														severity="success"
-														sx={{ mt: 2, borderRadius: '12px', backgroundColor: '#E7F8E7', color: '#1D1D1F', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)' }}
-														onClose={() => setOpenSuccess(false)}
-													>
-														{success}
-													</Alert>
-												)}
-											</Collapse>
+
 										</form>
 									</AppleCard>
 								</>
@@ -1850,14 +1882,13 @@ function ManagerDashboard() {
 											{publicationTypes.length > 0 ? (
 												publicationTypes.map((type) => (
 													<TableRow key={`type-${type.id}`}>
-														{/* Используем префикс для гарантии уникальности ключа */}
 														<TableCell>{type.name || 'Не указано'}</TableCell>
 														<TableCell>{renderDisplayNames(type.display_names)}</TableCell>
 														<TableCell>
 															<IconButton onClick={() => handleEditType(type)}>
 																<EditIcon />
 															</IconButton>
-															<IconButton onClick={() => handleDeleteType(type.id)}>
+															<IconButton onClick={() => handleDeleteType(type)}> {/* ПЕРЕДАЕМ ВЕСЬ ОБЪЕКТ type */}
 																<DeleteIcon />
 															</IconButton>
 														</TableCell>
@@ -2074,6 +2105,46 @@ function ManagerDashboard() {
 
 
 
+				{/* Диалог подтверждения удаления типа */}
+				<Dialog
+					open={openDeleteTypeConfirmDialog}
+					onClose={() => {
+						setOpenDeleteTypeConfirmDialog(false);
+						setTypeToDelete(null);
+					}}
+					PaperProps={{
+						sx: { borderRadius: '16px', p: 2, backgroundColor: '#FFFFFF', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' },
+					}}
+				>
+					<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600 }}>
+						Подтвердите удаление типа
+					</DialogTitle>
+					<DialogContent>
+						<Typography sx={{ color: '#1D1D1F' }}>
+							Вы уверены, что хотите удалить тип "{typeToDelete?.name || 'выбранный тип'}"? Это действие нельзя отменить.
+							<br />
+							Удаление возможно только если тип не используется ни в одной публикации и ни в одной записи плана.
+						</Typography>
+					</DialogContent>
+					<DialogActions sx={{ p: 2 }}>
+						<CancelButton onClick={() => {
+							setOpenDeleteTypeConfirmDialog(false);
+							setTypeToDelete(null);
+						}}>
+							Отмена
+						</CancelButton>
+						<AppleButton
+							sx={{ backgroundColor: '#FF3B30', '&:hover': { backgroundColor: '#E6392E' } }}
+							onClick={handleConfirmDeleteType} // Вызываем новую функцию подтверждения
+						>
+							Удалить
+						</AppleButton>
+					</DialogActions>
+				</Dialog>
+
+
+
+
 
 				{/* Диалог возврата плана на доработку */}
 				<Dialog
@@ -2139,6 +2210,30 @@ function ManagerDashboard() {
 							onClose={() => setOpenSuccess(false)}
 						>
 							{success}
+						</Alert>
+					)}
+				</Collapse>
+				<Collapse in={openError}>
+					{error && ( // Добавляем проверку на наличие текста ошибки
+						<Alert
+							severity="error"
+							sx={{
+								position: 'fixed',
+								// Можно задать фиксированное расстояние или рассчитывать от верхнего уведомления
+								top: openSuccess ? 76 : 16, // Например, на 60px ниже, если успех виден, иначе 16px
+								left: '50%',
+								transform: 'translateX(-50%)',
+								width: 'fit-content',
+								maxWidth: '90%',
+								borderRadius: '12px',
+								backgroundColor: '#FFF1F0', // Цвет фона для ошибки
+								color: '#1D1D1F',          // Цвет текста
+								boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+								zIndex: 1500,              // Убедимся, что поверх всего остального
+							}}
+							onClose={() => setOpenError(false)}
+						>
+							{error}
 						</Alert>
 					)}
 				</Collapse>

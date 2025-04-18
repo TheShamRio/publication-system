@@ -806,16 +806,33 @@ def update_publication_type(type_id):
 @bp.route('/admin/publication-types/<int:type_id>', methods=['DELETE'])
 @admin_or_manager_required
 def delete_publication_type(type_id):
+    """
+    Удаляет тип публикации, если он не используется в публикациях или планах.
+    Возвращает ошибку, если тип связан с данными.
+    """
+    # Шаг 1: Находим тип публикации или возвращаем 404
     type_ = PublicationType.query.get_or_404(type_id)
-    logger.info(f"Attempting to delete publication type {type_id}")
-    publications = Publication.query.filter_by(type_id=type_id).count()
-    plan_entries = PlanEntry.query.filter_by(type_id=type_id).count()
-    if publications or plan_entries:
-        logger.warning(f"Cannot delete type {type_id}: used in {publications} publications and {plan_entries} plan entries")
-        return jsonify({
-            'error': f'Cannot delete type: it is used in {publications} publication(s) and {plan_entries} plan entry(ies).'
-        }), 400
+    logger.info(f"Пользователь {current_user.id} пытается удалить тип публикации {type_id}")
+
+    # Шаг 2: Проверяем использование типа в публикациях
+    publications_count = Publication.query.filter_by(type_id=type_id).count()
+
+    # Шаг 3: Проверяем использование типа в планах
+    plan_entries_count = PlanEntry.query.filter_by(type_id=type_id).count()
+
+    # Шаг 4: Формируем сообщение об ошибке, если тип используется
+    if publications_count or plan_entries_count:
+        error_parts = []
+        if publications_count:
+            error_parts.append(f"{publications_count} публикация(й)")
+        if plan_entries_count:
+            error_parts.append(f"{plan_entries_count} запись(ей) плана")
+        error_message = f"Невозможно удалить тип: он используется в {', и '.join(error_parts)}."
+        logger.warning(f"Ошибка удаления типа {type_id}: {error_message}")
+        return jsonify({'error': error_message}), 400
+
+    # Шаг 5: Удаляем тип, если он не используется
     db.session.delete(type_)
     db.session.commit()
-    logger.info(f"Publication type {type_id} deleted successfully")
-    return jsonify({'message': 'Type deleted'}), 200
+    logger.info(f"Тип публикации {type_id} успешно удалён")
+    return jsonify({'message': 'Тип успешно удалён'}), 200
