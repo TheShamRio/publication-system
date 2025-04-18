@@ -971,7 +971,7 @@ function Dashboard() {
 		setEditTitle(publication?.title || '');
 		setEditAuthors(publication?.authors || '');
 		setEditYear(publication?.year || '');
-		setEditSelectedDisplayNameId(publication?.type?.display_name_id || '');
+		setEditSelectedDisplayNameId(publication?.display_name_id); // Пусть будет null или undefined
 		setEditFile(null);
 		setOpenEditDialog(true);
 	};
@@ -1716,7 +1716,7 @@ function Dashboard() {
 					Number(pub.display_name_id) === Number(entryGroup.display_name_id) &&
 					!linkedPublicationIds.has(pub.id) &&
 					(pub.title.toLowerCase().includes(linkSearchQuery.toLowerCase()) ||
-					pub.authors.toLowerCase().includes(linkSearchQuery.toLowerCase()))
+						pub.authors.toLowerCase().includes(linkSearchQuery.toLowerCase()))
 			);
 			setFilteredPublishedPublications(updatedFilteredPublications);
 
@@ -2669,7 +2669,7 @@ function Dashboard() {
 																							sx={{ width: '70px' }}
 																							type="number"
 																							value={group.planCount}
-																							onChange={(e) => handlePlanEntryCountChange(plan.id, group.type, parseInt(e.target.value) || 1)}
+																							onChange={(e) => handlePlanEntryCountChange(plan.id, group.type, group.display_name_id, parseInt(e.target.value) || 1)}
 																							fullWidth
 																							variant="outlined"
 																							disabled={group.isDeleted}
