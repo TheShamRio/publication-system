@@ -957,7 +957,7 @@ function Dashboard() {
 		setEditTitle(publication?.title || '');
 		setEditAuthors(publication?.authors || '');
 		setEditYear(publication?.year || '');
-		setEditSelectedDisplayNameId(publication?.type?.display_name_id || '');
+		setEditSelectedDisplayNameId(publication?.display_name_id); // Пусть будет null или undefined
 		setEditFile(null);
 		setOpenEditDialog(true);
 	};
