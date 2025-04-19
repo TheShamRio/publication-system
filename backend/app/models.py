@@ -84,7 +84,6 @@ class PublicationTypeDisplayName(db.Model):
 class Publication(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     title = db.Column(db.String(200), nullable=False)
-    authors = db.Column(db.String(200), nullable=False)
     year = db.Column(db.Integer, nullable=False)
     type_id = db.Column(db.Integer, db.ForeignKey('publication_type.id', ondelete='SET NULL'), nullable=True)
     type = db.relationship('PublicationType', backref='publications')
@@ -102,6 +101,7 @@ class Publication(db.Model):
 
     user = db.relationship('User', back_populates='publications', lazy=True)
     plan_entries = db.relationship('PlanEntry', back_populates='publication', lazy=True)
+    authors = db.relationship('PublicationAuthor', backref='publication', lazy='select', cascade='all, delete-orphan')
 
     @property
     def status_ru(self):
@@ -115,14 +115,14 @@ class Publication(db.Model):
         return {
             'id': self.id,
             'title': self.title,
-            'authors': self.authors,
+            # --- Заменить старое поле 'authors' на новое ---
+            'authors': [author.to_dict() for author in self.authors], # Получаем список словарей авторов
+            # --- Конец замены ---
             'year': self.year,
             'type': {
                 'id': self.type.id,
                 'name': self.type.name,
-                # Возвращаем конкретное русское название, если есть
                 'display_name': self.display_name.display_name if self.display_name else None,
-                # Для совместимости возвращаем список всех display_names
                 'display_names': [dn.display_name for dn in self.type.display_names] if self.type else []
             } if self.type else None,
             'status': self.status,
@@ -135,8 +135,27 @@ class Publication(db.Model):
             'user': {
                 'full_name': self.user.full_name if self.user else None
             } if self.user else None,
-            # Добавляем display_name_id для API
             'display_name_id': self.display_name_id
+        }
+
+
+class PublicationAuthor(db.Model):
+    __tablename__ = 'publication_author' # Явно указываем имя таблицы
+
+    id = db.Column(db.Integer, primary_key=True)
+    publication_id = db.Column(db.Integer, db.ForeignKey('publication.id', ondelete='CASCADE'), nullable=False, index=True) # Добавлен index
+    name = db.Column(db.String(200), nullable=False) # Имя автора (Хасаншин Ш.Р.)
+    is_employee = db.Column(db.Boolean, default=False, nullable=False) # Является ли сотрудником
+    # Связь обратно к Publication (опционально, но полезно для некоторых запросов)
+    # publication = db.relationship('Publication', back_populates='authors') # Закомментировано, т.к. back_populates определен в Publication
+
+    # Не будем добавлять created_at/updated_at сюда, чтобы не усложнять
+
+    def to_dict(self):
+        return {
+            'id': self.id, # Может пригодиться на фронте для удаления
+            'name': self.name,
+            'is_employee': self.is_employee
         }
 
 class PlanActionHistory(db.Model):

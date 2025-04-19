@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Line } from 'react-chartjs-2';
-import { Snackbar, Slide } from '@mui/material';
+import { Snackbar, Slide, Tooltip as MuiTooltip } from '@mui/material';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler } from 'chart.js';
 import {
 	Container,
@@ -28,6 +28,8 @@ import {
 	Tabs,
 	Tab,
 	Accordion,
+	Checkbox,
+	FormControlLabel,
 	AccordionSummary,
 	AccordionDetails,
 	Pagination,
@@ -50,6 +52,7 @@ import LinkIcon from '@mui/icons-material/Link'; // Добавляем икон�
 import UnlinkIcon from '@mui/icons-material/LinkOff';
 import AttachFileIcon from '@mui/icons-material/AttachFile';
 import DownloadIcon from '@mui/icons-material/Download';
+import PersonIcon from '@mui/icons-material/Person';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
@@ -253,7 +256,6 @@ function Dashboard() {
 	const [analytics, setAnalytics] = useState([]);
 	const [uploadType, setUploadType] = useState('file');
 	const [title, setTitle] = useState('');
-	const [authors, setAuthors] = useState('');
 	const [year, setYear] = useState('');
 	const [type, setType] = useState('article');
 	const [file, setFile] = useState(null);
@@ -267,7 +269,6 @@ function Dashboard() {
 	const [openEditDialog, setOpenEditDialog] = useState(false);
 	const [editPublication, setEditPublication] = useState(null);
 	const [editTitle, setEditTitle] = useState('');
-	const [editAuthors, setEditAuthors] = useState('');
 	const [editYear, setEditYear] = useState('');
 	const [editType, setEditType] = useState('article');
 	const [editFile, setEditFile] = useState(null);
@@ -309,6 +310,8 @@ function Dashboard() {
 	const chartRef = useRef(null);
 	const [unlinkDialogOpen, setUnlinkDialogOpen] = useState(false);
 	const [selectedGroup, setSelectedGroup] = useState(null);
+	const [newAuthors, setNewAuthors] = useState([{ id: Date.now(), name: '', is_employee: false }]);
+	const [editAuthorsList, setEditAuthorsList] = useState([{ id: Date.now(), name: '', is_employee: false }]);
 
 	const [loadingPublicationTypes, setLoadingPublicationTypes] = useState(true); // Новое состояние для типов
 	const [initializing, setInitializing] = useState(true);
@@ -446,11 +449,10 @@ function Dashboard() {
 	};
 
 	const fetchData = async (page = 1, search = '', displayNameId = '', status = 'all') => {
-		setIsTableLoading(true);
 		try {
 			const pubResponse = await axios.get('http://localhost:5000/api/publications', {
 				withCredentials: true,
-				params: {
+				params: { /* ... ваши параметры ... */
 					page,
 					per_page: publicationsPerPage,
 					search: search || undefined,
@@ -469,13 +471,21 @@ function Dashboard() {
 			const calculatedTotalPages = Math.ceil(total / publicationsPerPage);
 			setTotalPages(calculatedTotalPages);
 
+			// --- ИНКРЕМЕНТИРУЕМ КЛЮЧ ПЕРЕХОДА ПОСЛЕ УСПЕШНОЙ УСТАНОВКИ ДАННЫХ ---
+			// Это вызовет анимацию Fade на TableBody
+			setPublicationsTransitionKey(prev => prev + 1);
+			// --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
+
+			// ... остальная логика fetchData (проверка страниц, обновление аналитики) ...
 			if (page > calculatedTotalPages && calculatedTotalPages > 0) {
-				setCurrentPage(1);
-				fetchData(1, search, displayNameId, status);
-				return;
+				console.warn(`Запрошенная страница ${page} больше максимальной ${calculatedTotalPages}. Отображается последняя доступная страница.`);
+				if (page > 1) {
+					await fetchData(calculatedTotalPages, search, displayNameId, status);
+					return;
+				}
 			}
 
-			// Загружаем оба набора публикаций
 			const publishedPubs = await fetchAllPublications();
 			const allPubs = await fetchAllStatusesPublications();
 			updateAnalytics(publishedPubs, allPubs);
@@ -487,7 +497,7 @@ function Dashboard() {
 			setError('Произошла ошибка сервера. Попробуйте позже.');
 			setOpenError(true);
 		} finally {
-			setIsTableLoading(false);
+			setIsTableLoading(false); // Выключаем индикатор загрузки
 		}
 	};
 
@@ -809,6 +819,24 @@ function Dashboard() {
 		}
 	};
 
+	const handleAddAuthor = () => {
+		setNewAuthors([...newAuthors, { id: Date.now(), name: '', is_employee: false }]);
+	};
+
+	const handleAuthorChange = (index, field, value) => {
+		const updatedAuthors = [...newAuthors];
+		updatedAuthors[index][field] = value;
+		setNewAuthors(updatedAuthors);
+	};
+
+	const handleRemoveAuthor = (index) => {
+		if (newAuthors.length <= 1) return; // Не позволяем удалить последнего автора
+		const updatedAuthors = newAuthors.filter((_, i) => i !== index);
+		setNewAuthors(updatedAuthors);
+	};
+
+
+
 	const handleChangePasswordCancel = () => {
 		setOpenChangePasswordDialog(false);
 		setCurrentPassword('');
@@ -834,12 +862,18 @@ function Dashboard() {
 			setError('Пожалуйста, выберите файл для загрузки.');
 			setOpenError(true);
 			return;
+
+
+
 		}
-		if (!title.trim() || !authors.trim() || !year || !selectedDisplayNameId) {
-			setError('Пожалуйста, заполните все обязательные поля (название, авторы, год, тип).');
+		const validAuthors = newAuthors.filter(a => a.name.trim());
+		if (!title.trim() || validAuthors.length === 0 || !year || !selectedDisplayNameId) {
+			setError('Пожалуйста, заполните название, год, тип и добавьте хотя бы одного автора.');
 			setOpenError(true);
 			return;
 		}
+
+
 
 		const fileExtension = file.name.split('.').pop().toLowerCase();
 		if (!['pdf', 'docx'].includes(fileExtension)) {
@@ -864,7 +898,8 @@ function Dashboard() {
 		const formData = new FormData();
 		formData.append('file', file);
 		formData.append('title', title.trim());
-		formData.append('authors', authors.trim());
+		const authorsToSend = validAuthors.map(({ id, ...rest }) => rest);
+		formData.append('authors_json', JSON.stringify(authorsToSend));
 		formData.append('year', parseInt(year, 10));
 		formData.append('type_id', selectedType.id); // Передаём type_id
 		formData.append('display_name_id', selectedDisplayNameId); // Передаём display_name_id
@@ -872,9 +907,9 @@ function Dashboard() {
 		try {
 			await refreshCsrfToken();
 			console.log('Uploading file with data:', {
-				title,
-				authors,
-				year,
+				title: title.trim(),
+				authors: authorsToSend, // Логируем подготовленных авторов
+				year: parseInt(year, 10),
 				type_id: selectedType.id,
 				display_name_id: selectedDisplayNameId
 			});
@@ -889,7 +924,7 @@ function Dashboard() {
 			setOpenSuccess(true);
 			setError('');
 			setTitle('');
-			setAuthors('');
+			setNewAuthors([{ id: Date.now(), name: '', is_employee: false }]);
 			setYear('');
 			setSelectedDisplayNameId(''); // Сбрасываем выбор
 			setFile(null);
@@ -953,9 +988,23 @@ function Dashboard() {
 
 	const handleEditClick = (publication) => {
 		console.log('Editing publication:', publication?.id || 'unknown');
-		setEditPublication(publication || {});
-		setEditTitle(publication?.title || '');
-		setEditAuthors(publication?.authors || '');
+		if (!publication) return; // Добавим проверку
+
+		setEditPublication(publication);
+		setEditTitle(publication.title || '');
+
+		// --- Обновление инициализации авторов ---
+		if (publication.authors && publication.authors.length > 0) {
+			// Добавляем временный ID для каждого автора
+			setEditAuthorsList(publication.authors.map((author, index) => ({
+				...author,
+				id: author.id || `temp-${Date.now()}-${index}` // Используем существующий ID или генерируем временный
+			})));
+		} else {
+			// Если авторов нет, начинаем с одного пустого поля
+			setEditAuthorsList([{ id: Date.now(), name: '', is_employee: false }]);
+		}
+
 		setEditYear(publication?.year || '');
 		setEditSelectedDisplayNameId(publication?.display_name_id); // Пусть будет null или undefined
 		setEditFile(null);
@@ -968,8 +1017,9 @@ function Dashboard() {
 			setOpenError(true);
 			return;
 		}
-		if (!editTitle.trim() || !editAuthors.trim() || !editYear || !editSelectedDisplayNameId) {
-			setError('Название, авторы, год и тип обязательны для заполнения.');
+		const validAuthors = editAuthorsList.filter(a => a.name && a.name.trim()); // Проверяем непустое имя
+		if (!editTitle.trim() || validAuthors.length === 0 || !editYear || !editSelectedDisplayNameId) {
+			setError('Название, год, тип и хотя бы один автор с именем обязательны.');
 			setOpenError(true);
 			return;
 		}
@@ -981,63 +1031,55 @@ function Dashboard() {
 			return;
 		}
 
+		const authorsToSend = validAuthors.map(({ id, ...rest }) => rest);
+
 		let data;
 		let headers = { 'X-CSRFToken': csrfToken };
+		const apiUrl = `http://localhost:5000/api/publications/${editPublication.id}`;
 
 		if (editFile) {
 			data = new FormData();
 			data.append('file', editFile);
 			data.append('title', editTitle.trim());
-			data.append('authors', editAuthors.trim());
+			data.append('authors_json', JSON.stringify(authorsToSend));
 			data.append('year', parseInt(editYear, 10));
 			data.append('type_id', selectedType.id);
 			data.append('display_name_id', editSelectedDisplayNameId);
-			data.append('status', 'draft');
 		} else {
 			data = {
 				title: editTitle.trim(),
-				authors: editAuthors.trim(),
+				authors: authorsToSend,
 				year: parseInt(editYear, 10),
 				type_id: selectedType.id,
 				display_name_id: editSelectedDisplayNameId,
-				status: 'draft',
 			};
 			headers['Content-Type'] = 'application/json';
 		}
 
 		try {
 			await refreshCsrfToken();
-			console.log('Updating publication with:', {
-				title: editTitle,
-				authors: editAuthors,
-				year: editYear,
-				type_id: selectedType.id,
-				display_name_id: editSelectedDisplayNameId,
-				status: 'draft',
-				file: editFile ? editFile.name : 'No new file',
-			});
-			const response = await axios.put(
-				`http://localhost:5000/api/publications/${editPublication.id}`,
-				data,
-				{
-					withCredentials: true,
-					headers,
-				}
-			);
+			console.log('Обновление публикации данными:', data instanceof FormData ? Object.fromEntries(data.entries()) : data);
+
+			// 1. Дожидаемся завершения PUT запроса
+			const response = await axios.put(apiUrl, data, { withCredentials: true, headers });
+
+			// 2. СРАЗУ после успешного запроса:
 			setSuccess('Публикация успешно отредактирована!');
 			setOpenSuccess(true);
-			setError('');
-			await fetchData();
-			setOpenEditDialog(false);
+			setOpenEditDialog(false); // <-- Закрываем диалог НЕМЕДЛЕННО
+			setError(''); // Сброс ошибки на всякий случай
+
+			// 3. ПОСЛЕ закрытия диалога, обновляем данные таблицы в фоне
+			await fetchData(currentPage, searchQuery, filterDisplayNameId, filterStatus);
+
 		} catch (err) {
+			// Обработка ошибки - диалог НЕ закрываем, чтобы пользователь видел ошибку и мог исправить
 			console.error('Ошибка редактирования публикации:', err.response?.data || err);
-			if (err.response) {
-				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`);
-			} else {
-				setError('Ошибка сети. Проверьте подключение и сервер.');
-			}
+			if (err.response) { setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`); }
+			else { setError('Ошибка сети.'); }
 			setOpenError(true);
 			setSuccess('');
+			// setOpenEditDialog(false); // <-- НЕ закрываем диалог при ошибке
 		}
 	};
 
@@ -1066,12 +1108,100 @@ function Dashboard() {
 		}
 	};
 
+
+	const handleEditAddAuthor = () => {
+		setEditAuthorsList([...editAuthorsList, { id: Date.now(), name: '', is_employee: false }]);
+	};
+
+	const handleEditAuthorChange = (index, field, value) => {
+		const updatedAuthors = [...editAuthorsList];
+		updatedAuthors[index][field] = value;
+		setEditAuthorsList(updatedAuthors);
+	};
+
+	const handleEditRemoveAuthor = (index) => {
+		if (editAuthorsList.length <= 1) return;
+		const updatedAuthors = editAuthorsList.filter((_, i) => i !== index);
+		setEditAuthorsList(updatedAuthors);
+	};
+
 	const handleSaveAndSubmitForReview = async (e) => {
 		e.preventDefault();
-		await handleEditSubmit(e);
-		if (!error) {
-			await handleSubmitForReview(editPublication.id);
-			setOpenEditDialog(false);
+		let savedSuccessfully = false; // Флаг для отслеживания успеха сохранения
+
+		// --- Блок сохранения (аналогично handleEditSubmit, но без fetchData в конце) ---
+		if (!editPublication || !editAuthorsList.filter(a => a.name?.trim()).length || /* ...другие проверки... */ !editSelectedDisplayNameId || !editTitle.trim() || !editYear) {
+			setError('Проверьте все поля перед сохранением и отправкой.');
+			setOpenError(true);
+			return;
+		}
+		// ... подготовка данных (formData или data) ...
+		const authorsToSend = editAuthorsList.filter(a => a.name?.trim()).map(({ id, ...rest }) => rest);
+		let data;
+		let headers = { 'X-CSRFToken': csrfToken };
+		const apiUrl = `http://localhost:5000/api/publications/${editPublication.id}`;
+		if (editFile) {
+			data = new FormData();
+			data.append('file', editFile);
+			data.append('title', editTitle.trim());
+			data.append('authors_json', JSON.stringify(authorsToSend));
+			data.append('year', parseInt(editYear, 10));
+			data.append('type_id', publicationTypes.find(t => t.display_name_id === editSelectedDisplayNameId)?.id);
+			data.append('display_name_id', editSelectedDisplayNameId);
+		} else {
+			data = {
+				title: editTitle.trim(),
+				authors: authorsToSend,
+				year: parseInt(editYear, 10),
+				type_id: publicationTypes.find(t => t.display_name_id === editSelectedDisplayNameId)?.id,
+				display_name_id: editSelectedDisplayNameId,
+			};
+			headers['Content-Type'] = 'application/json';
+		}
+
+
+		try {
+			await refreshCsrfToken();
+			await axios.put(apiUrl, data, { withCredentials: true, headers });
+			savedSuccessfully = true; // Сохранение успешно
+		} catch (err) {
+			console.error('Ошибка при сохранении перед отправкой:', err.response?.data || err);
+			if (err.response) { setError(`Ошибка сохранения: ${err.response.status} - ${err.response.data?.error || 'Проверьте поля.'}`); }
+			else { setError('Ошибка сети при сохранении.'); }
+			setOpenError(true);
+			return; // Прерываем, если сохранить не удалось
+		}
+
+		// --- Блок отправки на проверку (только если сохранение было успешным) ---
+		if (savedSuccessfully && editPublication?.id) { // Убедимся что есть ID
+			try {
+				await refreshCsrfToken();
+				await axios.post(
+					`http://localhost:5000/api/publications/${editPublication.id}/submit-for-review`,
+					{},
+					{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
+				);
+
+				// Успех отправки на проверку
+				setSuccess('Публикация сохранена и отправлена на проверку!');
+				setOpenSuccess(true);
+				setOpenEditDialog(false); // <-- Закрываем диалог ПОСЛЕ УСПЕХА ОБЕИХ операций
+				setError('');
+
+				// Обновляем данные ПОСЛЕ закрытия
+				await fetchData(currentPage, searchQuery, filterDisplayNameId, filterStatus);
+
+			} catch (submitErr) {
+				// Ошибка отправки на проверку (сохранение УЖЕ прошло)
+				console.error('Ошибка отправки на проверку:', submitErr.response?.data || submitErr);
+				let submitErrMsg = 'Публикация сохранена, но не удалось отправить на проверку.';
+				if (submitErr.response) { submitErrMsg += ` Ошибка: ${submitErr.response.status} - ${submitErr.response.data?.error || ''}`; }
+				else { submitErrMsg += ' Ошибка сети.'; }
+				setError(submitErrMsg.trim());
+				setOpenError(true);
+				setSuccess(''); // Убираем сообщение об успешном сохранении, т.к. вся операция не завершилась как надо
+				// Диалог НЕ закрываем при ошибке отправки, но УЖЕ СОХРАНЕНО
+			}
 		}
 	};
 
@@ -1079,9 +1209,8 @@ function Dashboard() {
 		setOpenEditDialog(false);
 		setEditPublication(null);
 		setEditTitle('');
-		setEditAuthors('');
+		setEditAuthorsList([{ id: Date.now(), name: '', is_employee: false }]);
 		setEditYear('');
-		setEditType(publicationTypes.length > 0 ? publicationTypes[0].name : '');
 		setEditFile(null);
 	};
 
@@ -1102,22 +1231,28 @@ function Dashboard() {
 				withCredentials: true,
 				headers: { 'X-CSRFToken': csrfToken },
 			});
+
+			// 2. СРАЗУ после успеха:
 			setSuccess('Публикация успешно удалена!');
 			setOpenSuccess(true);
+			setOpenDeleteDialog(false); // <-- Закрываем диалог НЕМЕДЛЕННО
 			setError('');
-			await fetchData();
+			setPublicationToDelete(null); // Сброс удаляемого объекта
+
+			// 3. ПОСЛЕ закрытия диалога обновляем данные (чтобы удалить строку из таблицы)
+			// Если удаляется последняя запись на странице > 1, нужно перейти на пред. страницу
+			const pageToFetch = (publications.length === 1 && currentPage > 1) ? currentPage - 1 : currentPage;
+			await fetchData(pageToFetch, searchQuery, filterDisplayNameId, filterStatus);
+
 		} catch (err) {
+			// Ошибка - диалог НЕ закрываем, показываем ошибку
 			console.error('Ошибка удаления публикации:', err.response?.data || err);
-			if (err.response) {
-				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте права доступа.'}`);
-			} else {
-				setError('Ошибка сети. Проверьте подключение и сервер.');
-			}
+			if (err.response) { setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте права доступа.'}`); }
+			else { setError('Ошибка сети. Проверьте подключение и сервер.'); }
 			setOpenError(true);
 			setSuccess('');
+			// setOpenDeleteDialog(false); // <-- НЕ закрываем диалог при ошибке
 		}
-		setOpenDeleteDialog(false);
-		setPublicationToDelete(null);
 	};
 
 	const handleDeleteCancel = () => {
@@ -1203,32 +1338,28 @@ function Dashboard() {
 			const response = await axios.post(
 				`http://localhost:5000/api/publications/${publicationToAttach.id}/attach-file`,
 				formData,
-				{
-					withCredentials: true,
-					headers: {
-						'Content-Type': 'multipart/form-data',
-						'X-CSRFToken': csrfToken,
-					},
-				}
+				{ /* ... config ... */ }
 			);
-			setSuccess('Файл успешно прикреплен!'); // <- используется setSuccess
-			setOpenSuccess(true); // <- используется setOpenSuccess
-			setError(''); // <- сброс общей ошибки
-			setOpenError(false);
-			await fetchData();
-			setOpenAttachFileDialog(false); // Закрываем диалог после успеха
+
+			// 2. СРАЗУ после успеха:
+			setSuccess('Файл успешно прикреплен!');
+			setOpenSuccess(true);
+			setOpenAttachFileDialog(false); // <-- Закрываем диалог НЕМЕДЛЕННО
+			setError('');
+			setAttachFile(null); // Сброс состояния файла
+
+			// 3. ПОСЛЕ закрытия диалога обновляем данные
+			await fetchData(currentPage, searchQuery, filterDisplayNameId, filterStatus);
+
 		} catch (err) {
+			// Обработка ошибки - диалог НЕ закрываем
 			console.error('Ошибка прикрепления файла:', err.response?.data || err);
 			let errorMessage = 'Произошла ошибка при прикреплении файла.';
-			if (err.response) {
-				errorMessage = `Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте файл и права доступа.'}`;
-			} else {
-				errorMessage = 'Ошибка сети. Проверьте подключение и сервер.';
-			}
-			setError(errorMessage); // <- используется setError
-			setOpenError(true); // <- используется setOpenError
-			setSuccess(''); // <- сброс общего успеха
-			setOpenSuccess(false);
+			if (err.response) { /* ... */ } else { /* ... */ }
+			setError(errorMessage);
+			setOpenError(true);
+			setSuccess('');
+			// setOpenAttachFileDialog(false); // <-- НЕ закрываем диалог при ошибке
 		}
 	};
 
@@ -2008,14 +2139,61 @@ function Dashboard() {
 													margin="normal"
 													variant="outlined"
 												/>
-												<AppleTextField
-													fullWidth
-													label="Авторы"
-													value={authors}
-													onChange={(e) => setAuthors(e.target.value)}
-													margin="normal"
-													variant="outlined"
-												/>
+												<Box sx={{ mt: 2, border: '1px solid #D1D1D6', borderRadius: '12px', p: 2, backgroundColor: '#FFFFFF' }}>
+													<Typography variant="subtitle1" sx={{ mb: 1, color: '#1D1D1F' }}>Авторы</Typography>
+													{newAuthors.map((author, index) => (
+														<Grid container spacing={1} key={author.id} sx={{ mb: 1, alignItems: 'center' }}>
+															<Grid item xs={true}>
+																<AppleTextField
+																	fullWidth
+																	required
+																	label={`Автор ${index + 1}`}
+																	value={author.name}
+																	onChange={(e) => handleAuthorChange(index, 'name', e.target.value)}
+																	size="small"
+																	variant="outlined"
+																/>
+															</Grid>
+															<Grid item xs="auto"> {/* Изменено с xs={1} */}
+																<MuiTooltip title={author.is_employee ? "Автор сотрудник" : "Автор не сотрудник"} arrow>
+																	<IconButton
+																		onClick={() => handleAuthorChange(index, 'is_employee', !author.is_employee)}
+																		size="small"
+																		sx={{
+																			color: author.is_employee ? '#0071E3' : 'grey.500',
+																			'&:hover': {
+																				backgroundColor: author.is_employee ? 'rgba(0, 113, 227, 0.1)' : 'rgba(0, 0, 0, 0.04)',
+																			}
+																		}}
+																		aria-label={author.is_employee ? "Пометить как не сотрудника" : "Пометить как сотрудника"}
+																	>
+																		<PersonIcon fontSize="small" />
+																	</IconButton>
+																</MuiTooltip>
+															</Grid>
+															<Grid item xs="auto"> {/* Изменено с xs={1} */}
+																{newAuthors.length > 1 && (
+																	<IconButton
+																		onClick={() => handleRemoveAuthor(index)}
+																		size="small"
+																		sx={{ color: '#FF3B30' }}
+																		aria-label="Удалить автора"
+																	>
+																		<DeleteIcon fontSize="small" />
+																	</IconButton>
+																)}
+															</Grid>
+														</Grid>
+													))}
+													<Button
+														startIcon={<AddIcon />}
+														onClick={handleAddAuthor}
+														size="small"
+														sx={{ mt: 1, textTransform: 'none', color: '#0071E3' }}
+													>
+														Добавить автора
+													</Button>
+												</Box>
 												<AppleTextField
 													fullWidth
 													label="Год"
@@ -2178,150 +2356,120 @@ function Dashboard() {
 												</TableCell>
 											</TableRow>
 										</TableHead>
-										<TableBody>
-											{isTableLoading ? (
-												<TableRow>
-													<TableCell colSpan={7} sx={{ textAlign: 'center', color: '#6E6E73' }}>
-														Загрузка...
-													</TableCell>
-												</TableRow>
-											) : currentPublications.length > 0 ? (
-												currentPublications.map((pub) => (
-													<TableRow
-														key={pub.id}
-														sx={{
-															'&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' },
-														}}
-													>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.id}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															<Typography
-																sx={{
-																	color: '#0071E3',
-																	textDecoration: 'underline',
-																	cursor: 'pointer',
-																	'&:hover': { textDecoration: 'none' },
-																}}
-																onClick={() => navigate(`/publication/${pub.id}`)}
-															>
-																{pub.title}
-															</Typography>
-														</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															{pub.type?.display_name || 'Неизвестный тип'}
-														</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>
-															<StatusChip
-																status={
-																	pub.status === 'returned_for_revision' && pub.returned_for_revision
-																		? 'returned_for_revision'
-																		: pub.status
-																}
-																role={user.role}
-															/>
-														</TableCell>
-														<TableCell sx={{ textAlign: 'center' }}>
-															<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
-																{(pub.status === 'draft' || pub.status === 'returned_for_revision') && (
-																	<>
-																		<IconButton
-																			aria-label="edit"
-																			onClick={() => handleEditClick(pub)}
-																			sx={{
-																				color: '#0071E3',
-																				borderRadius: '8px',
-																				'&:hover': {
-																					color: '#FFFFFF',
-																					backgroundColor: '#0071E3',
-																					boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																				},
-																			}}
-																		>
-																			<EditIcon />
-																		</IconButton>
-																		<IconButton
-																			aria-label="delete"
-																			onClick={() => handleDeleteClick(pub)}
-																			sx={{
-																				color: '#0071E3',
-																				borderRadius: '8px',
-																				'&:hover': {
-																					color: '#FFFFFF',
-																					backgroundColor: '#0071E3',
-																					boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																				},
-																			}}
-																		>
-																			<DeleteIcon />
-																		</IconButton>
-																		{pub.file_url && (
+										{/* Fade оборачивает TableBody, ключ управляет анимацией */}
+										<Fade in={true} timeout={300} key={publicationsTransitionKey}>
+											{/* Убираем isTableLoading ИЗНУТРИ TableBody */}
+											<TableBody>
+												{/* Всегда рендерим строки на основе currentPublications */}
+												{currentPublications.length > 0 ? (
+													currentPublications.map((pub) => (
+														<TableRow
+															key={pub.id} // React ключ
+															sx={{
+																'&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' },
+															}}
+														>
+															{/* ... ваши TableCell с данными публикации ... */}
+															<TableCell sx={{ color: '#1D1D1F' }}>{pub.id}</TableCell>
+															<TableCell sx={{ color: '#1D1D1F' }}>
+																<Typography
+																	sx={{
+																		color: '#0071E3',
+																		textDecoration: 'underline',
+																		cursor: 'pointer',
+																		'&:hover': { textDecoration: 'none' },
+																	}}
+																	onClick={() => navigate(`/publication/${pub.id}`)}
+																>
+																	{pub.title}
+																</Typography>
+															</TableCell>
+															<TableCell sx={{ color: '#1D1D1F' }}> {pub.authors && pub.authors.length > 0
+																? pub.authors.map(author => author.name).join(', ')
+																: 'Нет авторов'}</TableCell>
+															<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
+															<TableCell sx={{ color: '#1D1D1F' }}>
+																{pub.type?.display_name || 'Неизвестный тип'}
+															</TableCell>
+															<TableCell sx={{ color: '#1D1D1F' }}>
+																<StatusChip
+																	status={
+																		pub.status === 'returned_for_revision' && pub.returned_for_revision
+																			? 'returned_for_revision'
+																			: pub.status
+																	}
+																	role={user.role}
+																/>
+															</TableCell>
+															<TableCell sx={{ textAlign: 'center' }}>
+																{/* ... ваши IconButton ... */}
+																<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
+																	{(pub.status === 'draft' || pub.status === 'returned_for_revision') && (
+																		<>
 																			<IconButton
-																				aria-label="submit-for-review"
-																				onClick={() => handleSubmitForReview(pub.id)}
-																				sx={{
-																					color: 'green',
-																					borderRadius: '8px',
-																					'&:hover': {
-																						color: '#FFFFFF',
-																						backgroundColor: 'green',
-																						boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																					},
-																				}}
+																				aria-label="edit"
+																				onClick={() => handleEditClick(pub)}
+																				sx={{ /* styles */ color: '#0071E3', '&:hover': { color: '#FFFFFF', backgroundColor: '#0071E3' } }}
 																			>
-																				<PublishIcon />
+																				<EditIcon />
 																			</IconButton>
-																		)}
-																	</>
-																)}
-																{pub.file_url && pub.status !== 'draft' && pub.status !== 'returned_for_revision' && (
-																	<IconButton
-																		aria-label="download"
-																		onClick={() => handleDownloadClick(pub)}
-																		sx={{
-																			color: '#0071E3',
-																			borderRadius: '8px',
-																			'&:hover': {
-																				color: '#FFFFFF',
-																				backgroundColor: '#0071E3',
-																				boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																			},
-																		}}
-																	>
-																		<DownloadIcon />
-																	</IconButton>
-																)}
-																{!pub.file_url && (pub.status === 'draft' || pub.status === 'returned_for_revision') && (
-																	<IconButton
-																		aria-label="attach"
-																		onClick={() => handleAttachFileClick(pub)}
-																		sx={{
-																			color: '#0071E3',
-																			borderRadius: '8px',
-																			'&:hover': {
-																				color: '#FFFFFF',
-																				backgroundColor: '#0071E3',
-																				boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)',
-																			},
-																		}}
-																	>
-																		<AttachFileIcon />
-																	</IconButton>
-																)}
-															</Box>
-														</TableCell>
-													</TableRow>
-												))
-											) : (
-												<TableRow>
-													<TableCell colSpan={7} sx={{ textAlign: 'center', color: '#6E6E73' }}>
-														Нет доступных публикаций на этой странице.
-													</TableCell>
-												</TableRow>
-											)}
-										</TableBody>
+																			<IconButton
+																				aria-label="delete"
+																				onClick={() => handleDeleteClick(pub)}
+																				sx={{ /* styles */ color: '#0071E3', '&:hover': { color: '#FFFFFF', backgroundColor: '#0071E3' } }}
+																			>
+																				<DeleteIcon />
+																			</IconButton>
+																			{pub.file_url && (
+																				<IconButton
+																					aria-label="submit-for-review"
+																					onClick={() => handleSubmitForReview(pub.id)}
+																					sx={{ /* styles */ color: 'green', '&:hover': { color: '#FFFFFF', backgroundColor: 'green' } }}
+																				>
+																					<PublishIcon />
+																				</IconButton>
+																			)}
+																		</>
+																	)}
+																	{pub.file_url && pub.status !== 'draft' && pub.status !== 'returned_for_revision' && (
+																		<IconButton
+																			aria-label="download"
+																			onClick={() => handleDownloadClick(pub)}
+																			sx={{ /* styles */ color: '#0071E3', '&:hover': { color: '#FFFFFF', backgroundColor: '#0071E3' } }}
+																		>
+																			<DownloadIcon />
+																		</IconButton>
+																	)}
+																	{!pub.file_url && (pub.status === 'draft' || pub.status === 'returned_for_revision') && (
+																		<IconButton
+																			aria-label="attach"
+																			onClick={() => handleAttachFileClick(pub)}
+																			sx={{ /* styles */ color: '#0071E3', '&:hover': { color: '#FFFFFF', backgroundColor: '#0071E3' } }}
+																		>
+																			<AttachFileIcon />
+																		</IconButton>
+																	)}
+																</Box>
+															</TableCell>
+														</TableRow>
+													))
+												) : (
+													// Показываем "Нет публикаций" только если НЕ идет загрузка
+													!isTableLoading && (
+														<TableRow>
+															<TableCell colSpan={7} sx={{ textAlign: 'center', color: '#6E6E73' }}>
+																Нет доступных публикаций {searchQuery || filterDisplayNameId !== 'all' || filterStatus !== 'all' ? ' по заданным фильтрам' : ''}.
+															</TableCell>
+														</TableRow>
+													)
+												)}
+											</TableBody>
+										</Fade>
 									</AppleTable>
+
+									{/* ВНЕШНИЙ ИНДИКАТОР ЗАГРУЗКИ (под таблицей) */}
+
+
 									<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
 										<Pagination
 											count={totalPages}
@@ -2923,14 +3071,62 @@ function Dashboard() {
 							margin="normal"
 							variant="outlined"
 						/>
-						<AppleTextField
-							fullWidth
-							label="Авторы"
-							value={editAuthors}
-							onChange={(e) => setEditAuthors(e.target.value)}
-							margin="normal"
-							variant="outlined"
-						/>
+						<Box sx={{ mt: 2, border: '1px solid #D1D1D6', borderRadius: '12px', p: 2, backgroundColor: '#FFFFFF' }}>
+							<Typography variant="subtitle1" sx={{ mb: 1, color: '#1D1D1F' }}>Авторы</Typography>
+							{editAuthorsList.map((author, index) => (
+								<Grid container spacing={1} key={author.id} sx={{ mb: 1, alignItems: 'center' }}>
+									{/* --- ИМЯ АВТОРА (ЗАНИМАЕТ ОСТАВШЕЕСЯ МЕСТО) --- */}
+									<Grid item xs={true}> {/* Изменено с xs={8} */}
+										<AppleTextField
+											fullWidth
+											required
+											label={`Автор ${index + 1}`}
+											value={author.name}
+											onChange={(e) => handleEditAuthorChange(index, 'name', e.target.value)}
+											size="small"
+											variant="outlined"
+										/>
+									</Grid>
+									<Grid item xs="auto"> {/* Изменено с xs={1} */}
+										<MuiTooltip title={author.is_employee ? "Автор сотрудник" : "Автор не сотрудник"} arrow>
+											<IconButton
+												onClick={() => handleEditAuthorChange(index, 'is_employee', !author.is_employee)}
+												size="small"
+												sx={{
+													color: author.is_employee ? '#0071E3' : 'grey.500',
+													'&:hover': {
+														backgroundColor: author.is_employee ? 'rgba(0, 113, 227, 0.1)' : 'rgba(0, 0, 0, 0.04)',
+													}
+												}}
+												aria-label={author.is_employee ? "Пометить как не сотрудника" : "Пометить как сотрудника"}
+											>
+												<PersonIcon fontSize="small" />
+											</IconButton>
+										</MuiTooltip>
+									</Grid>
+									<Grid item xs="auto"> {/* Изменено с xs={1} */}
+										{editAuthorsList.length > 1 && (
+											<IconButton
+												onClick={() => handleEditRemoveAuthor(index)}
+												size="small"
+												sx={{ color: '#FF3B30' }}
+												aria-label="Удалить автора"
+											>
+												<DeleteIcon fontSize="small" />
+											</IconButton>
+										)}
+									</Grid>
+								</Grid>
+							))}
+							<Button
+								startIcon={<AddIcon />}
+								onClick={handleEditAddAuthor}
+								size="small"
+								sx={{ mt: 1, textTransform: 'none', color: '#0071E3' }}
+							>
+								Добавить автора
+							</Button>
+						</Box>
 						<AppleTextField
 							fullWidth
 							label="Год"
@@ -3126,7 +3322,9 @@ function Dashboard() {
 										return publication ? (
 											<TableRow key={entry.id}>
 												<TableCell>{publication.title}</TableCell>
-												<TableCell>{publication.authors}</TableCell>
+												<TableCell>{publication && publication.authors && publication.authors.length > 0
+													? publication.authors.map(author => author.name).join(', ')
+													: 'Нет авторов'}</TableCell>
 												<TableCell>
 													<RedCancelButton
 														onClick={() => handleUnlinkPublication(selectedGroup.planId, entry.id)}
@@ -3208,7 +3406,9 @@ function Dashboard() {
 								filteredPublishedPublications.map((pub) => (
 									<TableRow key={pub.id}>
 										<TableCell>{pub.title}</TableCell>
-										<TableCell>{pub.authors}</TableCell>
+										<TableCell>{pub.authors && pub.authors.length > 0
+											? pub.authors.map(author => author.name).join(', ')
+											: 'Нет авторов'}</TableCell>
 										<TableCell>
 											<AppleButton
 												onClick={() => handleLinkPublication(selectedPlanEntry.planId, selectedPlanEntry, pub.id)}
@@ -3281,7 +3481,7 @@ function Dashboard() {
 					</Alert>
 				)}
 			</Collapse>
-		</Container>
+		</Container >
 	);
 }
 
