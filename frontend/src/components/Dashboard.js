@@ -279,8 +279,6 @@ function Dashboard() {
 	const [openAttachFileDialog, setOpenAttachFileDialog] = useState(false);
 	const [publicationToAttach, setPublicationToAttach] = useState(null);
 	const [attachFile, setAttachFile] = useState(null);
-	const [attachError, setAttachError] = useState('');
-	const [attachSuccess, setAttachSuccess] = useState('');
 	const [openChangePasswordDialog, setOpenChangePasswordDialog] = useState(false);
 	const [currentPassword, setCurrentPassword] = useState('');
 	const [newPassword, setNewPassword] = useState('');
@@ -311,11 +309,7 @@ function Dashboard() {
 	const chartRef = useRef(null);
 	const [unlinkDialogOpen, setUnlinkDialogOpen] = useState(false);
 	const [selectedGroup, setSelectedGroup] = useState(null);
-	const [createPlanError, setCreatePlanError] = useState('');
-	const [createPlanSuccess, setCreatePlanSuccess] = useState('');
-	const [planDialogError, setPlanDialogError] = useState('');
-	const [planDialogSuccess, setPlanDialogSuccess] = useState('');
-	const [openPlanSnackbar, setOpenPlanSnackbar] = useState(false); // Управление видимостью Snackbar
+
 	const [loadingPublicationTypes, setLoadingPublicationTypes] = useState(true); // Новое состояние для типов
 	const [initializing, setInitializing] = useState(true);
 	const validStatuses = ['all', 'draft', 'needs_review', 'published'];
@@ -426,14 +420,6 @@ function Dashboard() {
 		if (newValue !== 2) setShowDetailedAnalytics(false);
 	};
 
-	const handleClosePlanSnackbar = () => {
-		setOpenPlanSnackbar(false);
-		setPlanDialogError('');
-		setPlanDialogSuccess('');
-		if (planDialogSuccess) {
-			setOpenCreatePlanDialog(false); // Закрываем диалог только после успеха
-		}
-	};
 
 	const fetchAllPublications = async () => {
 		try {
@@ -971,7 +957,7 @@ function Dashboard() {
 		setEditTitle(publication?.title || '');
 		setEditAuthors(publication?.authors || '');
 		setEditYear(publication?.year || '');
-		setEditSelectedDisplayNameId(publication?.display_name_id); // Пусть будет null или undefined
+		setEditSelectedDisplayNameId(publication?.type?.display_name_id || '');
 		setEditFile(null);
 		setOpenEditDialog(true);
 	};
@@ -1194,14 +1180,17 @@ function Dashboard() {
 		setPublicationToAttach(publication);
 		setOpenAttachFileDialog(true);
 		setAttachFile(null);
-		setAttachError('');
-		setAttachSuccess('');
+		setError(''); // Сброс общей ошибки
+		setOpenError(false);
+		setSuccess(''); // Сброс общего успеха
+		setOpenSuccess(false);
 	};
 
 	const handleAttachFileSubmit = async (e) => {
 		e.preventDefault();
 		if (!attachFile) {
-			setAttachError('Пожалуйста, выберите файл для прикрепления.');
+			setError('Пожалуйста, выберите файл для прикрепления.'); // <- setError
+			setOpenError(true); // <- setOpenError
 			return;
 		}
 
@@ -1222,20 +1211,24 @@ function Dashboard() {
 					},
 				}
 			);
-			setAttachSuccess('Файл успешно прикреплен!');
-			setAttachError('');
+			setSuccess('Файл успешно прикреплен!'); // <- используется setSuccess
+			setOpenSuccess(true); // <- используется setOpenSuccess
+			setError(''); // <- сброс общей ошибки
+			setOpenError(false);
 			await fetchData();
-			setOpenAttachFileDialog(false);
+			setOpenAttachFileDialog(false); // Закрываем диалог после успеха
 		} catch (err) {
 			console.error('Ошибка прикрепления файла:', err.response?.data || err);
+			let errorMessage = 'Произошла ошибка при прикреплении файла.';
 			if (err.response) {
-				setAttachError(
-					`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте файл и права доступа.'}`
-				);
+				errorMessage = `Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте файл и права доступа.'}`;
 			} else {
-				setAttachError('Ошибка сети. Проверьте подключение и сервер.');
+				errorMessage = 'Ошибка сети. Проверьте подключение и сервер.';
 			}
-			setAttachSuccess('');
+			setError(errorMessage); // <- используется setError
+			setOpenError(true); // <- используется setOpenError
+			setSuccess(''); // <- сброс общего успеха
+			setOpenSuccess(false);
 		}
 	};
 
@@ -1243,8 +1236,11 @@ function Dashboard() {
 		setOpenAttachFileDialog(false);
 		setPublicationToAttach(null);
 		setAttachFile(null);
-		setAttachError('');
-		setAttachSuccess('');
+		// Можно добавить сброс общих уведомлений, если это нужно при отмене
+		setError('');
+		setOpenError(false);
+		setSuccess('');
+		setOpenSuccess(false);
 	};
 
 	const handleDownloadClick = (publication) => {
@@ -1275,15 +1271,7 @@ function Dashboard() {
 		}
 	}, [openError, openSuccess]);
 
-	useEffect(() => {
-		if (attachError || attachSuccess) {
-			const timer = setTimeout(() => {
-				setAttachError('');
-				setAttachSuccess('');
-			}, 5000);
-			return () => clearTimeout(timer);
-		}
-	}, [attachError, attachSuccess]);
+
 
 	const handleExportBibTeX = async () => {
 		try {
@@ -1338,8 +1326,8 @@ function Dashboard() {
 
 	const handleCreatePlan = async () => {
 		if (!newPlan.year || newPlan.year < 1900 || newPlan.year > 2100) {
-			setPlanDialogError('Пожалуйста, укажите корректный год (1900–2100).');
-			setOpenPlanSnackbar(true);
+			setError('Пожалуйста, укажите корректный год (1900–2100).');
+			setOpenError(true);
 			return;
 		}
 
@@ -1347,8 +1335,8 @@ function Dashboard() {
 			await refreshCsrfToken();
 		} catch (err) {
 			console.error('Ошибка при обновлении CSRF-токена:', err);
-			setPlanDialogError('Не удалось обновить CSRF-токен. Попробуйте снова.');
-			setOpenPlanSnackbar(true);
+			setError('Не удалось обновить CSRF-токен. Попробуйте снова.');
+			setOpenError(true);
 			return;
 		}
 
@@ -1373,14 +1361,14 @@ function Dashboard() {
 
 			setPlans([...plans, response.data.plan]);
 			setNewPlan({ year: new Date().getFullYear() + 1, expectedCount: 1 });
-			setPlanDialogSuccess('План успешно создан!');
-			setOpenPlanSnackbar(true);
+			setSuccess('План успешно создан!');
+			setOpenSuccess(true);
 			// Диалог не закрываем сразу, ждём закрытия Snackbar
 		} catch (err) {
 			console.error('Ошибка при создании плана:', err);
 			const errorMessage = err.response?.data?.error || 'Произошла ошибка при создании плана.';
-			setPlanDialogError(errorMessage);
-			setOpenPlanSnackbar(true);
+			setError(errorMessage);
+			setOpenError(true);
 		}
 	};
 	const handleEditPlanClick = (planId) => {
@@ -1964,41 +1952,6 @@ function Dashboard() {
 													<AppleButton onClick={handleEditUserClick}>Редактировать данные</AppleButton>
 													<AppleButton onClick={handleChangePasswordClick}>Изменить пароль</AppleButton>
 												</Box>
-												{/* Добавляем уведомление об успехе или ошибке внизу карточки */}
-												<Collapse in={openSuccess}>
-													{success && (
-														<Alert
-															severity="success"
-															sx={{
-																mt: 2,
-																borderRadius: '12px',
-																backgroundColor: '#E7F8E7',
-																color: '#1D1D1F',
-																boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-															}}
-															onClose={() => setOpenSuccess(false)}
-														>
-															{success}
-														</Alert>
-													)}
-												</Collapse>
-												<Collapse in={openError}>
-													{error && (
-														<Alert
-															severity="error"
-															sx={{
-																mt: 2,
-																borderRadius: '12px',
-																backgroundColor: '#FFF1F0',
-																color: '#1D1D1F',
-																boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-															}}
-															onClose={() => setOpenError(false)}
-														>
-															{error}
-														</Alert>
-													)}
-												</Collapse>
 											</Box>
 										) : (
 											<Typography sx={{ color: '#6E6E73' }}>Данные пользователя не найдены.</Typography>
@@ -2109,40 +2062,7 @@ function Dashboard() {
 													</label>
 													{file && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{file.name}</Typography>}
 												</Box>
-												<Collapse in={openError}>
-													{error && (
-														<Alert
-															severity="error"
-															sx={{
-																mt: 2,
-																borderRadius: '12px',
-																backgroundColor: '#FFF1F0',
-																color: '#1D1D1F',
-																boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-															}}
-															onClose={() => setOpenError(false)}
-														>
-															{error}
-														</Alert>
-													)}
-												</Collapse>
-												<Collapse in={openSuccess}>
-													{success && (
-														<Alert
-															severity="success"
-															sx={{
-																mt: 2,
-																borderRadius: '12px',
-																backgroundColor: '#E7F8E7',
-																color: '#1D1D1F',
-																boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-															}}
-															onClose={() => setOpenSuccess(false)}
-														>
-															{success}
-														</Alert>
-													)}
-												</Collapse>
+
 												<AppleButton type="submit" sx={{ mt: 2 }}>
 													Загрузить
 												</AppleButton>
@@ -2164,40 +2084,7 @@ function Dashboard() {
 													</label>
 													{file && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{file.name}</Typography>}
 												</Box>
-												<Collapse in={openError}>
-													{error && (
-														<Alert
-															severity="error"
-															sx={{
-																mb: 2,
-																borderRadius: '12px',
-																backgroundColor: '#FFF1F0',
-																color: '#1D1D1F',
-																boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-															}}
-															onClose={() => setOpenError(false)}
-														>
-															{error}
-														</Alert>
-													)}
-												</Collapse>
-												<Collapse in={openSuccess}>
-													{success && (
-														<Alert
-															severity="success"
-															sx={{
-																mb: 2,
-																borderRadius: '12px',
-																backgroundColor: '#E7F8E7',
-																color: '#1D1D1F',
-																boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-															}}
-															onClose={() => setOpenSuccess(false)}
-														>
-															{success}
-														</Alert>
-													)}
-												</Collapse>
+
 												<AppleButton type="submit" sx={{ mt: 2 }}>
 													Загрузить
 												</AppleButton>
@@ -2904,27 +2791,7 @@ function Dashboard() {
 				</CardContent>
 			</AppleCard>
 
-			<Snackbar
-				open={openPlanSnackbar}
-				autoHideDuration={2500}
-				onClose={handleClosePlanSnackbar}
-				anchorOrigin={{ vertical: 'top', horizontal: 'center' }}
-				TransitionComponent={TransitionDown}
-			>
-				<Alert
-					severity={planDialogError ? 'error' : 'success'}
-					sx={{
-						borderRadius: '12px',
-						backgroundColor: planDialogError ? '#FFF1F0' : '#E7F8E7',
-						color: '#1D1D1F',
-						boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-						minWidth: '300px',
-					}}
-					onClose={handleClosePlanSnackbar}
-				>
-					{planDialogError || planDialogSuccess}
-				</Alert>
-			</Snackbar>
+
 			{/* Диалог редактирования пользователя */}
 			<Dialog
 				open={openEditUserDialog}
@@ -3110,40 +2977,6 @@ function Dashboard() {
 							</label>
 							{editFile && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{editFile.name}</Typography>}
 						</Box>
-						<Collapse in={openError}>
-							{error && (
-								<Alert
-									severity="error"
-									sx={{
-										mt: 2,
-										borderRadius: '12px',
-										backgroundColor: '#FFF1F0',
-										color: '#1D1D1F',
-										boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-									}}
-									onClose={() => setOpenError(false)}
-								>
-									{error}
-								</Alert>
-							)}
-						</Collapse>
-						<Collapse in={openSuccess}>
-							{success && (
-								<Alert
-									severity="success"
-									sx={{
-										mt: 2,
-										borderRadius: '12px',
-										backgroundColor: '#E7F8E7',
-										color: '#1D1D1F',
-										boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-									}}
-									onClose={() => setOpenSuccess(false)}
-								>
-									{success}
-								</Alert>
-							)}
-						</Collapse>
 					</form>
 				</DialogContent>
 				<DialogActions sx={{ p: 2 }}>
@@ -3187,34 +3020,7 @@ function Dashboard() {
 							</label>
 							{attachFile && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{attachFile.name}</Typography>}
 						</Box>
-						<Collapse in={attachError !== ''}>
-							<Alert
-								severity="error"
-								sx={{
-									mt: 2,
-									borderRadius: '12px',
-									backgroundColor: '#FFF1F0',
-									color: '#1D1D1F',
-									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-								}}
-							>
-								{attachError}
-							</Alert>
-						</Collapse>
-						<Collapse in={attachSuccess !== ''}>
-							<Alert
-								severity="success"
-								sx={{
-									mt: 2,
-									borderRadius: '12px',
-									backgroundColor: '#E7F8E7',
-									color: '#1D1D1F',
-									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-								}}
-							>
-								{attachSuccess}
-							</Alert>
-						</Collapse>
+
 					</form>
 				</DialogContent>
 				<DialogActions sx={{ p: 2 }}>
@@ -3340,40 +3146,7 @@ function Dashboard() {
 							)}
 						</TableBody>
 					</Table>
-					<Collapse in={openSuccess}>
-						{success && (
-							<Alert
-								severity="success"
-								sx={{
-									mt: 2,
-									borderRadius: '12px',
-									backgroundColor: '#E7F8E7',
-									color: '#1D1D1F',
-									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-								}}
-								onClose={() => setOpenSuccess(false)}
-							>
-								{success}
-							</Alert>
-						)}
-					</Collapse>
-					<Collapse in={openError}>
-						{error && (
-							<Alert
-								severity="error"
-								sx={{
-									mt: 2,
-									borderRadius: '12px',
-									backgroundColor: '#FFF1F0',
-									color: '#1D1D1F',
-									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-								}}
-								onClose={() => setOpenError(false)}
-							>
-								{error}
-							</Alert>
-						)}
-					</Collapse>
+
 				</DialogContent>
 				<DialogActions>
 					<CancelButton onClick={() => setUnlinkDialogOpen(false)}>Закрыть</CancelButton>
@@ -3398,43 +3171,11 @@ function Dashboard() {
 						variant="outlined"
 					/>
 					{/* Уведомления внутри диалога */}
-					<Collapse in={!!createPlanSuccess}>
-						{createPlanSuccess && (
-							<Alert
-								severity="success"
-								sx={{
-									mt: 2,
-									borderRadius: '12px',
-									backgroundColor: '#E7F8E7',
-									color: '#1D1D1F',
-									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-								}}
-							>
-								{createPlanSuccess}
-							</Alert>
-						)}
-					</Collapse>
-					<Collapse in={!!createPlanError}>
-						{createPlanError && (
-							<Alert
-								severity="error"
-								sx={{
-									mt: 2,
-									borderRadius: '12px',
-									backgroundColor: '#FFF1F0',
-									color: '#1D1D1F',
-									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-								}}
-								onClose={() => setCreatePlanError('')} // Позволяет закрыть ошибку вручную
-							>
-								{createPlanError}
-							</Alert>
-						)}
-					</Collapse>
+
 				</DialogContent>
 				<DialogActions>
 					<CancelButton onClick={() => setOpenCreatePlanDialog(false)}>Отмена</CancelButton>
-					<AppleButton onClick={handleCreatePlan} disabled={!!createPlanSuccess}>
+					<AppleButton onClick={handleCreatePlan}>
 						Создать
 					</AppleButton>
 				</DialogActions>
@@ -3486,45 +3227,60 @@ function Dashboard() {
 							)}
 						</TableBody>
 					</Table>
-					<Collapse in={openSuccess}>
-						{success && (
-							<Alert
-								severity="success"
-								sx={{
-									mt: 2,
-									borderRadius: '12px',
-									backgroundColor: '#E7F8E7',
-									color: '#1D1D1F',
-									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-								}}
-								onClose={() => setOpenSuccess(false)}
-							>
-								{success}
-							</Alert>
-						)}
-					</Collapse>
-					<Collapse in={openError}>
-						{error && (
-							<Alert
-								severity="error"
-								sx={{
-									mt: 2,
-									borderRadius: '12px',
-									backgroundColor: '#FFF1F0',
-									color: '#1D1D1F',
-									boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-								}}
-								onClose={() => setOpenError(false)}
-							>
-								{error}
-							</Alert>
-						)}
-					</Collapse>
+
 				</DialogContent>
 				<DialogActions>
 					<CancelButton onClick={() => setLinkDialogOpen(false)}>Закрыть</CancelButton>
 				</DialogActions>
 			</Dialog>
+			{/* Глобальные Уведомления (как в ManagerDashboard) */}
+			<Collapse in={openSuccess}>
+				{success && (
+					<Alert
+						severity="success"
+						sx={{
+							position: 'fixed',
+							top: 16,
+							left: '50%',
+							transform: 'translateX(-50%)',
+							width: 'fit-content',
+							maxWidth: '90%',
+							borderRadius: '12px',
+							backgroundColor: '#E7F8E7',
+							color: '#1D1D1F',
+							boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+							zIndex: 1500,
+						}}
+						onClose={() => setOpenSuccess(false)}
+					>
+						{success}
+					</Alert>
+				)}
+			</Collapse>
+			<Collapse in={openError}>
+				{error && ( // Добавляем проверку на наличие текста ошибки
+					<Alert
+						severity="error"
+						sx={{
+							position: 'fixed',
+							// Позиционирование относительно верхнего края или другого уведомления
+							top: openSuccess ? 76 : 16, // Если есть success-уведомление, сдвигаем ниже
+							left: '50%',
+							transform: 'translateX(-50%)',
+							width: 'fit-content',
+							maxWidth: '90%',
+							borderRadius: '12px',
+							backgroundColor: '#FFF1F0', // Цвет фона для ошибки
+							color: '#1D1D1F',          // Цвет текста
+							boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+							zIndex: 1500,              // Убедимся, что поверх всего остального
+						}}
+						onClose={() => setOpenError(false)}
+					>
+						{error}
+					</Alert>
+				)}
+			</Collapse>
 		</Container>
 	);
 }
