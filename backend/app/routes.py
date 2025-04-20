@@ -1097,23 +1097,7 @@ def attach_file(pub_id):
             db.session.commit()
             return jsonify({
                 'message': 'Файл успешно прикреплён',
-                'publication': {
-                    'id': publication.id,
-                    'title': publication.title,
-                    'authors': publication.authors,
-                    'year': publication.year,
-                    'type': {
-                        'id': publication.type.id,
-                        'name': publication.type.name,
-                        'display_name': publication.display_name.display_name if publication.display_name else None,
-                        'display_names': [dn.display_name for dn in publication.type.display_names],
-                        'display_name_id': publication.display_name_id
-                    } if publication.type else None,
-                    'status': publication.status,
-                    'file_url': publication.file_url,
-                    'updated_at': publication.updated_at.isoformat() if publication.updated_at else None,
-                    'returned_for_revision': publication.returned_for_revision,
-                }
+                'publication': publication.to_dict() # Используем готовый метод
             }), 200
         except Exception as e:
             db.session.rollback()

@@ -258,7 +258,10 @@ function Home() {
 													Год: {pub.year}
 												</Typography>
 												<Typography variant="body2" component="span" sx={{ color: '#757575', display: 'block', mt: 0.5 }}>
-													Автор: {pub.authors}
+													Авторы: {Array.isArray(pub.authors) && pub.authors.length > 0
+														? pub.authors.map(author => author.name).join(', ') // Извлекаем имена и соединяем через запятую
+														: 'Авторы не указаны' // Запасной текст, если авторов нет
+													}
 												</Typography>
 												<Typography variant="body2" component="span" sx={{ color: '#757575', display: 'block', mt: 0.5 }}>
 													Тип: {pub.type.display_name}

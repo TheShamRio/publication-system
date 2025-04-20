@@ -189,28 +189,7 @@ def get_publications():
         logger.error(f"Ошибка пагинации: {str(e)}")
         return jsonify({"error": "Ошибка сервера при загрузке публикаций"}), 500
 
-    publications = [{
-        'id': pub.id,
-        'title': pub.title,
-        'authors': pub.authors,
-        'year': pub.year,
-        'type': {
-            'id': pub.type.id,
-            'name': pub.type.name,
-            'display_name': pub.display_name.display_name if pub.display_name else None,
-            'display_names': [dn.display_name for dn in pub.type.display_names],
-            'display_name_id': pub.display_name_id
-        } if pub.type else None,
-        'status': pub.status,
-        'file_url': pub.file_url,
-        'user': {
-            'id': pub.user.id if pub.user else None,
-            'full_name': pub.user.full_name if pub.user else None
-        },
-        'returned_for_revision': pub.returned_for_revision,
-        'published_at': pub.published_at.isoformat() if pub.published_at else None,
-        'updated_at': pub.updated_at.isoformat() if pub.updated_at else None
-    } for pub in paginated_publications.items]
+    publications = [pub.to_dict() for pub in paginated_publications.items]
 
     return jsonify({
         'publications': publications,
@@ -355,27 +334,7 @@ def get_needs_review_publications():
 
     paginated_publications = query.paginate(page=page, per_page=per_page, error_out=False)
 
-    publications = [{
-        'id': pub.id,
-        'title': pub.title,
-        'authors': pub.authors,
-        'year': pub.year,
-        'type': {
-            'id': pub.type.id,
-            'name': pub.type.name,
-            'display_name': pub.display_name.display_name if pub.display_name else None,
-            'display_names': [dn.display_name for dn in pub.type.display_names],
-            'display_name_id': pub.display_name_id
-        } if pub.type else None,
-        'status': pub.status,
-        'file_url': pub.file_url,
-        'user': {
-            'id': pub.user.id if pub.user else None,
-            'full_name': pub.user.full_name if pub.user else None
-        },
-        'returned_for_revision': pub.returned_for_revision,
-        'published_at': pub.published_at.isoformat() if pub.published_at else None
-    } for pub in paginated_publications.items]
+    publications = [pub.to_dict() for pub in paginated_publications.items]
 
     return jsonify({
         'publications': publications,

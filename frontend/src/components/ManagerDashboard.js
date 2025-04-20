@@ -1054,7 +1054,10 @@ function ManagerDashboard() {
 																	{pub.title}
 																</Typography>
 															</TableCell>
-															<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
+															<TableCell sx={{ color: '#1D1D1F' }}>{Array.isArray(pub.authors) && pub.authors.length > 0
+																? pub.authors.map(author => author.name).join(', ') // Извлекаем имена и соединяем через запятую
+																: 'Авторы не указаны' // Запасной текст, если авторов нет
+															}</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>
 																{pub.type?.display_name || pub.type?.display_names?.[0] || 'Неизвестный тип'}

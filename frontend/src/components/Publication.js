@@ -303,12 +303,12 @@ function Publication() {
 					color: statusColor,
 					backgroundColor: backgroundColor,
 					display: 'inline-block',
-					
+
 					borderRadius: '4px',
 					mb: 1,
 				}}
 			>
-			{`Статус: ${statusText}`}
+				{`Статус: ${statusText}`}
 			</Typography>
 		);
 	};
@@ -330,16 +330,25 @@ function Publication() {
 						{publication.title}
 					</Typography>
 					<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
-						Авторы: {publication.authors}
+						Авторы: {publication.authors && publication.authors.length > 0
+							? publication.authors.map(author => author.name).join(', ')
+							: 'Нет авторов'}
 					</Typography>
 					<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
 						Год: {publication.year}
 					</Typography>
 					<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
-						{/* Отображаем тип публикации с проверкой */}
 						Тип:{' '}
-						{publicationTypes.find((type) => type.name === publication.type)?.display_name ||
-							'Неизвестный тип'}
+						{/* --- ИЗМЕНЕНИЕ ЗДЕСЬ --- */}
+						{/* Ищем в массиве всех типов запись, ID русского названия которой совпадает с ID в публикации */}
+						{publicationTypes.find((type) => type.display_name_id === publication.display_name_id)?.display_name
+							// Запасной вариант: если не нашли по ID, попробуем взять display_name напрямую из данных публикации
+							|| publication.type?.display_name
+							// Крайний запасной вариант: ищем по базовому имени (старая логика)
+							|| publicationTypes.find((type) => type.name === publication.type?.name)?.display_name
+							// Если ничего не помогло
+							|| 'Неизвестный тип'}
+						{/* --- КОНЕЦ ИЗМЕНЕНИЯ --- */}
 					</Typography>
 					{renderStatus(publication.status, publication.returned_for_revision, isReviewer)}
 					<Typography variant="body1" sx={{ color: '#757575', mb: 2 }}>
@@ -407,7 +416,7 @@ function Publication() {
 						</Typography>
 					)}
 					{fileUrl && (
-						<Box sx={{ mb: 2 }}>
+						<Box sx={{ mt: 2, mb: 2 }}>
 							<AppleButton startIcon={<DownloadIcon />} onClick={handleDownload}>
 								Скачать
 							</AppleButton>

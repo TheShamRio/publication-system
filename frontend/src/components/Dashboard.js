@@ -1338,7 +1338,13 @@ function Dashboard() {
 			const response = await axios.post(
 				`http://localhost:5000/api/publications/${publicationToAttach.id}/attach-file`,
 				formData,
-				{ /* ... config ... */ }
+				{
+					withCredentials: true, // Важно для cookies/сессии
+					headers: {
+						// Content-Type устанавливается Axios автоматически для FormData
+						'X-CSRFToken': csrfToken, // Отправляем CSRF токен
+					},
+				}
 			);
 
 			// 2. СРАЗУ после успеха:
@@ -2155,7 +2161,7 @@ function Dashboard() {
 																/>
 															</Grid>
 															<Grid item xs="auto"> {/* Изменено с xs={1} */}
-																<MuiTooltip title={author.is_employee ? "Автор сотрудник" : "Автор не сотрудник"} arrow>
+																<MuiTooltip title={author.is_employee ? "Автор сотрудник КНИТУ-КАИ" : "Автор не сотрудник КНИТУ-КАИ"} arrow>
 																	<IconButton
 																		onClick={() => handleAuthorChange(index, 'is_employee', !author.is_employee)}
 																		size="small"
@@ -2870,15 +2876,7 @@ function Dashboard() {
 																	</TableBody>
 																</PlanTable>
 															)}
-															{plan.status === 'approved' && groupedEntries.length !== 0 && (
-																<AppleButton
-																	startIcon={<AddIcon />}
-																	onClick={() => handleEditPlanClick(plan.id)}
-																	sx={{ mt: 2 }}
-																>
-																	Добавить тип
-																</AppleButton>
-															)}
+
 															{plan.return_comment && plan.status !== 'approved' && (
 																<Typography
 																	sx={{
@@ -3088,7 +3086,7 @@ function Dashboard() {
 										/>
 									</Grid>
 									<Grid item xs="auto"> {/* Изменено с xs={1} */}
-										<MuiTooltip title={author.is_employee ? "Автор сотрудник" : "Автор не сотрудник"} arrow>
+										<MuiTooltip title={author.is_employee ? "Автор сотрудник КНИТУ-КАИ" : "Автор не сотрудник КНИТУ-КАИ"} arrow>
 											<IconButton
 												onClick={() => handleEditAuthorChange(index, 'is_employee', !author.is_employee)}
 												size="small"
