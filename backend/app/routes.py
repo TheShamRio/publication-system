@@ -12,6 +12,7 @@ from reportlab.platypus import SimpleDocTemplate, Paragraph
 from reportlab.lib.pagesizes import letter
 from bibtexparser.bibdatabase import BibDatabase
 from bibtexparser.bwriter import BibTexWriter
+from bibtexparser.customization import homogenize_latex_encoding, splitname # Для парсинга авторов
 import logging
 from datetime import datetime, UTC
 import json
@@ -320,13 +321,11 @@ def change_password():
 
 @bp.route('/public/publications', methods=['GET'])
 def get_public_publications():
-    # ... (пагинация и фильтрация как раньше) ...
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
     pub_type = request.args.get('type', 'all')
     search = request.args.get('search', '').lower()
     year = request.args.get('year', type=str)
-    # Новый поиск по автору
     author_search = request.args.get('author', '').lower()
 
 
@@ -338,31 +337,41 @@ def get_public_publications():
             logger.debug(f"Фильтр по типу: {pub_type}, type_id: {type_.id}")
             query = query.filter(Publication.type_id == type_.id)
         else:
-            # Если тип не найден, возвращаем пустой результат
             logger.warning(f"Тип публикации не найден: {pub_type}")
             return jsonify({'publications': [], 'total': 0, 'pages': 0, 'current_page': page}), 200
 
     search_filters = []
     if search:
         search_filters.append(Publication.title.ilike(f'%{search}%'))
-        # Искать в поле year как строку (менее эффективно)
         search_filters.append(db.cast(Publication.year, db.String).ilike(f'%{search}%'))
+        # Добавим поиск по новым текстовым полям
+        search_filters.append(Publication.journal_conference_name.ilike(f'%{search}%'))
+        search_filters.append(Publication.doi.ilike(f'%{search}%'))
+        search_filters.append(Publication.issn.ilike(f'%{search}%'))
+        search_filters.append(Publication.isbn.ilike(f'%{search}%'))
+        search_filters.append(Publication.quartile.ilike(f'%{search}%'))
+        # search_filters.append(Publication.number_volume_pages.ilike(f'%{search}%')) 
+        search_filters.append(Publication.volume.ilike(f'%{search}%'))              
+        search_filters.append(Publication.number.ilike(f'%{search}%'))              
+        search_filters.append(Publication.pages.ilike(f'%{search}%'))               
+        search_filters.append(Publication.department.ilike(f'%{search}%'))
+        search_filters.append(Publication.publisher.ilike(f'%{search}%'))
+        search_filters.append(Publication.publisher_location.ilike(f'%{search}%'))
+        search_filters.append(Publication.classification_code.ilike(f'%{search}%'))
+        search_filters.append(Publication.notes.ilike(f'%{search}%'))
 
-    # Добавляем поиск по авторам в новой таблице
     if search or author_search:
-        # Объединяем поисковые строки для авторов
         combined_author_search = f"%{search}%" if search else f"%{author_search}%"
         author_subquery = db.session.query(PublicationAuthor.publication_id)\
             .filter(PublicationAuthor.name.ilike(combined_author_search))\
             .subquery()
-        # Ищем публикации, ID которых есть в результатах поиска по авторам ИЛИ по другим полям
         author_filter = Publication.id.in_(db.select(author_subquery.c.publication_id))
-        if search: # Если искали и в других полях
+        if search:
             search_filters.append(author_filter)
             query = query.filter(db.or_(*search_filters))
-        else: # Если искали только по автору
+        else:
              query = query.filter(author_filter)
-    elif search_filters: # Если был только поиск по title/year
+    elif search_filters:
         query = query.filter(db.or_(*search_filters))
 
 
@@ -373,7 +382,6 @@ def get_public_publications():
         except ValueError:
             logger.warning(f"Недопустимый год: {year}")
 
-    # --- Сортировка как раньше ---
     query = query.order_by(
         db.func.coalesce(Publication.published_at, Publication.updated_at).desc()
     )
@@ -382,8 +390,7 @@ def get_public_publications():
     pagination = query.paginate(page=page, per_page=per_page, error_out=False)
     publications = pagination.items
 
-    # --- Формирование ответа использует to_dict ---
-    response = [pub.to_dict() for pub in publications] # Проще!
+    response = [pub.to_dict() for pub in publications]
 
     logger.debug(f"Возвращено {len(response)} публикаций, всего: {pagination.total}")
 
@@ -394,6 +401,7 @@ def get_public_publications():
         'current_page': pagination.page
     }), 200
 
+
 @bp.route('/publications', methods=['GET'])
 @login_required
 def get_publications():
@@ -401,23 +409,21 @@ def get_publications():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
     search = request.args.get('search', '').lower()
-    pub_type = request.args.get('type', 'all') # Если используется фронтом для старого фильтра
-    display_name_id = request.args.get('display_name_id', type=int)
+    pub_type = request.args.get('type', 'all') # Старый фильтр по имени типа
+    display_name_id = request.args.get('display_name_id', type=int) # Новый фильтр по ID русского названия
     status = request.args.get('status', 'all')
-    # Новый поиск по автору
-    author_search = request.args.get('author', '').lower()
+    author_search = request.args.get('author', '').lower() # Отдельный поиск по автору
 
 
     query = Publication.query.filter_by(user_id=current_user.id)
 
-    # --- Логика фильтрации по типу/display_name как раньше ---
+    # Приоритет новому фильтру по display_name_id
     if display_name_id:
         query = query.filter(Publication.display_name_id == display_name_id)
-    elif pub_type != 'all': # Устаревший фильтр, возможно, убрать?
+    elif pub_type != 'all': # Если новый не задан, используем старый
         type_ = PublicationType.query.filter_by(name=pub_type).first()
         if type_:
             query = query.filter(Publication.type_id == type_.id)
-        # Если тип не найден, возвращаем пустой результат
         else:
             return jsonify({'publications': [], 'total': 0, 'pages': 0, 'current_page': page}), 200
 
@@ -425,30 +431,41 @@ def get_publications():
         query = query.filter(Publication.status == status)
 
 
-    # --- Логика поиска ---
+    # --- Обновленный блок поиска ---
     search_filters = []
     if search:
         search_filters.append(Publication.title.ilike(f'%{search}%'))
         search_filters.append(db.cast(Publication.year, db.String).ilike(f'%{search}%'))
+        # Добавляем поиск по новым текстовым полям
+        search_filters.append(Publication.journal_conference_name.ilike(f'%{search}%'))
+        search_filters.append(Publication.doi.ilike(f'%{search}%'))
+        search_filters.append(Publication.issn.ilike(f'%{search}%'))
+        search_filters.append(Publication.isbn.ilike(f'%{search}%'))
+        search_filters.append(Publication.quartile.ilike(f'%{search}%'))
+        search_filters.append(Publication.department.ilike(f'%{search}%'))
+        search_filters.append(Publication.publisher.ilike(f'%{search}%'))
+        search_filters.append(Publication.publisher_location.ilike(f'%{search}%'))
+        search_filters.append(Publication.classification_code.ilike(f'%{search}%'))
+        search_filters.append(Publication.notes.ilike(f'%{search}%'))
 
-    # Добавляем поиск по авторам
     if search or author_search:
         combined_author_search = f"%{search}%" if search else f"%{author_search}%"
-        author_subquery = db.session.query(PublicationAuthor.publication_id)\
-            .filter(PublicationAuthor.publication_id == Publication.id).filter(PublicationAuthor.name.ilike(combined_author_search))\
-                            .exists() # Используем exists() для фильтра
-        # Фильтруем основную таблицу
+        # Ищем публикации, где ХОТЯ БЫ ОДИН автор соответствует
+        author_subquery = PublicationAuthor.query\
+            .filter(PublicationAuthor.publication_id == Publication.id)\
+            .filter(PublicationAuthor.name.ilike(combined_author_search))\
+            .exists()
         author_filter = author_subquery
-        if search: # Если искали и в других полях
-            search_filters.append(author_filter)
-            query = query.filter(db.or_(*search_filters))
-        else: # Если искали только по автору
-            query = query.filter(author_filter)
-    elif search_filters: # Если был только поиск по title/year
+        if search: # Если основной поиск тоже есть
+            search_filters.append(author_filter) # Добавляем условие по автору к остальным
+            query = query.filter(db.or_(*search_filters)) # Ищем по ЛЮБОМУ из условий
+        else: # Если ищем ТОЛЬКО по автору
+            query = query.filter(author_filter) # Ищем только те, где есть такой автор
+    elif search_filters: # Если был только основной поиск (без авторов)
         query = query.filter(db.or_(*search_filters))
 
 
-    # --- Сортировка как раньше ---
+    # --- Сортировка ---
     query = query.order_by(Publication.updated_at.desc())
 
 
@@ -470,34 +487,37 @@ def get_publications():
 def manage_publication(pub_id):
     publication = Publication.query.get_or_404(pub_id)
 
-    # --- Проверки прав и статуса (как раньше) ---
+    # --- Проверки прав и статуса ---
     if publication.user_id != current_user.id:
         logger.warning(f"Пользователь {current_user.id} (роль: {current_user.role}) пытался {request.method} публикацию {pub_id} другого пользователя.")
         return jsonify({'error': 'У вас нет прав на управление этой публикацией'}), 403
 
+    # Нельзя редактировать/удалять, если на проверке
     if publication.status == 'needs_review':
         logger.warning(f"Пользователь {current_user.id} пытался {request.method} публикацию {pub_id} в статусе 'needs_review'.")
         return jsonify({'error': 'Нельзя управлять публикацией (редактировать или удалить), пока она на проверке.'}), 403
-    # Дополнительно: возможно, запретить PUT/DELETE для published тоже?
-    # if publication.status == 'published':
+    # Доп: запрет изменения опубликованных? (Раскомментировать, если нужно)
+    # if publication.status == 'published' and current_user.role != 'admin':
     #      logger.warning(f"Пользователь {current_user.id} пытался {request.method} опубликованную публикацию {pub_id}.")
-    #      return jsonify({'error': 'Нельзя управлять опубликованной публикацией через этот интерфейс.'}), 403
+    #      return jsonify({'error': 'Нельзя управлять опубликованной публикацией.'}), 403
 
 
     if request.method == 'PUT':
-        # --- Получение данных (как раньше) ---
-        if request.content_type == 'application/json':
+        data = None
+        authors_data_received = None
+        form_data = None # Для обработки данных из multipart
+
+        # Определяем тип контента и парсим данные
+        if request.content_type.startswith('application/json'):
             data = request.get_json()
-            # Ожидаем authors как список объектов в data
             authors_data_received = data.get('authors')
             if authors_data_received is not None and not isinstance(authors_data_received, list):
                  return jsonify({'error': 'Поле authors должно быть массивом'}), 400
-        elif 'file' in request.files or request.content_type.startswith('multipart/form-data'):
-            data = request.form
-            # Ожидаем authors как JSON-строку в form
+        elif request.content_type.startswith('multipart/form-data'):
+            form_data = request.form.to_dict() # Получаем все поля формы как словарь
+            data = form_data # Используем form_data для дальнейшей обработки
             authors_json = data.get('authors_json')
             try:
-                # authors_data_received может быть None, если поле не передано
                 authors_data_received = json.loads(authors_json) if authors_json else None
                 if authors_data_received is not None and not isinstance(authors_data_received, list):
                     raise ValueError("Authors data must be a list.")
@@ -507,31 +527,30 @@ def manage_publication(pub_id):
         else:
             return jsonify({"error": "Неподдерживаемый формат данных."}), 415
 
-
-        # --- Валидация полученных данных авторов (если они передавались) ---
+        # --- Валидация авторов (если переданы) ---
         if authors_data_received is not None:
-             if not authors_data_received: # Запрещаем пустой список, если поле было передано
-                  return jsonify({'error': 'Список авторов не может быть пустым, если он передается.'}), 400
+             # Проверяем, что список не пустой, если он передан
+             if not authors_data_received:
+                 return jsonify({'error': 'Список авторов не может быть пустым, если он передан.'}), 400
+             # Валидируем каждый элемент списка
              try:
                  for author_item in authors_data_received:
                      if not isinstance(author_item, dict) or 'name' not in author_item or 'is_employee' not in author_item:
-                         raise ValueError("Each author must be an object with 'name' and 'is_employee'.")
+                         raise ValueError("Каждый автор должен быть объектом с полями 'name' и 'is_employee'.")
                      if not isinstance(author_item['name'], str) or not author_item['name'].strip():
-                         raise ValueError("Author name cannot be empty.")
+                         raise ValueError("Имя автора не может быть пустым.")
                      if not isinstance(author_item['is_employee'], bool):
-                         raise ValueError("Author 'is_employee' must be boolean.")
+                         raise ValueError("'is_employee' автора должно быть булевым значением.")
              except ValueError as e:
-                 logger.error(f"Invalid authors format during update: {authors_data_received}. Error: {e}")
+                 logger.error(f"Неверный формат данных авторов при обновлении: {authors_data_received}. Ошибка: {e}")
                  return jsonify({'error': f'Некорректный формат данных авторов: {e}'}), 400
-        # --- Конец валидации ---
 
-        old_status = publication.status
 
-        # --- Обработка файла (как раньше) ---
-        if 'file' in request.files:
+        # --- Обработка файла (если передан через multipart) ---
+        if request.content_type.startswith('multipart/form-data') and 'file' in request.files:
             file = request.files['file']
             if file and allowed_file(file.filename):
-                # Удаление старого файла...
+                # Удаление старого файла, если есть
                 if publication.file_url:
                     try:
                         old_file_path_segment = publication.file_url.split('/uploads/')[-1]
@@ -541,113 +560,115 @@ def manage_publication(pub_id):
                             logger.debug(f"Старый файл '{old_file_path_segment}' удален для публикации {pub_id}.")
                     except Exception as file_del_e:
                         logger.error(f"Ошибка при удалении старого файла '{publication.file_url}': {str(file_del_e)}")
-                # Сохранение нового файла...
+                # Сохранение нового файла
                 filename = secure_filename(file.filename)
                 upload_folder = current_app.config['UPLOAD_FOLDER']
-                if not os.path.exists(upload_folder):
-                    os.makedirs(upload_folder)
-                    logger.debug(f"Создана директория загрузки: {upload_folder}")
+                os.makedirs(upload_folder, exist_ok=True) # Создаем, если не существует
 
                 file_path = os.path.join(upload_folder, filename)
-                # Логика предотвращения перезаписи...
-                if os.path.exists(file_path):
-                    base, extension = os.path.splitext(filename)
-                    counter = 1
-                    while os.path.exists(file_path):
-                        filename = f"{base}_{counter}{extension}"
-                        file_path = os.path.join(upload_folder, filename)
-                        counter += 1
+                # Предотвращение перезаписи файла
+                counter = 1
+                base, extension = os.path.splitext(filename)
+                while os.path.exists(file_path):
+                    filename = f"{base}_{counter}{extension}"
+                    file_path = os.path.join(upload_folder, filename)
+                    counter += 1
                 try:
                     file.save(file_path)
-                    publication.file_url = f"/uploads/{filename}" # Путь относительно корня сайта
+                    publication.file_url = f"/uploads/{filename}" # Обновляем путь к файлу
                     logger.debug(f"Новый файл '{filename}' успешно прикреплен к публикации {pub_id}.")
                 except Exception as save_err:
                     logger.error(f"Ошибка сохранения файла {filename}: {save_err}")
                     return jsonify({'error': 'Ошибка при сохранении файла.'}), 500
+            elif file: # Если файл есть, но некорректный
+                return jsonify({'error': 'Недопустимый тип файла при обновлении.'}), 400
 
-        # --- Обновление полей публикации (кроме authors) ---
-        # Обязательные поля
-        if 'title' in data and data.get('title') is not None:
-            publication.title = data['title'].strip()
-            if not publication.title: return jsonify({'error': 'Название не может быть пустым.'}), 400
-        if 'year' in data and data.get('year') is not None:
-            try:
-                 year_int = int(data['year'])
-                 if year_int < 1900 or year_int > datetime.now().year + 5: # Допуск +5 лет
-                     raise ValueError("Invalid year range")
-                 publication.year = year_int
-            except (ValueError, TypeError):
-                 logger.error(f"Ошибка обновления публикации {pub_id}: Неверный формат года '{data.get('year')}'")
-                 return jsonify({'error': 'Неверный формат года.'}), 400
-
-        # Типы (Nullable поля)
-        type_id_data = data.get('type_id')
-        display_name_id_data = data.get('display_name_id')
-        type_id = None # Для проверки display_name
-        if type_id_data is not None:
-            try:
-                 type_id = int(type_id_data) if str(type_id_data).strip() else None
-                 if type_id is not None and not PublicationType.query.get(type_id):
-                      return jsonify({'error': f'Недопустимый type_id: {type_id}'}), 400
-                 publication.type_id = type_id
-            except (ValueError, TypeError):
-                 return jsonify({'error': 'type_id должен быть числом или null.'}), 400
-        else:
-             type_id = publication.type_id # Используем текущий для проверки display_name
-
-
-        if display_name_id_data is not None:
-             try:
-                 display_name_id = int(display_name_id_data) if str(display_name_id_data).strip() else None
-                 if display_name_id is not None:
-                      display_name = PublicationTypeDisplayName.query.get(display_name_id)
-                      if not display_name or (type_id is not None and display_name.publication_type_id != type_id):
-                           return jsonify({'error': f'Недопустимое русское название (ID: {display_name_id}) для выбранного типа публикации (ID: {type_id}).'}), 400
-                 publication.display_name_id = display_name_id
-             except (ValueError, TypeError):
-                  return jsonify({'error': 'display_name_id должен быть числом или null.'}), 400
-
-
-        # Обновление статуса (остается без изменений, так как не влияет на авторов)
-        new_status = data.get('status') # ПОЛЬЗОВАТЕЛЬ НЕ МОЖЕТ МЕНЯТЬ СТАТУС ЭТИМ ЭНДПОИНТОМ
-                                        # Он всегда должен быть 'draft' или 'returned_for_revision' при сохранении
-        # Поэтому мы НЕ ОБНОВЛЯЕМ статус здесь. Статус меняется через отдельные эндпоинты (/submit-for-review)
-        # или админом (/publish, /return-for-revision)
-        # При редактировании пользователем публикации со статусом 'returned_for_revision',
-        # можно автоматически менять статус обратно на 'draft' или делать это на фронте
-        # Если публикация 'returned_for_revision', сбрасываем флаг и коммент при любом сохранении пользователем
-        if publication.status == 'returned_for_revision':
-             publication.returned_for_revision = False
-             publication.return_comment = None
-             publication.returned_at = None # Сбросим дату возврата
-             # Можно автоматически вернуть в draft, но безопаснее ожидать submit_for_review
-             # publication.status = 'draft'
-
-
-        # --- Обновление авторов ---
-        if authors_data_received is not None:
-            # 1. Удаляем старых авторов (самый простой способ при использовании cascade=all, delete-orphan)
-            publication.authors.clear() # SQLAlchemy удалит связанные объекты при commit
-            # 2. Создаем новых (без commit пока)
-            for author_data in authors_data_received:
-                new_author = PublicationAuthor(
-                    name=author_data['name'].strip(),
-                    is_employee=author_data['is_employee'],
-                    publication=publication # Связь устанавливается, но в БД добавится при commit
-                )
-                db.session.add(new_author)
-            logger.debug(f"Authors for publication {pub_id} are set to be updated.")
-        # --- Конец обновления авторов ---
-
-        publication.updated_at = datetime.utcnow() # Обновляем дату изменения
-
+        # --- Обновление полей публикации (основные и новые) ---
         try:
-            db.session.commit() # Фиксируем все изменения
+            # Основные поля
+            if 'title' in data and data.get('title') is not None: publication.title = data['title'].strip()
+            if not publication.title: return jsonify({'error': 'Название не может быть пустым.'}), 400
+
+            if 'year' in data and data.get('year') is not None:
+                year_int = int(data['year'])
+                if year_int < 1900 or year_int > datetime.now().year + 5: raise ValueError("Недопустимый год")
+                publication.year = year_int
+
+            if 'type_id' in data and data.get('type_id') is not None:
+                type_id = int(data['type_id']) if data['type_id'] else None
+                if type_id is not None and not PublicationType.query.get(type_id): raise ValueError("Недопустимый type_id")
+                publication.type_id = type_id
+            else: # Нужен для проверки display_name_id
+                type_id = publication.type_id
+
+            if 'display_name_id' in data and data.get('display_name_id') is not None:
+                display_name_id = int(data['display_name_id']) if data['display_name_id'] else None
+                if display_name_id is not None:
+                      dn = PublicationTypeDisplayName.query.get(display_name_id)
+                      if not dn or (type_id is not None and dn.publication_type_id != type_id): raise ValueError("Недопустимое русское название")
+                publication.display_name_id = display_name_id
+
+
+          # --- Новые поля ---
+            publication.journal_conference_name = data.get('journal_conference_name', publication.journal_conference_name)
+            publication.doi = data.get('doi', publication.doi)
+            publication.issn = data.get('issn', publication.issn)
+            publication.isbn = data.get('isbn', publication.isbn)
+            publication.quartile = data.get('quartile', publication.quartile)
+
+            publication.volume = data.get('volume', publication.volume)       # <- ДОБАВИТЬ
+            publication.number = data.get('number', publication.number)       # <- ДОБАВИТЬ
+            publication.pages = data.get('pages', publication.pages)         # <- ДОБАВИТЬ
+
+            publication.department = data.get('department', publication.department)
+            publication.publisher = data.get('publisher', publication.publisher)
+            publication.publisher_location = data.get('publisher_location', publication.publisher_location)
+
+            # Обработка числовых полей с проверкой на None/пустую строку
+            psv = data.get('printed_sheets_volume')
+            publication.printed_sheets_volume = float(psv) if psv is not None and psv != '' else None
+
+            circ = data.get('circulation')
+            publication.circulation = int(circ) if circ is not None and circ != '' else None
+
+            publication.classification_code = data.get('classification_code', publication.classification_code)
+            publication.notes = data.get('notes', publication.notes)
+            # --- Конец новых полей ---
+
+            # Статус не меняем здесь! Если вернули на доработку, сбрасываем флаги
+            if publication.status == 'returned_for_revision':
+                publication.returned_for_revision = False
+                publication.return_comment = None
+                publication.returned_at = None
+
+            # --- Обновление авторов ---
+            if authors_data_received is not None:
+                # Удаляем старых авторов
+                PublicationAuthor.query.filter_by(publication_id=pub_id).delete()
+                # Создаем новых
+                for author_data in authors_data_received:
+                    new_author = PublicationAuthor(
+                        name=author_data['name'].strip(),
+                        is_employee=author_data['is_employee'],
+                        publication_id=pub_id # Прямая установка ID
+                    )
+                    db.session.add(new_author)
+                logger.debug(f"Авторы для публикации {pub_id} были обновлены.")
+
+            publication.updated_at = datetime.utcnow() # Обновляем дату изменения
+
+        except (ValueError, TypeError) as val_err:
+             logger.error(f"Ошибка валидации при обновлении публикации {pub_id}: {val_err}", exc_info=True)
+             return jsonify({'error': f'Ошибка в значении поля: {val_err}'}), 400
+
+        # --- Фиксация изменений ---
+        try:
+            db.session.commit()
             logger.debug(f"Публикация {pub_id} успешно обновлена пользователем {current_user.id}.")
-            db.session.refresh(publication)
+            # db.session.refresh(publication) # Не всегда нужно, to_dict() и так получит свежие данные
             return jsonify({
                 'message': 'Публикация успешно обновлена',
-                'publication': publication.to_dict() # Используем to_dict
+                'publication': publication.to_dict() # Возвращаем обновленные данные
             }), 200
         except Exception as e:
             db.session.rollback()
@@ -656,30 +677,38 @@ def manage_publication(pub_id):
 
 
     elif request.method == 'DELETE':
-        # --- Логика DELETE (как раньше) ---
+        # --- Логика DELETE (без изменений, но проверим удаление файла) ---
         # Можно добавить проверку, если нужно запретить удаление опубликованных
-        if publication.status == 'published' and current_user.role != 'admin':
+        if publication.status == 'published' and current_user.role not in ['admin', 'manager']:
              logger.warning(f"Пользователь {current_user.id} пытался удалить опубликованную публикацию {pub_id}.")
              return jsonify({'error': 'Нельзя удалить опубликованную публикацию.'}), 403
 
         try:
             # Удаление файла, если есть
+            file_path_to_delete = None
             if publication.file_url:
                  try:
                      file_path_segment = publication.file_url.split('/uploads/')[-1]
-                     file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], file_path_segment)
-                     if os.path.exists(file_path):
-                          os.remove(file_path)
-                          logger.debug(f"Файл '{file_path_segment}' удален перед удалением публикации {pub_id}.")
-                 except Exception as file_del_e:
-                      logger.error(f"Ошибка при удалении файла '{publication.file_url}' при удалении публикации: {str(file_del_e)}")
-                      # Не прерываем удаление из БД
+                     file_path_to_delete = os.path.join(current_app.config['UPLOAD_FOLDER'], file_path_segment)
+                 except Exception as path_err:
+                     logger.error(f"Ошибка определения пути к файлу '{publication.file_url}' при удалении публикации {pub_id}: {path_err}")
 
-            # SQLAlchemy обработает удаление авторов благодаря cascade='all, delete-orphan'
+            # Удаление из БД (SQLAlchemy удалит авторов через cascade)
             db.session.delete(publication)
-            db.session.commit()
+            db.session.commit() # Сначала коммит БД
+
+            # Удаление файла после успешного коммита БД
+            if file_path_to_delete and os.path.exists(file_path_to_delete):
+                 try:
+                     os.remove(file_path_to_delete)
+                     logger.debug(f"Файл '{file_path_to_delete}' успешно удален после удаления публикации {pub_id} из БД.")
+                 except Exception as file_del_e:
+                      # Логируем ошибку, но удаление из БД уже прошло успешно
+                      logger.error(f"Ошибка при удалении файла '{file_path_to_delete}' ПОСЛЕ удаления публикации {pub_id} из БД: {str(file_del_e)}")
+
             logger.debug(f"Публикация {pub_id} успешно удалена пользователем {current_user.id}")
             return jsonify({'message': 'Публикация успешно удалена!'}), 200
+
         except Exception as e:
             db.session.rollback()
             logger.error(f"Ошибка при удалении публикации {pub_id}: {str(e)}", exc_info=True)
@@ -696,112 +725,146 @@ def upload_file():
     if not file or not allowed_file(file.filename):
         return jsonify({'error': 'Недопустимый файл'}), 400
 
+    # Получаем основные поля
     title = request.form.get('title')
-    # --- Удаляем старое поле authors ---
-    # authors = request.form.get('authors')
-    # --- Получаем новое поле authors_json ---
     authors_json = request.form.get('authors_json')
-
     year = request.form.get('year')
     type_id = request.form.get('type_id')
     display_name_id = request.form.get('display_name_id')
 
-    # --- Обновляем проверку ---
+    # --- Получаем НОВЫЕ поля ---
+    journal_conference_name = request.form.get('journal_conference_name')
+    doi = request.form.get('doi')
+    issn = request.form.get('issn')
+    isbn = request.form.get('isbn')
+    quartile = request.form.get('quartile')
+    # number_volume_pages = request.form.get('number_volume_pages') # <- УДАЛИТЬ
+    volume = request.form.get('volume') # <- ДОБАВИТЬ
+    number = request.form.get('number') # <- ДОБАВИТЬ
+    pages = request.form.get('pages')   # <- ДОБАВИТЬ
+    department = request.form.get('department')
+    publisher = request.form.get('publisher')
+    publisher_location = request.form.get('publisher_location')
+    printed_sheets_volume_str = request.form.get('printed_sheets_volume')
+    circulation_str = request.form.get('circulation')
+    classification_code = request.form.get('classification_code')
+    notes = request.form.get('notes')
+    # --- Конец получения новых полей ---
+
+    # --- Валидация обязательных полей ---
     if not title or not year or not type_id or not authors_json:
         return jsonify({'error': 'Название, год, тип и хотя бы один автор обязательны'}), 400
 
-    # --- Парсинг и валидация JSON авторов ---
+    # --- Валидация JSON авторов (без изменений) ---
     try:
         authors_data = json.loads(authors_json)
         if not isinstance(authors_data, list) or not authors_data:
              raise ValueError("Authors data must be a non-empty list.")
+        # ... (остальная валидация авторов как раньше) ...
         for author_item in authors_data:
-             if not isinstance(author_item, dict) or 'name' not in author_item or 'is_employee' not in author_item:
-                 raise ValueError("Each author must be an object with 'name' and 'is_employee'.")
-             if not isinstance(author_item['name'], str) or not author_item['name'].strip():
-                 raise ValueError("Author name cannot be empty.")
-             if not isinstance(author_item['is_employee'], bool):
-                  raise ValueError("Author 'is_employee' must be boolean.")
+            if not isinstance(author_item, dict) or 'name' not in author_item or 'is_employee' not in author_item:
+                raise ValueError("Each author must be an object with 'name' and 'is_employee'.")
+            if not isinstance(author_item['name'], str) or not author_item['name'].strip():
+                raise ValueError("Author name cannot be empty.")
+            if not isinstance(author_item['is_employee'], bool):
+                raise ValueError("Author 'is_employee' must be boolean.")
     except (json.JSONDecodeError, ValueError) as e:
         logger.error(f"Invalid authors_json format: {authors_json}. Error: {e}")
         return jsonify({'error': f'Некорректный формат данных авторов: {e}'}), 400
-    # --- Конец парсинга ---
 
-    # --- Проверка года, type_id, display_name_id (как раньше) ---
+    # --- Валидация типов и числовых полей ---
     try:
         year_int = int(year)
-        if year_int < 1900 or year_int > datetime.now().year + 5: # Допуск +5 лет
-             raise ValueError("Invalid year range")
+        if year_int < 1900 or year_int > datetime.now().year + 5: raise ValueError("Invalid year range")
         type_id_int = int(type_id) if type_id else None
         display_name_id_int = int(display_name_id) if display_name_id else None
-    except (ValueError, TypeError):
-        return jsonify({'error': 'Год, type_id и display_name_id (если переданы) должны быть числами'}), 400
+        # Новые числовые поля
+        printed_sheets_volume = float(printed_sheets_volume_str) if printed_sheets_volume_str is not None and printed_sheets_volume_str != '' else None
+        circulation = int(circulation_str) if circulation_str is not None and circulation_str != '' else None
+    except (ValueError, TypeError) as e:
+        logger.error(f"Ошибка конвертации числовых полей: {e}", exc_info=True)
+        return jsonify({'error': 'Год, type_id, display_name_id, тираж и объем п.л. (если переданы) должны быть числами'}), 400
 
+    # Проверка существования типа и русского названия (без изменений)
     type_ = PublicationType.query.get(type_id_int) if type_id_int else None
     if not type_:
         return jsonify({'error': 'Недопустимый тип публикации'}), 400
-
     if display_name_id_int:
         display_name = PublicationTypeDisplayName.query.get(display_name_id_int)
         if not display_name or display_name.publication_type_id != type_id_int:
             return jsonify({'error': 'Недопустимое русское название для выбранного типа'}), 400
     else:
-         display_name = None # Явно
+         display_name_id_int = None # Убедимся, что ID это None, если не передано
 
 
-    # --- Загрузка файла (как раньше, но с улучшенной обработкой ошибок) ---
+    # --- Загрузка файла (без изменений, но проверим путь сохранения) ---
     filename = secure_filename(file.filename)
     upload_folder = current_app.config['UPLOAD_FOLDER']
-    if not os.path.exists(upload_folder):
-        os.makedirs(upload_folder)
-        logger.debug(f"Создана директория загрузки: {upload_folder}")
+    os.makedirs(upload_folder, exist_ok=True) # Убедимся, что папка есть
     file_path = os.path.join(upload_folder, filename)
-    if os.path.exists(file_path):
-        base, extension = os.path.splitext(filename)
-        counter = 1
-        while os.path.exists(file_path):
-            filename = f"{base}_{counter}{extension}"
-            file_path = os.path.join(upload_folder, filename)
-            counter += 1
+    # Предотвращение перезаписи файла
+    counter = 1
+    base, extension = os.path.splitext(filename)
+    while os.path.exists(file_path):
+        filename = f"{base}_{counter}{extension}"
+        file_path = os.path.join(upload_folder, filename)
+        counter += 1
     try:
         file.save(file_path)
     except Exception as save_err:
         logger.error(f"Ошибка сохранения файла {filename}: {save_err}")
+        # ВАЖНО: Не оставлять мусор, если файл не удалось сохранить
         return jsonify({'error': 'Ошибка при сохранении файла.'}), 500
 
 
-    # --- Создание объектов Publication и PublicationAuthor ---
+    # --- Создание объекта Publication со всеми полями ---
     publication = Publication(
         title=title.strip(),
-        # authors=authors, # Удалено
         year=year_int,
         type_id=type_id_int,
         display_name_id=display_name_id_int,
         status='draft',
-        file_url=f"/uploads/{filename}", # Путь относительно корня сайта
+        file_url=f"/uploads/{filename}",
         user_id=current_user.id,
         returned_for_revision=False,
+        # --- Передаем новые поля ---
+        journal_conference_name=journal_conference_name,
+        doi=doi,
+        issn=issn,
+        isbn=isbn,
+        quartile=quartile,
+        # number_volume_pages=number_volume_pages, # <- УДАЛИТЬ
+        volume=volume, # <- ДОБАВИТЬ
+        number=number, # <- ДОБАВИТЬ
+        pages=pages,   # <- ДОБАВИТЬ
+        department=department,
+        publisher=publisher,
+        publisher_location=publisher_location,
+        printed_sheets_volume=printed_sheets_volume,
+        circulation=circulation,
+        classification_code=classification_code,
+        notes=notes
     )
-    # Сразу добавляем авторов к объекту Publication перед commit
+
+    # Создание авторов (без изменений)
     for author_data in authors_data:
         pub_author = PublicationAuthor(
             name=author_data['name'].strip(),
             is_employee=author_data['is_employee'],
             publication=publication # Устанавливаем связь
         )
-        # publication.authors.append(pub_author) # SQLAlchemy >= 1.4 сделает это неявно
-                                                 # при установке publication=publication
+        # SQLAlchemy добавит в сессию через relationship/cascade
 
-    db.session.add(publication) # Добавляем публикацию (авторы добавятся через cascade)
+    db.session.add(publication) # Добавляем саму публикацию
 
-    # --- Сохранение в БД ---
+    # --- Сохранение в БД (с удалением файла при ошибке) ---
     try:
         db.session.commit()
-        logger.debug(f"Publication {publication.id} created with {len(authors_data)} authors.")
+        logger.debug(f"Publication {publication.id} created with {len(authors_data)} authors and new fields.")
     except Exception as e:
         db.session.rollback()
         logger.error(f"Error creating publication with authors: {e}", exc_info=True)
-        # Удаляем загруженный файл, если запись в БД не удалась
+        # Удаляем загруженный файл, так как запись в БД не удалась
         if os.path.exists(file_path):
             try:
                 os.remove(file_path)
@@ -814,32 +877,23 @@ def upload_file():
     return jsonify({
         'message': 'Публикация успешно загружена',
         'publication': publication.to_dict()
-    }), 201 # Используем статус 201 Created
+    }), 201
 
-
-# --- Константы для BibTeX импорта (как раньше) ---
-BIBTEX_TO_APP_TYPE_MAP = {
-    'article': 'article',
-    'inproceedings': 'conference', # Доклады/статьи конференций
-    'conference': 'conference',    # Синоним inproceedings
-    'book': 'book',
-    'inbook': 'book',      # Часть книги (глава, диапазон страниц)
-    'incollection': 'book',  # Статья или глава в сборнике/редактируемой книге
-    'phdthesis': 'phdthesis',
-    'mastersthesis': 'mastersthesis',
-    'misc': 'misc',          # Прочее
-    'unpublished': 'misc',   # Неопубликованные работы, часто подходит для депонированных
-    'techreport': 'misc',    # Технические отчеты
-    'manual': 'misc',        # Руководства
-    # Добавьте сюда другие BibTeX типы, если встретятся и нужно их маппить
-}
-APP_TYPE_TO_DISPLAY_NAME_MAP = {
-    'article': 'Статья',
-    'conference': 'Конференция',
-    'book': 'Книга',
-    'misc': 'Депонированная рукопись', # Ваше специфическое маппирование 'misc'
-    'phdthesis': 'Докторская диссертация',
-    'mastersthesis': 'Магистерская диссертация',
+BIBTEX_SYNONYM_MAP = {
+    'inproceedings': 'conference', # Самый частый случай
+    'proceedings': 'conference',   # Сборник трудов тоже можно отнести к типу 'conference' или 'book'? Пока 'conference'
+    'inbook': 'book',              # Глава в книге
+    'incollection': 'book',        # Тоже часть книги/сборника
+    'phdthesis': 'phdthesis',        # Явное совпадение
+    'mastersthesis': 'mastersthesis',# Явное совпадение
+    'techreport': 'techreport',      # Добавлен явный тип, если есть
+    'manual': 'misc',              # Руководство можно к misc
+    'unpublished': 'misc',         # Неопубликованное к misc
+    'misc': 'misc',                # misc к misc
+    'article': 'article',          # Явное совпадение
+    'book': 'book',                # Явное совпадение
+    'journal': 'article',          # Некоторые могут использовать @journal вместо @article
+    'booklet': 'book'              # Буклеты тоже к книгам/misc? Пока book
 }
 
 # --- Обновленный эндпоинт upload_bibtex ---
@@ -847,8 +901,8 @@ APP_TYPE_TO_DISPLAY_NAME_MAP = {
 @bp.route('/publications/upload-bibtex', methods=['POST'])
 @login_required
 def upload_bibtex():
-    logger.debug(f"Получен POST запрос для /publications/upload-bibtex")
-    # ... (проверка файла как раньше) ...
+    logger.debug("Получен POST запрос для /publications/upload-bibtex")
+    # --- Проверка файла ---
     if 'file' not in request.files:
         logger.warning("BibTeX файл не предоставлен в запросе.")
         return jsonify({'error': 'BibTeX файл не предоставлен'}), 400
@@ -859,184 +913,273 @@ def upload_bibtex():
         return jsonify({'error': 'Недопустимый файл. Ожидается .bib'}), 400
 
     try:
-        content = file.read().decode('utf-8') # Предполагаем UTF-8
+        # --- Чтение и парсинг файла ---
+        content = file.read().decode('utf-8')
         logger.debug(f"Файл {file.filename} успешно прочитан и декодирован.")
 
-        bib_database = bibtexparser.loads(content)
+        # Устанавливаем common_strings=False, чтобы не заменялись месяцы и др.
+        bib_parser = bibtexparser.bparser.BibTexParser(common_strings=False)
+        bib_database = bibtexparser.loads(content, parser=bib_parser)
         logger.debug(f"Парсинг BibTeX файла завершен. Найдено {len(bib_database.entries)} записей.")
 
         publications_added_count = 0
         skipped_entries = []
         error_entries = []
 
-        # --- Предзагрузка типов и названий (как раньше) ---
+        # --- Предзагрузка типов и названий из БД ---
         try:
-            app_types_by_name = {pt.name: pt for pt in PublicationType.query.all()}
-            app_display_names_by_key = {(pnd.publication_type_id, pnd.display_name): pnd
-                                        for pnd in PublicationTypeDisplayName.query.all()}
-            logger.debug(f"Загружено {len(app_types_by_name)} типов PublicationType и {len(app_display_names_by_key)} объектов PublicationTypeDisplayName.")
+            all_types = PublicationType.query.options(
+                db.selectinload(PublicationType.display_names) # Загружаем связанные display_names
+            ).all()
+
+            # Словарь типов { 'name': PublicationType_object }
+            app_types_by_name = {pt.name.lower(): pt for pt in all_types}
+
+            # Словарь отображаемых имен { type_id: [PublicationTypeDisplayName_object, ...] }
+            # Сразу сортируем по ID (или другому полю, гарантирующему порядок)
+            display_names_by_type_id = {}
+            for pt in all_types:
+                # Сортируем display_names по ID, чтобы гарантированно брать первое
+                sorted_display_names = sorted(pt.display_names, key=lambda dn: dn.id)
+                display_names_by_type_id[pt.id] = sorted_display_names
+
+            logger.debug(f"Загружено {len(app_types_by_name)} типов PublicationType и связанные DisplayNames.")
+
         except Exception as e:
              logger.error(f"Ошибка предварительной загрузки типов и названий из БД: {str(e)}", exc_info=True)
-             db.session.rollback() # Откатываем на всякий случай
+             db.session.rollback()
              return jsonify({'error': 'Ошибка настройки базы данных типов публикаций.'}), 500
 
 
         for entry in bib_database.entries:
             entry_key = entry.get('ID', 'Без ключа')
+            bibtex_type_raw = entry.get('ENTRYTYPE', '').lower() # Сразу в lower
 
-            # --- Определение типа и display name (как раньше) ---
-            bibtex_type_raw = entry.get('ENTRYTYPE', entry.get('entrytype', ''))
-            bibtex_type_lower = bibtex_type_raw.lower() if isinstance(bibtex_type_raw, str) else ''
-            if not bibtex_type_lower:
-                 logger.warning(f"Запись с ключом '{entry_key}': Не удалось извлечь тип BibTeX или он пустой ('{bibtex_type_raw}'). Пропускаем.")
-                 skipped_entries.append(entry_key)
+            # Очистка значений в записи от лишних скобок, если они не заменяются автоматически
+            for key, value in entry.items():
+                if isinstance(value, str):
+                    # Убираем скобки {}, кавычки "" и пробелы по краям
+                    entry[key] = value.strip('{} "')
+
+            if not bibtex_type_raw:
+                 logger.warning(f"Запись с ключом '{entry_key}': тип BibTeX пустой. Пропускаем.")
+                 skipped_entries.append(f"{entry_key} (пустой тип)")
                  continue
 
-            app_type_name = BIBTEX_TO_APP_TYPE_MAP.get(bibtex_type_lower)
-            if not app_type_name:
-                logger.warning(f"Запись '{entry_key}', тип BibTeX '{bibtex_type_lower}': Не маппируется. Пропускаем.")
-                skipped_entries.append(entry_key)
-                continue
+            # --- Шаг 1 и 2: Поиск PublicationType (сначала прямой, потом через синонимы) ---
+            type_obj = app_types_by_name.get(bibtex_type_raw) # Прямой поиск
 
-            type_obj = app_types_by_name.get(app_type_name)
             if not type_obj:
-                logger.error(f"Запись '{entry_key}': Внутренний тип '{app_type_name}' не найден в БД. Пропускаем.")
-                skipped_entries.append(entry_key)
+                 # Прямого совпадения нет, ищем в синонимах
+                 target_app_type_name = BIBTEX_SYNONYM_MAP.get(bibtex_type_raw)
+                 if target_app_type_name:
+                     type_obj = app_types_by_name.get(target_app_type_name)
+                     logger.debug(f"Запись '{entry_key}': BibTeX тип '{bibtex_type_raw}' смаплен на '{target_app_type_name}' через синонимы.")
+                 else:
+                    # Нет ни прямого совпадения, ни синонима
+                    logger.warning(f"Запись '{entry_key}': Тип BibTeX '{bibtex_type_raw}' не найден ни напрямую, ни в синонимах. Пропускаем.")
+                    skipped_entries.append(f"{entry_key} (неизв./немапп. тип: {bibtex_type_raw})")
+                    continue
+            else:
+                logger.debug(f"Запись '{entry_key}': BibTeX тип '{bibtex_type_raw}' найден напрямую.")
+
+            if not type_obj: # Если и после поиска по синонимам не нашли (маловероятно, но все же)
+                logger.warning(f"Запись '{entry_key}': Соответствующий тип приложения не найден в БД для BibTeX типа '{bibtex_type_raw}'. Пропускаем.")
+                skipped_entries.append(f"{entry_key} (тип не в БД)")
                 continue
 
-            expected_display_name_text = APP_TYPE_TO_DISPLAY_NAME_MAP.get(app_type_name)
-            if not expected_display_name_text:
-                 logger.error(f"Запись '{entry_key}': Для типа '{app_type_name}' не настроено русское имя в APP_TYPE_TO_DISPLAY_NAME_MAP. Пропускаем.")
-                 skipped_entries.append(entry_key)
-                 continue
+            # --- Шаг 3: Выбор первого PublicationTypeDisplayName ---
+            associated_display_names = display_names_by_type_id.get(type_obj.id, [])
+            if not associated_display_names:
+                logger.error(f"Запись '{entry_key}': Для типа '{type_obj.name}' (ID: {type_obj.id}) не найдено НИ ОДНОГО отображаемого имени в БД. Проверьте целостность данных! Пропускаем.")
+                skipped_entries.append(f"{entry_key} (нет рус. имен для типа {type_obj.name})")
+                continue
 
-            display_name_obj_key = (type_obj.id, expected_display_name_text)
-            display_name_obj = app_display_names_by_key.get(display_name_obj_key)
-            if not display_name_obj:
-                 logger.error(f"Запись '{entry_key}': Русское имя '{expected_display_name_text}' для типа '{app_type_name}' (id={type_obj.id}) не найдено в БД. Пропускаем.")
-                 skipped_entries.append(entry_key)
-                 continue
+            # Берем первое из отсортированного списка
+            first_display_name_obj = associated_display_names[0]
+            logger.debug(f"Запись '{entry_key}': Для типа '{type_obj.name}' выбрано первое отображаемое имя: '{first_display_name_obj.display_name}' (ID: {first_display_name_obj.id}).")
 
 
-            # --- Блок создания записи (ОБНОВЛЕН для авторов) ---
+            # --- Блок создания записи (с извлечением НОВЫХ полей) ---
             try:
-                 # Извлечение title, year
+                 # Основные поля
                  title = entry.get('title', 'Без названия').strip()
-                 if not title: title = 'Без названия' # Гарантия непустого заголовка
+                 if not title: title = 'Без названия'
                  year_str = entry.get('year')
                  year = None
                  if year_str:
-                     try:
+                     try: # Более устойчивый парсинг года
                          year_str_cleaned = "".join(filter(str.isdigit, year_str))
-                         if len(year_str_cleaned) >= 4:
-                             year = int(year_str_cleaned[:4])
-                     except (ValueError, TypeError) as ve:
-                         logger.warning(f"Запись '{entry_key}': Некорректный год '{year_str}'. Год оставлен пустым.")
+                         if len(year_str_cleaned) >= 4: year = int(year_str_cleaned[:4])
+                     except (ValueError, TypeError): year = None
                  if year is None or year < 1900 or year > datetime.now().year + 5:
-                     year = datetime.now().year # По умолчанию текущий год при ошибке
+                     logger.warning(f"Запись '{entry_key}': Некорректный или отсутствующий год ('{year_str}'). Используется текущий год.")
+                     year = datetime.now().year
 
-                 # --- Парсинг авторов ---
+                 # --- Авторы (используем bibtexparser для лучшего парсинга) ---
                  author_string = entry.get('author', entry.get('editor', '')).strip()
                  author_names = []
                  if author_string:
-                     # Используем простой split, его может потребоваться улучшить для сложных случаев
-                     author_names = [name.strip() for name in author_string.split(' and ') if name.strip()]
+                    try:
+                         # Преобразование LaTeX сущностей в Unicode
+                         author_string = homogenize_latex_encoding(author_string)
+                         # Используем getnames для разделения
+                         names = bibtexparser.customization.getnames([a.strip() for a in author_string.split(' and ')])
+                         # Форматируем как "Фамилия И." или как есть, если парсинг не дал части
+                         formatted_names = []
+                         for name_parts in names: # getnames возвращает список списков строк, если используется splitname
+                              # getnames возвращает просто список строк
+                             if isinstance(name_parts, str):
+                                 formatted_names.append(name_parts)
+                             else: # Попытка использовать splitname для формата Ф И О - менее надежно
+                                try:
+                                    p = splitname(name_parts)
+                                    last = p.get('last', [''])[0]
+                                    first = p.get('first', [''])[0]
+                                    von = p.get('von', [''])[0] # частицы типа von, van
+                                    jr = p.get('jr', [''])[0]   # суффиксы типа Jr., Sr.
+                                    # Склеиваем
+                                    name_str = f"{von} {last}".strip()
+                                    if first: name_str += f" {first[0]}." if first else ''
+                                    # middle = p.get('middle', [''])[0] # среднее имя/отчество пока опускаем
+                                    # if middle: name_str += f" {middle[0]}."
+                                    if jr: name_str += f", {jr}"
+                                    formatted_names.append(name_str.strip())
+                                except: # Если splitname не сработал, берем как есть
+                                    formatted_names.append(" ".join(name_parts).strip())
+
+                         author_names = [name for name in formatted_names if name]
+
+                    except Exception as author_parse_err:
+                         logger.warning(f"Запись '{entry_key}': Ошибка парсинга авторов '{author_string}' ({author_parse_err}), используем простое разделение.")
+                         author_names = [name.strip() for name in author_string.split(' and ') if name.strip()]
+
                  if not author_names:
-                     author_names = ['Неизвестный автор'] # Гарантируем хотя бы одного
-                 # --- Конец парсинга авторов ---
+                     author_names = ['Неизвестный автор']
 
+                 # --- Извлечение полей из BibTeX ---
+                 # Journal/Booktitle/Series
+                 journal_conf = entry.get('journal', entry.get('booktitle', entry.get('series', ''))).strip()
+                 doi = entry.get('doi', '').strip()
+                 issn = entry.get('issn', '').strip()
+                 isbn = entry.get('isbn', '').strip()
 
-                 # --- Создание Publication (без авторов пока) ---
+                 volume = entry.get('volume', '').strip()
+                 number = entry.get('number', entry.get('issue', '')).strip() # Добавляем 'issue' как синоним
+                 pages = entry.get('pages', '').replace('--', '-').strip()
+
+                 # Publisher/Organization/School/Address
+                 publisher = entry.get('publisher', entry.get('organization', entry.get('school', ''))).strip()
+                 address = entry.get('address', entry.get('location', '')).strip() # Добавляем 'location'
+                 notes = entry.get('note', entry.get('annote', '')).strip()
+                 # Поля quartile, department, printed_sheets_volume, circulation, classification_code обычно не импортируются
+
+                 # Создание Publication
                  publication = Publication(
-                     title=title,
-                     year=year,
-                     type_id=type_obj.id,
-                     display_name_id=display_name_obj.id,
-                     status='draft',
-                     user_id=current_user.id,
-                     returned_for_revision=False,
+                     title=title, year=year,
+                     type_id=type_obj.id, # Используем ID найденного типа
+                     display_name_id=first_display_name_obj.id, # Используем ID первого отображаемого имени
+                     status='draft', user_id=current_user.id, returned_for_revision=False,
+                     # --- Передача полей ---
+                     journal_conference_name=journal_conf if journal_conf else None,
+                     doi=doi if doi else None,
+                     issn=issn if issn else None,
+                     isbn=isbn if isbn else None,
+                     volume=volume if volume else None,
+                     number=number if number else None,
+                     pages=pages if pages else None,
+                     publisher=publisher if publisher else None,
+                     publisher_location=address if address else None,
+                     notes=notes if notes else None,
+                     # Оставляем остальные поля пустыми (quartile, department и т.д.)
+                     quartile=None,
+                     department=None,
+                     printed_sheets_volume=None,
+                     circulation=None,
+                     classification_code=None
                  )
-                 # --- Создание PublicationAuthor ---
-                 for author_name in author_names:
-                     pub_author = PublicationAuthor(
-                         name=author_name,
-                         is_employee=False, # По умолчанию не сотрудник
-                         publication=publication # Связь
-                     )
-                     # publication.authors.append(pub_author) # Неявно добавится
-
-                 # Добавляем объект Publication в сессию (авторы добавятся через cascade)
                  db.session.add(publication)
-                 # НЕ делаем commit внутри цикла!
+
+                 # Создание авторов
+                 for author_name in author_names:
+                     # Не создаем пустых авторов
+                     if author_name:
+                         db.session.add(PublicationAuthor(name=author_name, is_employee=False, publication=publication))
 
                  publications_added_count += 1
-                 logger.debug(f"Запись '{entry_key}' (BibTeX: {bibtex_type_lower}) успешно подготовлена.")
+                 logger.debug(f"Запись '{entry_key}' (BibTeX: {bibtex_type_raw}) успешно подготовлена для добавления.")
 
             except Exception as field_e:
-                 logger.error(f"Ошибка обработки записи '{entry_key}': {str(field_e)}", exc_info=True)
-                 error_entries.append(entry_key)
-                 # ВАЖНО: Не откатываем сессию здесь, чтобы не потерять другие записи.
-                 # Обработка ошибок commit будет после цикла.
-                 continue
-            # --- Конец блока try/except для записи ---
+                 db.session.rollback() # Откатываем добавление публикации и ее авторов при ошибке
+                 logger.error(f"Ошибка обработки полей записи '{entry_key}': {str(field_e)}", exc_info=True)
+                 error_entries.append(f"{entry_key} (ошибка полей: {field_e})")
+                 continue # Переходим к следующей записи
 
-
-        # --- Фиксация изменений ПОСЛЕ ЦИКЛА ---
+        # --- Фиксация изменений ---
         try:
-            if publications_added_count > 0: # Только если есть что коммитить
+            if publications_added_count > 0:
                 db.session.commit()
                 logger.debug(f"Импорт завершен. Успешно зафиксированы {publications_added_count} публикаций.")
             else:
                 logger.debug("Нет публикаций для фиксации.")
+                if error_entries or skipped_entries:
+                    db.session.rollback() # Важно откатить, если были ошибки/пропуски и ничего не добавилось
+
         except Exception as commit_e:
-             db.session.rollback() # Откатываем ВЕСЬ импорт при ошибке
+             db.session.rollback()
              logger.error(f"Критическая ошибка при фиксации BibTeX импорта: {str(commit_e)}", exc_info=True)
-             # Формируем сообщение об ошибке
-             response_message = f'Импорт завершен. Добавлено 0 публикаций. Ошибка базы данных при сохранении.'
-             if skipped_entries:
-                 response_message += f' Пропущено {len(skipped_entries)} записей.'
-             if error_entries:
-                  response_message += f' Ошибка при обработке {len(error_entries)} записей.'
+             # Сообщение должно отражать, что коммит не удался
+             response_message = f'Импорт прерван из-за ошибки базы данных при сохранении. Добавлено 0 публикаций.'
+             if skipped_entries: response_message += f' Пропущено (до ошибки): {len(skipped_entries)} записей.'
+             if error_entries: response_message += f' Ошибка обработки (до ошибки): {len(error_entries)} записей.'
              return jsonify({
-                'message': response_message,
-                'added_count': 0,
-                'skipped_count': len(skipped_entries),
-                'error_count': len(error_entries),
-                'db_error': True # Флаг ошибки БД
+                'message': response_message, 'added_count': 0,
+                'skipped_count': len(skipped_entries), 'error_count': len(error_entries),
+                'db_error': True
              }), 500
 
-
-        # --- Формирование успешного ответа (как раньше) ---
-        response_message = f'Импорт завершен. Добавлено {publications_added_count} публикаций.'
+        # --- Формирование успешного ответа ---
+        response_message = f'Импорт завершен. Успешно добавлено {publications_added_count} публикаций.'
+        details = []
         if skipped_entries:
-            skipped_sample = skipped_entries[:10]
-            skipped_info = f'Пропущено {len(skipped_entries)} записей из-за типа/названия'
-            if skipped_sample: skipped_info += f' (ключи: {", ".join(skipped_sample)}{"..." if len(skipped_entries) > len(skipped_sample) else ""}).'
-            response_message += ' ' + skipped_info
-            logger.warning(skipped_info)
+            response_message += f' Пропущено: {len(skipped_entries)}.'
+            details.append(f"Пропущенные записи: {'; '.join(skipped_entries)}")
+            logger.warning(f"Пропущенные записи при импорте BibTeX: {'; '.join(skipped_entries)}")
         if error_entries:
-             error_sample = error_entries[:10]
-             error_info = f'Ошибка при обработке {len(error_entries)} записей'
-             if error_sample: error_info += f' (ключи: {", ".join(error_sample)}{"..." if len(error_entries) > len(error_sample) else ""}). Подробности в логах.'
-             response_message += ' ' + error_info
-             logger.error(error_info)
+             response_message += f' Ошибок обработки полей: {len(error_entries)}.'
+             details.append(f"Ошибки обработки полей: {'; '.join(error_entries)}")
+             logger.error(f"Ошибки при обработке полей записей BibTeX: {'; '.join(error_entries)}")
 
-        return jsonify({
+        status_code = 200
+        if skipped_entries or error_entries:
+            status_code = 207 # Multi-Status, если были и успехи, и проблемы
+
+        response_data = {
             'message': response_message,
             'added_count': publications_added_count,
             'skipped_count': len(skipped_entries),
             'error_count': len(error_entries)
-        }), 200
+        }
+        if details:
+            response_data['details'] = " ".join(details) # Добавляем детали в ответ
+
+        return jsonify(response_data), status_code
 
     except UnicodeDecodeError:
-         # Откатываем, если что-то попало в сессию до ошибки декодирования (маловероятно)
-         db.session.rollback()
+         # Откат не нужен
          logger.error(f"Ошибка декодирования BibTeX файла. Ожидается UTF-8.", exc_info=True)
          return jsonify({'error': 'Ошибка чтения файла. Проверьте кодировку (ожидается UTF-8).'}), 400
+    except bibtexparser.bparser.BibTexParserError as parse_err:
+         # Откат не нужен
+         logger.error(f"Ошибка парсинга BibTeX файла: {parse_err}", exc_info=True)
+         return jsonify({'error': f'Ошибка парсинга BibTeX файла: {str(parse_err)}. Проверьте синтаксис файла.'}), 400
     except Exception as e:
-        db.session.rollback() # Откат при любых других ошибках парсинга или инициализации
-        logger.error(f"Критическая ошибка при обработке BibTeX файла: {str(e)}", exc_info=True)
-        return jsonify({'error': f'Внутренняя ошибка при обработке BibTeX файла: {str(e)}'}), 500
+        # Откат на всякий случай, если ошибка была после начала работы с сессией
+        if db.session.is_active:
+            db.session.rollback()
+        logger.error(f"Неожиданная ошибка при обработке BibTeX файла: {str(e)}", exc_info=True)
+        return jsonify({'error': f'Внутренняя ошибка сервера при обработке BibTeX файла.'}), 500
+
 
 @bp.route('/publications/<int:pub_id>/attach-file', methods=['POST'])
 @login_required
@@ -1108,51 +1251,138 @@ def attach_file(pub_id):
 @bp.route('/publications/export-bibtex', methods=['GET'])
 @login_required
 def export_bibtex():
-    logger.debug(f"Получен GET запрос для /publications/export-bibtex")
+    logger.debug(f"Получен GET запрос для /publications/export-bibtex от пользователя {current_user.id}")
     try:
-        logger.debug(f"Запрос публикаций для пользователя {current_user.id}")
-        publications = Publication.query.filter_by(user_id=current_user.id).all()
-        logger.debug(f"Найдено публикаций: {len(publications)}")
+        logger.debug(f"Запрос публикаций для экспорта пользователем {current_user.id}")
+        publications = Publication.query.filter_by(user_id=current_user.id)\
+            .options(
+                db.joinedload(Publication.authors),
+                db.joinedload(Publication.type) # Убедимся что тип загружен
+             )\
+            .order_by(Publication.year.desc(), Publication.title)\
+            .all()
+        logger.debug(f"Найдено публикаций для экспорта: {len(publications)}")
+
+        if not publications:
+             logger.info(f"Нет публикаций для экспорта для пользователя {current_user.id}")
+             # Возвращаем пустой файл или сообщение? Вернем пустой файл.
+             bib_db_empty = BibDatabase()
+             bibtex_str_empty = BibTexWriter().write(bib_db_empty)
+             response_empty = make_response(bibtex_str_empty)
+             response_empty.headers['Content-Disposition'] = 'attachment; filename="publications_empty.bib"'
+             response_empty.headers['Content-Type'] = 'application/x-bibtex; charset=utf-8'
+             return response_empty
+
 
         bib_db = BibDatabase()
-        entries_list = [] # Собираем записи в список
-        for pub in publications:
-            # --- Собираем авторов ---
-            author_names = [author.name for author in pub.authors] # Получаем список имен
-            author_string = ' and '.join(author_names) if author_names else 'Неизвестный автор'
-            # --- Конец сборки авторов ---
+        entries_list = []
+        for i, pub in enumerate(publications):
+            entry = {}
+            # --- Тип записи ---
+            # Берем имя из связанной таблицы PublicationType
+            # Убираем '@', если вдруг он там есть (не должен по вашим данным)
+            # Если тип не задан, используем 'misc' по умолчанию
+            entry['ENTRYTYPE'] = pub.type.name.lower().lstrip('@') if pub.type and pub.type.name else 'misc'
+            bibtex_type = entry['ENTRYTYPE'] # Сохраним для удобства
 
-            entries_list.append({
-                # --- Используем 'misc' как запасной вариант, если тип не указан ---
-                'ENTRYTYPE': pub.type.name if pub.type else 'misc',
-                'ID': f'pub{pub.id}',
-                'title': pub.title or 'Без названия',
-                'author': author_string, # Используем собранную строку
-                'year': str(pub.year) if pub.year else str(datetime.now().year)
-            })
-        bib_db.entries = entries_list # Присваиваем готовый список
+            # --- ID ---
+            # Делаем ID уникальным в рамках экспорта (пользователь + ID публикации)
+            entry['ID'] = f'user{current_user.id}_pub{pub.id}' # Можно добавить индекс i если нужно
 
+            # --- Основные поля ---
+            if pub.title: entry['title'] = pub.title
+            author_names = [author.name for author in pub.authors if author.name] # Исключаем пустые имена
+            if author_names: entry['author'] = ' and '.join(author_names)
+            if pub.year: entry['year'] = str(pub.year)
+
+            # --- Экспорт полей в соответствующие поля BibTeX ---
+            # Наименование журнала/конференции
+            if pub.journal_conference_name:
+                if bibtex_type == 'article':
+                    entry['journal'] = pub.journal_conference_name
+                elif bibtex_type in ['inproceedings', 'conference', 'incollection', 'proceedings', 'book']:
+                    entry['booktitle'] = pub.journal_conference_name # booktitle используется чаще всего
+                # Если нужно другое поле для 'book', можно добавить условие
+                # elif bibtex_type == 'book':
+                #     entry['series'] = pub.journal_conference_name # Например, в series
+                # else: # В остальных случаях - в note
+                #     entry.setdefault('note', []).append(f"Место публикации: {pub.journal_conference_name}")
+                else: # В не самых очевидных случаях (misc, thesis...) добавим в notes
+                    entry.setdefault('note', []).append(f"Источник: {pub.journal_conference_name}")
+
+
+            # DOI, ISSN, ISBN
+            if pub.doi: entry['doi'] = pub.doi
+            if pub.issn: entry['issn'] = pub.issn
+            if pub.isbn: entry['isbn'] = pub.isbn
+
+            # Том, номер, страницы - прямой экспорт
+            if pub.volume: entry['volume'] = str(pub.volume) # Убедимся, что строка
+            if pub.number: entry['number'] = str(pub.number) # Убедимся, что строка
+            if pub.pages: entry['pages'] = str(pub.pages).replace('-', '--') # В BibTeX часто используют -- для диапазона
+
+            # Издательство, Место издательства
+            if pub.publisher:
+                 if bibtex_type in ['book', 'inbook', 'proceedings', 'booklet', 'manual']:
+                      entry['publisher'] = pub.publisher
+                 elif bibtex_type in ['phdthesis', 'mastersthesis', 'techreport']:
+                      entry['institution'] = pub.publisher # 'institution' или 'school'
+                 else: # Для article, inproceedings - менее стандартно, в note
+                     entry.setdefault('note', []).append(f"Издатель/Организация: {pub.publisher}")
+
+            if pub.publisher_location: entry['address'] = pub.publisher_location
+
+            # Собираем все дополнительные и нестандартные поля в 'note'
+            # Используем setdefault для создания списка notes, если его еще нет
+            note_list = entry.setdefault('note', []) # Теперь это список строк
+
+            if pub.quartile: note_list.append(f"Квартиль: {pub.quartile}")
+            if pub.department: note_list.append(f"Кафедра: {pub.department}")
+            # Обработка Float и Int перед добавлением в note
+            if pub.printed_sheets_volume is not None:
+                note_list.append(f"Объем (п.л.): {float(pub.printed_sheets_volume):g}") # Используем :g для компактного float
+            if pub.circulation is not None:
+                note_list.append(f"Тираж: {int(pub.circulation)}")
+            if pub.classification_code: note_list.append(f"Классификатор: {pub.classification_code}")
+
+            # Добавляем существующее поле 'notes' в общий список примечаний
+            if pub.notes: note_list.append(f"{pub.notes.strip()}") # Добавляем как есть
+
+            # --- Конец экспорта ---
+
+            # Объединяем заметки в одну строку, если они есть
+            if note_list:
+                entry['note'] = '; '.join(note_list) # Соединяем через точку с запятой
+            elif 'note' in entry: # Если note был создан, но список пуст
+                 del entry['note'] # Удаляем пустое поле note
+
+            # Опционально: Удаляем поля, значение которых None или пустая строка
+            # entry = {k: v for k, v in entry.items() if v is not None and v != ''}
+
+            entries_list.append(entry)
+            logger.debug(f"Подготовлена запись для экспорта: ID={entry['ID']}, Type={entry['ENTRYTYPE']}, Title='{entry.get('title', '')[:30]}...'")
+
+        bib_db.entries = entries_list
+
+        # Настройка записи
         writer = BibTexWriter()
-        # Проверка callable не обязательна для bibtexparser >= 1.4.0
-        # if not callable(getattr(writer, 'write', None)):
-        #     raise AttributeError("Метод write в BibTexWriter не найден или не callable.")
-
+        writer.indent = '  '       # Отступ
+        writer.comma_first = False # Запятая в конце
         bibtex_str = writer.write(bib_db)
 
+        # Формирование ответа
         response = make_response(bibtex_str)
-        response.headers['Content-Disposition'] = 'attachment; filename=publications.bib'
-        response.headers['Content-Type'] = 'application/x-bibtex; charset=utf-8' # Укажем кодировку
-        logger.debug("BibTeX успешно сгенерирован и отправлен")
+        # Добавляем дату к имени файла
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        response.headers['Content-Disposition'] = f'attachment; filename="publications_{timestamp}.bib"'
+        response.headers['Content-Type'] = 'application/x-bibtex; charset=utf-8' # Указание кодировки
+        logger.debug("BibTeX файл успешно сгенерирован и будет отправлен")
         return response
-    except ImportError as e:
-        logger.error(f"Ошибка импорта bibtexparser: {str(e)}", exc_info=True)
-        return jsonify({'error': 'Ошибка импорта библиотеки bibtexparser.'}), 500
-    except AttributeError as e:
-        logger.error(f"Ошибка атрибута в bibtexparser: {str(e)}", exc_info=True)
-        return jsonify({'error': 'Ошибка в библиотеке bibtexparser. Проверьте версию.'}), 500
+
     except Exception as e:
-        logger.error(f"Ошибка экспорта BibTeX: {str(e)}", exc_info=True)
-        return jsonify({'error': f'Внутренняя ошибка сервера при экспорте BibTeX: {str(e)}'}), 500
+        logger.error(f"Критическая ошибка при экспорте BibTeX: {str(e)}", exc_info=True)
+        # Вместо JSON можно вернуть HTML страницу с ошибкой или простой текст
+        return make_response(f"Ошибка сервера при генерации BibTeX файла: {str(e)}", 500)
 
 @bp.route('/analytics/yearly', methods=['GET'])
 @login_required

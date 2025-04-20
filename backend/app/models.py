@@ -62,7 +62,6 @@ class PublicationType(db.Model):
     display_names = db.relationship(
         'PublicationTypeDisplayName',
         back_populates='publication_type',  # Явная обратная связь
-        lazy='dynamic',
         cascade='all, delete-orphan'       # Каскадное удаление
     )
 
@@ -87,7 +86,6 @@ class Publication(db.Model):
     year = db.Column(db.Integer, nullable=False)
     type_id = db.Column(db.Integer, db.ForeignKey('publication_type.id', ondelete='SET NULL'), nullable=True)
     type = db.relationship('PublicationType', backref='publications')
-    # Новое поле для связи с конкретным русским названием
     display_name_id = db.Column(db.Integer, db.ForeignKey('publication_type_display_name.id', ondelete='SET NULL'), nullable=True)
     display_name = db.relationship('PublicationTypeDisplayName', backref='publications', lazy=True)
     status = db.Column(db.String(50), nullable=False, default='draft')
@@ -103,6 +101,27 @@ class Publication(db.Model):
     plan_entries = db.relationship('PlanEntry', back_populates='publication', lazy=True)
     authors = db.relationship('PublicationAuthor', backref='publication', lazy='select', cascade='all, delete-orphan')
 
+    # --- НОВЫЕ ПОЛЯ ---
+    journal_conference_name = db.Column(db.Text, nullable=True)  # 1.
+    doi = db.Column(db.String(100), nullable=True)                      # 2.
+    issn = db.Column(db.String(20), nullable=True)                       # 3.
+    isbn = db.Column(db.String(20), nullable=True)                       # 4.
+    quartile = db.Column(db.String(10), nullable=True)                   # 5.
+    # ЗАМЕНЯЕМ number_volume_pages:
+    # number_volume_pages = db.Column(db.String(100), nullable=True)     # <- УДАЛИТЬ ЭТУ СТРОКУ
+    volume = db.Column(db.String(50), nullable=True)                   # 6. Том
+    number = db.Column(db.String(50), nullable=True)                   # 7. Номер/Выпуск
+    pages = db.Column(db.String(50), nullable=True)                    # 8. Страницы
+    # Сдвигаем нумерацию остальных полей
+    department = db.Column(db.String(150), nullable=True)               # 9. Кафедра
+    publisher = db.Column(db.String(200), nullable=True)                # 10. Издательство
+    publisher_location = db.Column(db.String(150), nullable=True)       # 11. Место издательства
+    printed_sheets_volume = db.Column(db.Float, nullable=True)           # 12. Объем в п.л.
+    circulation = db.Column(db.Integer, nullable=True)                   # 13. Тираж
+    classification_code = db.Column(db.String(100), nullable=True)      # 14. Направление и код
+    notes = db.Column(db.Text, nullable=True)     
+    # --- КОНЕЦ НОВЫХ ПОЛЕЙ ---
+
     @property
     def status_ru(self):
         return {
@@ -115,16 +134,15 @@ class Publication(db.Model):
         return {
             'id': self.id,
             'title': self.title,
-            # --- Заменить старое поле 'authors' на новое ---
-            'authors': [author.to_dict() for author in self.authors], # Получаем список словарей авторов
-            # --- Конец замены ---
+            'authors': [author.to_dict() for author in self.authors],
             'year': self.year,
             'type': {
-                'id': self.type.id,
-                'name': self.type.name,
+                'id': self.type.id if self.type else None,
+                'name': self.type.name.lstrip('@') if self.type else None, # Убираем @ если оно есть в БД
                 'display_name': self.display_name.display_name if self.display_name else None,
-                'display_names': [dn.display_name for dn in self.type.display_names] if self.type else []
+                'display_names': [dn.display_name for dn in self.type.display_names] if self.type and hasattr(self.type, 'display_names') else []
             } if self.type else None,
+            'display_name_id': self.display_name_id,
             'status': self.status,
             'file_url': self.file_url,
             'updated_at': self.updated_at.isoformat() if self.updated_at else None,
@@ -135,7 +153,24 @@ class Publication(db.Model):
             'user': {
                 'full_name': self.user.full_name if self.user else None
             } if self.user else None,
-            'display_name_id': self.display_name_id
+            # --- Добавляем новые поля в словарь ---
+            'journal_conference_name': self.journal_conference_name,
+            'doi': self.doi,
+            'issn': self.issn,
+            'isbn': self.isbn,
+            'quartile': self.quartile,
+            # 'number_volume_pages': self.number_volume_pages, # <- УДАЛИТЬ
+            'volume': self.volume,                           # <- ДОБАВИТЬ
+            'number': self.number,                           # <- ДОБАВИТЬ
+            'pages': self.pages,                             # <- ДОБАВИТЬ
+            'department': self.department,
+            'publisher': self.publisher,
+            'publisher_location': self.publisher_location,
+            'printed_sheets_volume': self.printed_sheets_volume,
+            'circulation': self.circulation,
+            'classification_code': self.classification_code,
+            'notes': self.notes,
+            # --- Конец добавления новых полей ---
         }
 
 

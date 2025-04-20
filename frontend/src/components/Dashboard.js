@@ -334,6 +334,43 @@ function Dashboard() {
 	const validPublicationTypes = ['article', 'monograph', 'conference'];
 	const validPlanStatuses = ['planned', 'in_progress', 'completed'];
 
+
+	// --- НОВЫЕ состояния для формы СОЗДАНИЯ ---
+	const [journalConferenceName, setJournalConferenceName] = useState('');
+	const [doi, setDoi] = useState('');
+	const [issn, setIssn] = useState('');
+	const [isbn, setIsbn] = useState('');
+	const [quartile, setQuartile] = useState('');
+	const [volume, setVolume] = useState('');
+	const [number, setNumber] = useState('');
+	const [pages, setPages] = useState('');
+	const [department, setDepartment] = useState('');
+	const [publisher, setPublisher] = useState('');
+	const [publisherLocation, setPublisherLocation] = useState('');
+	const [printedSheetsVolume, setPrintedSheetsVolume] = useState('');
+	const [circulation, setCirculation] = useState('');
+	const [classificationCode, setClassificationCode] = useState('');
+	const [notes, setNotes] = useState('');
+	// --- КОНЕЦ НОВЫХ состояний для формы СОЗДАНИЯ ---
+
+	// --- НОВЫЕ состояния для формы РЕДАКТИРОВАНИЯ ---
+	const [editJournalConferenceName, setEditJournalConferenceName] = useState('');
+	const [editDoi, setEditDoi] = useState('');
+	const [editIssn, setEditIssn] = useState('');
+	const [editIsbn, setEditIsbn] = useState('');
+	const [editQuartile, setEditQuartile] = useState('');
+	const [editVolume, setEditVolume] = useState('');                           // <- ДОБАВИТЬ
+	const [editNumber, setEditNumber] = useState('');                           // <- ДОБАВИТЬ
+	const [editPages, setEditPages] = useState('');
+	const [editDepartment, setEditDepartment] = useState('');
+	const [editPublisher, setEditPublisher] = useState('');
+	const [editPublisherLocation, setEditPublisherLocation] = useState('');
+	const [editPrintedSheetsVolume, setEditPrintedSheetsVolume] = useState('');
+	const [editCirculation, setEditCirculation] = useState('');
+	const [editClassificationCode, setEditClassificationCode] = useState('');
+	const [editNotes, setEditNotes] = useState('');
+	// --- КОНЕЦ НОВЫХ состояний для формы РЕДАКТИРОВАНИЯ ---
+
 	useEffect(() => {
 		if (user !== null) {
 			setLoadingUser(false);
@@ -903,15 +940,44 @@ function Dashboard() {
 		formData.append('year', parseInt(year, 10));
 		formData.append('type_id', selectedType.id); // Передаём type_id
 		formData.append('display_name_id', selectedDisplayNameId); // Передаём display_name_id
+		formData.append('journal_conference_name', journalConferenceName);
+		formData.append('doi', doi);
+		formData.append('issn', issn);
+		formData.append('isbn', isbn);
+		formData.append('quartile', quartile);
+		formData.append('volume', volume);                           // <- ДОБАВИТЬ
+		formData.append('number', number);                           // <- ДОБАВИТЬ
+		formData.append('pages', pages);
+		formData.append('department', department);
+		formData.append('publisher', publisher);
+		formData.append('publisher_location', publisherLocation);
+		// Отправляем как строки, бэкэнд разберется (или пустые строки)
+		formData.append('printed_sheets_volume', printedSheetsVolume || '');
+		formData.append('circulation', circulation || '');
+		formData.append('classification_code', classificationCode);
+		formData.append('notes', notes);
+
 
 		try {
 			await refreshCsrfToken();
 			console.log('Uploading file with data:', {
 				title: title.trim(),
-				authors: authorsToSend, // Логируем подготовленных авторов
+				authors: authorsToSend,
 				year: parseInt(year, 10),
 				type_id: selectedType.id,
-				display_name_id: selectedDisplayNameId
+				display_name_id: selectedDisplayNameId,
+				journal_conference_name: journalConferenceName,
+				doi: doi,
+				issn: issn,
+				isbn: isbn,
+				quartile: quartile,
+				department: department,
+				publisher: publisher,
+				publisher_location: publisherLocation,
+				printed_sheets_volume: printedSheetsVolume,
+				circulation: circulation,
+				classification_code: classificationCode,
+				notes: notes,
 			});
 			const response = await axios.post('http://localhost:5000/api/publications/upload-file', formData, {
 				withCredentials: true,
@@ -928,6 +994,21 @@ function Dashboard() {
 			setYear('');
 			setSelectedDisplayNameId(''); // Сбрасываем выбор
 			setFile(null);
+			setJournalConferenceName('');
+			setDoi('');
+			setIssn('');
+			setIsbn('');
+			setQuartile('');
+			setVolume('');              // <- ДОБАВИТЬ
+			setNumber('');              // <- ДОБАВИТЬ
+			setPages('');
+			setDepartment('');
+			setPublisher('');
+			setPublisherLocation('');
+			setPrintedSheetsVolume('');
+			setCirculation('');
+			setClassificationCode('');
+			setNotes('');
 			await fetchData();
 		} catch (err) {
 			console.error('Ошибка загрузки файла:', err.response?.data || err);
@@ -1008,6 +1089,22 @@ function Dashboard() {
 		setEditYear(publication?.year || '');
 		setEditSelectedDisplayNameId(publication?.display_name_id); // Пусть будет null или undefined
 		setEditFile(null);
+		setEditJournalConferenceName(publication?.journal_conference_name || '');
+		setEditDoi(publication?.doi || '');
+		setEditIssn(publication?.issn || '');
+		setEditIsbn(publication?.isbn || '');
+		setEditQuartile(publication?.quartile || '');
+		setEditVolume(publication?.volume || '');                           // <- ДОБАВИТЬ
+		setEditNumber(publication?.number || '');                           // <- ДОБАВИТЬ
+		setEditPages(publication?.pages || '');
+		setEditDepartment(publication?.department || '');
+		setEditPublisher(publication?.publisher || '');
+		setEditPublisherLocation(publication?.publisher_location || '');
+		// Для числовых полей: конвертируем null/undefined в пустую строку для TextField
+		setEditPrintedSheetsVolume(publication?.printed_sheets_volume != null ? String(publication.printed_sheets_volume) : '');
+		setEditCirculation(publication?.circulation != null ? String(publication.circulation) : '');
+		setEditClassificationCode(publication?.classification_code || '');
+		setEditNotes(publication?.notes || '');
 		setOpenEditDialog(true);
 	};
 	const handleEditSubmit = async (e) => {
@@ -1045,6 +1142,21 @@ function Dashboard() {
 			data.append('year', parseInt(editYear, 10));
 			data.append('type_id', selectedType.id);
 			data.append('display_name_id', editSelectedDisplayNameId);
+			data.append('journal_conference_name', editJournalConferenceName);
+			data.append('doi', editDoi);
+			data.append('issn', editIssn);
+			data.append('isbn', editIsbn);
+			data.append('quartile', editQuartile);
+			data.append('volume', editVolume);                         // <- ДОБАВИТЬ
+			data.append('number', editNumber);                         // <- ДОБАВИТЬ
+			data.append('pages', editPages);
+			data.append('department', editDepartment);
+			data.append('publisher', editPublisher);
+			data.append('publisher_location', editPublisherLocation);
+			data.append('printed_sheets_volume', editPrintedSheetsVolume || ''); // Отправляем пустую строку, если null/undefined
+			data.append('circulation', editCirculation || ''); // Отправляем пустую строку, если null/undefined
+			data.append('classification_code', editClassificationCode);
+			data.append('notes', editNotes);
 		} else {
 			data = {
 				title: editTitle.trim(),
@@ -1052,6 +1164,22 @@ function Dashboard() {
 				year: parseInt(editYear, 10),
 				type_id: selectedType.id,
 				display_name_id: editSelectedDisplayNameId,
+				journal_conference_name: editJournalConferenceName || null, // Отправляем null для пустых необязательных полей
+				doi: editDoi || null,
+				issn: editIssn || null,
+				isbn: editIsbn || null,
+				quartile: editQuartile || null,
+				volume: editVolume || null,                         // <- ДОБАВИТЬ
+				number: editNumber || null,                         // <- ДОБАВИТЬ
+				pages: editPages || null,
+				department: editDepartment || null,
+				publisher: editPublisher || null,
+				publisher_location: editPublisherLocation || null,
+				// Числовые поля - парсим или отправляем null
+				printed_sheets_volume: editPrintedSheetsVolume ? parseFloat(editPrintedSheetsVolume) : null,
+				circulation: editCirculation ? parseInt(editCirculation, 10) : null,
+				classification_code: editClassificationCode || null,
+				notes: editNotes || null,
 			};
 			headers['Content-Type'] = 'application/json';
 		}
@@ -1148,6 +1276,21 @@ function Dashboard() {
 			data.append('year', parseInt(editYear, 10));
 			data.append('type_id', publicationTypes.find(t => t.display_name_id === editSelectedDisplayNameId)?.id);
 			data.append('display_name_id', editSelectedDisplayNameId);
+			data.append('journal_conference_name', editJournalConferenceName);
+			data.append('doi', editDoi);
+			data.append('issn', editIssn);
+			data.append('isbn', editIsbn);
+			data.append('quartile', editQuartile);
+			data.append('volume', editVolume);                         // <- ДОБАВИТЬ
+			data.append('number', editNumber);                         // <- ДОБАВИТЬ
+			data.append('pages', editPages);
+			data.append('department', editDepartment);
+			data.append('publisher', editPublisher);
+			data.append('publisher_location', editPublisherLocation);
+			data.append('printed_sheets_volume', editPrintedSheetsVolume || '');
+			data.append('circulation', editCirculation || '');
+			data.append('classification_code', editClassificationCode);
+			data.append('notes', editNotes);
 		} else {
 			data = {
 				title: editTitle.trim(),
@@ -1155,6 +1298,18 @@ function Dashboard() {
 				year: parseInt(editYear, 10),
 				type_id: publicationTypes.find(t => t.display_name_id === editSelectedDisplayNameId)?.id,
 				display_name_id: editSelectedDisplayNameId,
+				journal_conference_name: editJournalConferenceName || null,
+				doi: editDoi || null,
+				issn: editIssn || null,
+				isbn: editIsbn || null,
+				quartile: editQuartile || null,
+				department: editDepartment || null,
+				publisher: editPublisher || null,
+				publisher_location: editPublisherLocation || null,
+				printed_sheets_volume: editPrintedSheetsVolume ? parseFloat(editPrintedSheetsVolume) : null,
+				circulation: editCirculation ? parseInt(editCirculation, 10) : null,
+				classification_code: editClassificationCode || null,
+				notes: editNotes || null,
 			};
 			headers['Content-Type'] = 'application/json';
 		}
@@ -1212,6 +1367,21 @@ function Dashboard() {
 		setEditAuthorsList([{ id: Date.now(), name: '', is_employee: false }]);
 		setEditYear('');
 		setEditFile(null);
+		setEditJournalConferenceName('');
+		setEditDoi('');
+		setEditIssn('');
+		setEditIsbn('');
+		setEditQuartile('');
+		setEditVolume('');      // <-- ДОБАВИТЬ
+		setEditNumber('');      // <-- ДОБАВИТЬ
+		setEditPages('');
+		setEditDepartment('');
+		setEditPublisher('');
+		setEditPublisherLocation('');
+		setEditPrintedSheetsVolume('');
+		setEditCirculation('');
+		setEditClassificationCode('');
+		setEditNotes('');
 	};
 
 	const handleDeleteClick = (publication) => {
@@ -2139,6 +2309,28 @@ function Dashboard() {
 											<form onSubmit={handleFileUpload}>
 												<AppleTextField
 													fullWidth
+													select
+													label="Тип публикации"
+													value={selectedDisplayNameId}
+													onChange={(e) => setSelectedDisplayNameId(e.target.value)}
+													margin="normal"
+													variant="outlined"
+													disabled={publicationTypes.length === 0}
+												>
+													{publicationTypes.length === 0 ? (
+														<MenuItem value="" disabled>
+															Типы не доступны
+														</MenuItem>
+													) : (
+														publicationTypes.map((type) => (
+															<MenuItem key={type.display_name_id} value={type.display_name_id}>
+																{type.display_name}
+															</MenuItem>
+														))
+													)}
+												</AppleTextField>
+												<AppleTextField
+													fullWidth
 													label="Название"
 													value={title}
 													onChange={(e) => setTitle(e.target.value)}
@@ -2211,26 +2403,161 @@ function Dashboard() {
 												/>
 												<AppleTextField
 													fullWidth
-													select
-													label="Тип публикации"
-													value={selectedDisplayNameId}
-													onChange={(e) => setSelectedDisplayNameId(e.target.value)}
+													label="Наименование журнала/конференции"
+													value={journalConferenceName}
+													onChange={(e) => setJournalConferenceName(e.target.value)}
 													margin="normal"
 													variant="outlined"
-													disabled={publicationTypes.length === 0}
-												>
-													{publicationTypes.length === 0 ? (
-														<MenuItem value="" disabled>
-															Типы не доступны
-														</MenuItem>
-													) : (
-														publicationTypes.map((type) => (
-															<MenuItem key={type.display_name_id} value={type.display_name_id}>
-																{type.display_name}
-															</MenuItem>
-														))
-													)}
-												</AppleTextField>
+												/>
+												<Grid container spacing={2}> {/* Используем Grid для группировки */}
+													<Grid item xs={12} sm={6}>
+														<AppleTextField
+															fullWidth
+															label="DOI"
+															value={doi}
+															onChange={(e) => setDoi(e.target.value)}
+															margin="normal"
+															variant="outlined"
+														/>
+													</Grid>
+													<Grid item xs={12} sm={6}>
+														<AppleTextField
+															fullWidth
+															label="Квартиль (Q)"
+															value={quartile}
+															onChange={(e) => setQuartile(e.target.value)}
+															margin="normal"
+															variant="outlined"
+														/>
+													</Grid>
+													<Grid item xs={12} sm={6}>
+														<AppleTextField
+															fullWidth
+															label="ISSN"
+															value={issn}
+															onChange={(e) => setIssn(e.target.value)}
+															margin="normal"
+															variant="outlined"
+														/>
+													</Grid>
+													<Grid item xs={12} sm={6}>
+														<AppleTextField
+															fullWidth
+															label="ISBN"
+															value={isbn}
+															onChange={(e) => setIsbn(e.target.value)}
+															margin="normal"
+															variant="outlined"
+														/>
+													</Grid>
+												</Grid>
+												<Grid container spacing={2}>
+													<Grid item xs={12} sm={4}>
+														<AppleTextField
+															fullWidth
+															label="Том"
+															value={volume}
+															onChange={(e) => setVolume(e.target.value)}
+															margin="normal"
+															variant="outlined"
+														/>
+													</Grid>
+													<Grid item xs={12} sm={4}>
+														<AppleTextField
+															fullWidth
+															label="Номер/Выпуск"
+															value={number}
+															onChange={(e) => setNumber(e.target.value)}
+															margin="normal"
+															variant="outlined"
+														/>
+													</Grid>
+													<Grid item xs={12} sm={4}>
+														<AppleTextField
+															fullWidth
+															label="Страницы"
+															value={pages}
+															onChange={(e) => setPages(e.target.value)}
+															margin="normal"
+															variant="outlined"
+														/>
+													</Grid>
+												</Grid>
+												<Grid container spacing={2}>
+													<Grid item xs={12} sm={6}>
+														<AppleTextField
+															fullWidth
+															label="Издательство"
+															value={publisher}
+															onChange={(e) => setPublisher(e.target.value)}
+															margin="normal"
+															variant="outlined"
+														/>
+													</Grid>
+													<Grid item xs={12} sm={6}>
+														<AppleTextField
+															fullWidth
+															label="Место издательства"
+															value={publisherLocation}
+															onChange={(e) => setPublisherLocation(e.target.value)}
+															margin="normal"
+															variant="outlined"
+														/>
+													</Grid>
+													<Grid item xs={12} sm={4}>
+														<AppleTextField
+															fullWidth
+															label="Объем (п.л.)"
+															type="number" // Для валидации браузера, но отправляем строку
+															value={printedSheetsVolume}
+															onChange={(e) => setPrintedSheetsVolume(e.target.value)}
+															margin="normal"
+															variant="outlined"
+															inputProps={{ step: "0.1" }} // Для дробных чисел
+														/>
+													</Grid>
+													<Grid item xs={12} sm={4}>
+														<AppleTextField
+															fullWidth
+															label="Тираж"
+															type="number"
+															value={circulation}
+															onChange={(e) => setCirculation(e.target.value)}
+															margin="normal"
+															variant="outlined"
+														/>
+													</Grid>
+													<Grid item xs={12} sm={4}>
+														<AppleTextField
+															fullWidth
+															label="Кафедра"
+															value={department}
+															onChange={(e) => setDepartment(e.target.value)}
+															margin="normal"
+															variant="outlined"
+														/>
+													</Grid>
+												</Grid>
+												<AppleTextField
+													fullWidth
+													label="Код по классификатору"
+													value={classificationCode}
+													onChange={(e) => setClassificationCode(e.target.value)}
+													margin="normal"
+													variant="outlined"
+												/>
+												<AppleTextField
+													fullWidth
+													label="Примечание"
+													value={notes}
+													onChange={(e) => setNotes(e.target.value)}
+													margin="normal"
+													variant="outlined"
+													multiline
+													rows={2}
+												/>
+												{/* --- КОНЕЦ НОВЫХ ПОЛЕЙ --- */}
+
 												<Box sx={{ mt: 2 }}>
 													<input
 														type="file"
@@ -3063,6 +3390,28 @@ function Dashboard() {
 					<form onSubmit={handleEditSubmit}>
 						<AppleTextField
 							fullWidth
+							select
+							label="Тип публикации"
+							value={editSelectedDisplayNameId}
+							onChange={(e) => setEditSelectedDisplayNameId(e.target.value)}
+							margin="normal"
+							variant="outlined"
+							disabled={publicationTypes.length === 0}
+						>
+							{publicationTypes.length === 0 ? (
+								<MenuItem value="" disabled>
+									Типы не доступны
+								</MenuItem>
+							) : (
+								publicationTypes.map((type) => (
+									<MenuItem key={type.display_name_id} value={type.display_name_id}>
+										{type.display_name}
+									</MenuItem>
+								))
+							)}
+						</AppleTextField>
+						<AppleTextField
+							fullWidth
 							label="Название"
 							value={editTitle}
 							onChange={(e) => setEditTitle(e.target.value)}
@@ -3136,26 +3485,160 @@ function Dashboard() {
 						/>
 						<AppleTextField
 							fullWidth
-							select
-							label="Тип публикации"
-							value={editSelectedDisplayNameId}
-							onChange={(e) => setEditSelectedDisplayNameId(e.target.value)}
+							label="Наименование журнала/конференции"
+							value={editJournalConferenceName}
+							onChange={(e) => setEditJournalConferenceName(e.target.value)}
 							margin="normal"
 							variant="outlined"
-							disabled={publicationTypes.length === 0}
-						>
-							{publicationTypes.length === 0 ? (
-								<MenuItem value="" disabled>
-									Типы не доступны
-								</MenuItem>
-							) : (
-								publicationTypes.map((type) => (
-									<MenuItem key={type.display_name_id} value={type.display_name_id}>
-										{type.display_name}
-									</MenuItem>
-								))
-							)}
-						</AppleTextField>
+						/>
+						<Grid container spacing={2}>
+							<Grid item xs={12} sm={6}>
+								<AppleTextField
+									fullWidth
+									label="DOI"
+									value={editDoi}
+									onChange={(e) => setEditDoi(e.target.value)}
+									margin="normal"
+									variant="outlined"
+								/>
+							</Grid>
+							<Grid item xs={12} sm={6}>
+								<AppleTextField
+									fullWidth
+									label="Квартиль (Q)"
+									value={editQuartile}
+									onChange={(e) => setEditQuartile(e.target.value)}
+									margin="normal"
+									variant="outlined"
+								/>
+							</Grid>
+							<Grid item xs={12} sm={6}>
+								<AppleTextField
+									fullWidth
+									label="ISSN"
+									value={editIssn}
+									onChange={(e) => setEditIssn(e.target.value)}
+									margin="normal"
+									variant="outlined"
+								/>
+							</Grid>
+							<Grid item xs={12} sm={6}>
+								<AppleTextField
+									fullWidth
+									label="ISBN"
+									value={editIsbn}
+									onChange={(e) => setEditIsbn(e.target.value)}
+									margin="normal"
+									variant="outlined"
+								/>
+							</Grid>
+						</Grid>
+						<Grid container spacing={2}>
+							<Grid item xs={12} sm={4}>
+								<AppleTextField
+									fullWidth
+									label="Том"
+									value={editVolume}
+									onChange={(e) => setEditVolume(e.target.value)}
+									margin="normal"
+									variant="outlined"
+								/>
+							</Grid>
+							<Grid item xs={12} sm={4}>
+								<AppleTextField
+									fullWidth
+									label="Номер/Выпуск"
+									value={editNumber}
+									onChange={(e) => setEditNumber(e.target.value)}
+									margin="normal"
+									variant="outlined"
+								/>
+							</Grid>
+							<Grid item xs={12} sm={4}>
+								<AppleTextField
+									fullWidth
+									label="Страницы"
+									value={editPages}
+									onChange={(e) => setEditPages(e.target.value)}
+									margin="normal"
+									variant="outlined"
+								/>
+							</Grid>
+						</Grid>
+						<Grid container spacing={2}>
+							<Grid item xs={12} sm={6}>
+								<AppleTextField
+									fullWidth
+									label="Издательство"
+									value={editPublisher}
+									onChange={(e) => setEditPublisher(e.target.value)}
+									margin="normal"
+									variant="outlined"
+								/>
+							</Grid>
+							<Grid item xs={12} sm={6}>
+								<AppleTextField
+									fullWidth
+									label="Место издательства"
+									value={editPublisherLocation}
+									onChange={(e) => setEditPublisherLocation(e.target.value)}
+									margin="normal"
+									variant="outlined"
+								/>
+							</Grid>
+							<Grid item xs={12} sm={4}>
+								<AppleTextField
+									fullWidth
+									label="Объем (п.л.)"
+									type="number"
+									value={editPrintedSheetsVolume}
+									onChange={(e) => setEditPrintedSheetsVolume(e.target.value)}
+									margin="normal"
+									variant="outlined"
+									inputProps={{ step: "0.1" }}
+								/>
+							</Grid>
+							<Grid item xs={12} sm={4}>
+								<AppleTextField
+									fullWidth
+									label="Тираж"
+									type="number"
+									value={editCirculation}
+									onChange={(e) => setEditCirculation(e.target.value)}
+									margin="normal"
+									variant="outlined"
+								/>
+							</Grid>
+							<Grid item xs={12} sm={4}>
+								<AppleTextField
+									fullWidth
+									label="Кафедра"
+									value={editDepartment}
+									onChange={(e) => setEditDepartment(e.target.value)}
+									margin="normal"
+									variant="outlined"
+								/>
+							</Grid>
+						</Grid>
+						<AppleTextField
+							fullWidth
+							label="Код по классификатору"
+							value={editClassificationCode}
+							onChange={(e) => setEditClassificationCode(e.target.value)}
+							margin="normal"
+							variant="outlined"
+						/>
+						<AppleTextField
+							fullWidth
+							label="Примечание"
+							value={editNotes}
+							onChange={(e) => setEditNotes(e.target.value)}
+							margin="normal"
+							variant="outlined"
+							multiline
+							rows={2}
+						/>
+
 						<Box sx={{ mt: 2 }}>
 							<input
 								type="file"

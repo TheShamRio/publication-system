@@ -1,3 +1,5 @@
+// --- START OF FILE Publication.js ---
+
 import React, { useEffect, useState, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
@@ -8,6 +10,7 @@ import {
 	CardContent,
 	Box,
 	Pagination,
+	CircularProgress // Добавим индикатор загрузки
 } from '@mui/material';
 import { styled } from '@mui/system';
 import { Document, Page, pdfjs } from 'react-pdf';
@@ -16,7 +19,7 @@ import 'react-pdf/dist/Page/TextLayer.css';
 import axios from 'axios';
 import DownloadIcon from '@mui/icons-material/Download';
 import { useAuth } from '../contexts/AuthContext';
-import CommentSection from './CommentSection';
+import CommentSection from './CommentSection'; // Предполагаем, что компонент CommentSection существует
 
 // Настройка worker для react-pdf
 pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
@@ -83,20 +86,32 @@ const AppleCard = styled(Card)({
 
 // Контейнер для предпросмотра документов
 const DocumentViewer = styled(Box)({
-	mb: 4,
+	marginBottom: 4, // Можно оставить или перенести ниже
 	border: '1px solid #E5E5EA',
 	borderRadius: '12px',
-	overflow: 'hidden',
+	// overflow: 'hidden',        // УБРАТЬ или заменить на overflowX: 'hidden', если горизонтальный скролл не нужен
+	// overflowY: 'auto',       // УБРАТЬ
 	backgroundColor: '#FFFFFF',
 	boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
 	width: '100%',
-	height: '850px',
+	// Убираем фиксированную высоту, чтобы она адаптировалась под контент
+	// height: '850px',         // ЗАКОММЕНТИРОВАНО - ОСТАВИТЬ ТАК
+	// maxHeight: '850px',      // УБРАТЬ или ЗАКОММЕНТИРОВАТЬ
 	display: 'flex',
-	justifyContent: 'center',
-	alignItems: 'flex-start',
-	'&::-webkit-scrollbar': { display: 'none' },
-	'-ms-overflow-style': 'none',
-	'scrollbar-width': 'none',
+	flexDirection: 'column',
+	justifyContent: 'flex-start', // Начинаем сверху
+	alignItems: 'center',
+	position: 'relative',
+	padding: '16px 0', // ОПЦИОНАЛЬНО: добавить вертикальный паддинг
+});
+
+
+const PdfPageWrapper = styled(Box)({
+	width: '100%',
+	display: 'flex',
+	justifyContent: 'center', // Центрируем страницу
+	alignItems: 'center',
+	padding: '10px 0', // Добавим отступы сверху/снизу
 });
 
 function Publication() {
@@ -105,84 +120,97 @@ function Publication() {
 	const [error, setError] = useState('');
 	const [numPages, setNumPages] = useState(null);
 	const [pageNumber, setPageNumber] = useState(1);
-	const { user, isAuthenticated, csrfToken } = useAuth();
-	const [hasReviewerComment, setHasReviewerComment] = useState(false);
+	const { user, isAuthenticated, csrfToken } = useAuth(); // Убираем hasReviewerComment отсюда
 	const [loadingUser, setLoadingUser] = useState(true);
-	const [publicationTypes, setPublicationTypes] = useState([]);
-	const [isLoadingTypes, setIsLoadingTypes] = useState(true); // Состояние для отслеживания загрузки типов
+	// PublicationTypes не нужен здесь, так как мы отображаем имя типа из данных публикации
+	const [isLoadingPublication, setIsLoadingPublication] = useState(true); // Состояние загрузки публикации
+	const [hasReviewerComment, setHasReviewerComment] = useState(false); // Возвращаем сюда
+
 
 	// Функция загрузки данных публикации
 	const fetchPublication = useCallback(async () => {
+		setIsLoadingPublication(true); // Начинаем загрузку
 		try {
 			const response = await axios.get(`http://localhost:5000/api/publications/${id}`, {
 				withCredentials: true,
 			});
 			console.log('Publication loaded:', response.data); // Логирование для отладки
 			setPublication(response.data);
-			const reviewerComment = response.data.comments.some(
+			// Пересчитываем наличие комментария рецензента после загрузки
+			const reviewerCommentExists = response.data.comments.some(
 				(comment) =>
 					['admin', 'manager'].includes(comment.user.role) ||
 					comment.replies.some((reply) => ['admin', 'manager'].includes(reply.user.role))
 			);
-			setHasReviewerComment(reviewerComment);
+			setHasReviewerComment(reviewerCommentExists);
 			setError('');
 		} catch (err) {
 			console.error('Ошибка загрузки публикации:', err);
-			setError('Не удалось загрузить публикацию. Попробуйте позже.');
-		}
-	}, [id]);
-
-	// Функция загрузки типов публикаций
-	const fetchPublicationTypes = useCallback(async () => {
-		try {
-			setIsLoadingTypes(true);
-			const response = await axios.get('http://localhost:5000/api/publication-types', {
-				withCredentials: true,
-			});
-			console.log('Publication types loaded:', response.data); // Логирование для отладки
-			setPublicationTypes(response.data);
-			setError('');
-		} catch (err) {
-			console.error('Ошибка загрузки типов публикаций:', err);
-			setError('Не удалось загрузить типы публикаций.');
+			if (err.response && err.response.status === 404) {
+				setError('Публикация не найдена.');
+			} else if (err.response && err.response.status === 403) {
+				setError('У вас нет прав для просмотра этой публикации.');
+			}
+			else {
+				setError('Не удалось загрузить публикацию. Попробуйте позже.');
+			}
 		} finally {
-			setIsLoadingTypes(false);
+			setIsLoadingPublication(false); // Завершаем загрузку
 		}
-	}, []);
+	}, [id]); // Зависимость только от ID
 
-	// Выполняем запросы при монтировании компонента
+
+	// Выполняем запрос при монтировании компонента
 	useEffect(() => {
 		fetchPublication();
-		fetchPublicationTypes();
-	}, [fetchPublication, fetchPublicationTypes]);
+		// fetchPublicationTypes больше не нужен здесь
+	}, [fetchPublication]); // Зависимость от fetchPublication
 
 	// Проверяем загрузку пользователя
 	useEffect(() => {
-		if (user !== null) {
+		if (user !== null || !isAuthenticated) { // Проверяем и неаутентифицированных
 			setLoadingUser(false);
 		}
-	}, [user]);
+	}, [user, isAuthenticated]);
 
 	// Обработчик успешной загрузки PDF
-	const onDocumentLoadSuccess = ({ numPages }) => {
-		setNumPages(numPages);
-	};
+	const onDocumentLoadSuccess = useCallback(({ numPages: nextNumPages }) => {
+		setNumPages(nextNumPages);
+		setPageNumber(1); // Сбросить на первую страницу при загрузке нового документа
+	}, []);
+
+	// Функция для изменения страницы
+	const handlePageChange = useCallback((event, value) => {
+		setPageNumber(value);
+	}, []);
+
 
 	// Обработчик скачивания файла
 	const handleDownload = () => {
 		if (publication && publication.file_url) {
-			const fileUrl = `http://localhost:5000${publication.file_url}`;
+			// Убедимся, что URL начинается с http://localhost:5000 или /, если он относительный
+			const fileUrl = publication.file_url.startsWith('/')
+				? `http://localhost:5000${publication.file_url}`
+				: publication.file_url; // Предполагаем, что это уже полный URL, если не начинается с /
+
 			const link = document.createElement('a');
 			link.href = fileUrl;
-			link.download = publication.file_url.split('/').pop();
+			// Получаем имя файла из URL
+			const filename = publication.file_url.substring(publication.file_url.lastIndexOf('/') + 1);
+			link.download = filename || 'publication_file'; // Имя по умолчанию
 			document.body.appendChild(link);
 			link.click();
 			document.body.removeChild(link);
+			console.log(`Attempting to download: ${fileUrl} as ${link.download}`);
+		} else {
+			console.error("Download failed: No publication or file_url");
+			setError("Невозможно скачать файл: URL отсутствует.");
 		}
 	};
 
 	// Обработчик публикации
 	const handlePublish = async () => {
+		setError(''); // Сбрасываем ошибку перед действием
 		try {
 			const response = await axios.post(
 				`http://localhost:5000/api/publications/${id}/publish`,
@@ -190,142 +218,119 @@ function Publication() {
 				{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
 			);
 			console.log('Publication response:', response.data);
-			fetchPublication();
+			await fetchPublication(); // Перезагружаем данные после действия
 		} catch (err) {
-			console.error('Ошибка при публикации:', err);
-			setError('Не удалось опубликовать публикацию.');
+			console.error('Ошибка при публикации:', err.response?.data?.error || err.message);
+			setError(`Не удалось опубликовать публикацию: ${err.response?.data?.error || 'Серверная ошибка'}`);
 		}
 	};
 
 	// Обработчик отправки на доработку
 	const handleReject = async () => {
+		setError('');
+		const reviewerComments = publication.comments.filter(
+			(comment) => ['admin', 'manager'].includes(comment.user.role)
+		);
+		// Найдем самый последний комментарий ревьюера
+		const lastReviewerComment = reviewerComments.sort(
+			(a, b) => new Date(b.created_at) - new Date(a.created_at)
+		)[0]?.content;
+
+		// Убрали проверку на пустой коммент здесь, бэкенд сам проверит
+
 		try {
-			const reviewerComment = publication.comments
-				.filter((comment) => ['admin', 'manager'].includes(comment.user.role))
-				.sort((a, b) => new Date(b.created_at) - new Date(a.created_at))[0]?.content || '';
-
-			if (!reviewerComment) {
-				setError('Добавьте комментарий перед отправкой на доработку.');
-				return;
-			}
-
 			const response = await axios.post(
 				`http://localhost:5000/api/publications/${id}/return-for-revision`,
-				{ comment: reviewerComment },
+				// Бэкенд теперь ожидает comment в теле запроса
+				{ comment: lastReviewerComment || "Требуется доработка (комментарий добавлен в обсуждении)" }, // Отправляем последний или заглушку
 				{ withCredentials: true, headers: { 'X-CSRFToken': csrfToken } }
 			);
 			console.log('Return for revision response:', response.data);
-			fetchPublication();
+			await fetchPublication(); // Перезагружаем данные
 		} catch (err) {
-			console.error('Ошибка при отправке на доработку:', err);
-			setError('Не удалось отправить на доработку. Убедитесь, что был добавлен комментарий.');
+			console.error('Ошибка при отправке на доработку:', err.response?.data?.error || err.message);
+			setError(`Не удалось отправить на доработку: ${err.response?.data?.error || 'Серверная ошибка'}`);
 		}
 	};
+
 
 	// Обработчик добавления комментария
-	const handleCommentAdded = (newComment) => {
-		setPublication((prev) => {
-			if (newComment.parent_id) {
-				const updatedComments = prev.comments.map((comment) =>
-					comment.id === newComment.parent_id
-						? { ...comment, replies: [...comment.replies, newComment] }
-						: comment
-				);
-				return { ...prev, comments: updatedComments };
-			}
-			return { ...prev, comments: [...prev.comments, newComment] };
-		});
-		if (['admin', 'manager'].includes(newComment.user.role)) {
-			setHasReviewerComment(true);
-		}
-	};
+	const handleCommentAdded = useCallback(async () => {
+		// Просто перезагружаем данные публикации, чтобы получить обновленные комментарии
+		await fetchPublication();
+	}, [fetchPublication]); // Зависим от fetchPublication
 
-	// Отображаем ошибку, если она есть
-	if (error) return <Typography color="error">{error}</Typography>;
-
-	// Ждем загрузки всех данных
-	if (!publication || loadingUser || isLoadingTypes) {
-		return <Typography sx={{ color: '#212121' }}>Загрузка...</Typography>;
-	}
-
-	// Формируем URL файла
-	const fileUrl = publication.file_url ? `http://localhost:5000${publication.file_url}` : null;
-
-	// Функция для отображения статуса с учетом локализации и цвета
-	const renderStatus = (status, returnedForRevision, isReviewer) => {
-		console.log('renderStatus called with:', { status, returnedForRevision, isReviewer });
-
+	// --- Отображение статусов (можно вынести в отдельный компонент или оставить здесь) ---
+	const renderStatus = (status, returnedForRevision) => {
 		let statusText = '';
-		let statusColor = '#757575'; // Цвет по умолчанию (серый)
-		let backgroundColor = 'transparent'; // Фон по умолчанию
+		let textColor = '#6E6E73'; // Default grey
 
-		// Проверяем оба возможных условия для "Требует доработки"
-		if (status === 'returned_for_revision' || (status === 'draft' && returnedForRevision)) {
-			statusText = 'Требует доработки';
-			statusColor = '#FF3B30'; // Красный текст
-			backgroundColor = 'transparent'; // Исправляем некорректный цвет фона
-			console.log('Condition matched: Требует доработки');
-		} else if (isReviewer) {
-			// Логика для менеджера или админа
-			switch (status) {
-				case 'draft':
-					statusText = 'Черновик';
-					break;
-				case 'needs_review':
-					statusText = 'Нуждается в проверке';
-					statusColor = '#FF3B30'; // Красный текст
-					break;
-				case 'published':
-					statusText = 'Опубликованные';
-					break;
-				default:
-					statusText = status || 'Неизвестный статус';
-			}
-			console.log('Reviewer logic applied:', statusText);
+		if (status === 'returned_for_revision') {
+			statusText = 'Возвращена на доработку';
+			textColor = '#FF3B30'; // Red
+		} else if (status === 'draft') {
+			statusText = returnedForRevision ? 'Возвращена на доработку (черновик)' : 'Черновик';
+			textColor = returnedForRevision ? '#FF3B30' : '#6E6E73';
+		} else if (status === 'needs_review') {
+			statusText = 'На проверке';
+			textColor = '#FF9500'; // Orange
+		} else if (status === 'published') {
+			statusText = 'Опубликована';
+			textColor = '#34C759'; // Green
 		} else {
-			// Логика для обычного пользователя
-			if (status === 'needs_review') {
-				statusText = 'На проверке';
-			} else if (status === 'draft') {
-				statusText = 'Черновик';
-			} else if (status === 'published') {
-				statusText = 'Опубликованные';
-			} else {
-				statusText = status || 'Неизвестный статус';
-			}
-			console.log('User logic applied:', statusText);
+			statusText = status || 'Неизвестно';
 		}
 
 		return (
-			<Typography
-				variant="body1"
-				sx={{
-					color: statusColor,
-					backgroundColor: backgroundColor,
-					display: 'inline-block',
-
-					borderRadius: '4px',
-					mb: 1,
-				}}
-			>
-				{`Статус: ${statusText}`}
+			<Typography variant="body1" sx={{ color: textColor, mb: 1, fontWeight: 500 }}>
+				Статус: {statusText}
 			</Typography>
 		);
 	};
 
-	// Проверяем, является ли пользователь рецензентом
-	const isReviewer = ['admin', 'manager'].includes(user?.role);
+	// Проверяем, является ли пользователь рецензентом (менеджер или админ)
+	const isReviewer = user?.role && ['admin', 'manager'].includes(user.role);
 
-	// Логи для отладки
-	console.log('User:', user);
-	console.log('User role:', user?.role);
-	console.log('Publication status:', publication.status);
-	console.log('Is reviewer and needs_review:', isReviewer && publication.status === 'needs_review');
+	// Отображаем ошибку
+	if (error) {
+		return (
+			<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
+				<Typography color="error" align="center">{error}</Typography>
+			</Container>
+		);
+	}
+
+	// Отображаем индикатор загрузки, пока ждем данные
+	if (isLoadingPublication || loadingUser) {
+		return (
+			<Container maxWidth="lg" sx={{ mt: 8, mb: 4, display: 'flex', justifyContent: 'center' }}>
+				<CircularProgress sx={{ color: '#0071E3' }} />
+			</Container>
+		);
+	}
+
+	// Если публикация не загружена после завершения загрузки
+	if (!publication) {
+		return (
+			<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
+				<Typography align="center">Не удалось загрузить данные публикации.</Typography>
+			</Container>
+		);
+	}
+
+	// Формируем URL файла
+	const fileUrl = publication.file_url
+		? publication.file_url.startsWith('http')
+			? publication.file_url // Уже полный URL
+			: `http://localhost:5000${publication.file_url.startsWith('/') ? '' : '/'}${publication.file_url}` // Делаем URL абсолютным
+		: null;
+
 
 	return (
 		<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
 			<AppleCard elevation={4}>
-				<CardContent sx={{ pt: 4, pb: 4 }}>
+				<CardContent sx={{ p: 3 }}> {/* Уменьшили padding для компактности */}
+					{/* --- Основные поля --- */}
 					<Typography variant="h4" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 600 }}>
 						{publication.title}
 					</Typography>
@@ -338,110 +343,181 @@ function Publication() {
 						Год: {publication.year}
 					</Typography>
 					<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
-						Тип:{' '}
-						{/* --- ИЗМЕНЕНИЕ ЗДЕСЬ --- */}
-						{/* Ищем в массиве всех типов запись, ID русского названия которой совпадает с ID в публикации */}
-						{publicationTypes.find((type) => type.display_name_id === publication.display_name_id)?.display_name
-							// Запасной вариант: если не нашли по ID, попробуем взять display_name напрямую из данных публикации
-							|| publication.type?.display_name
-							// Крайний запасной вариант: ищем по базовому имени (старая логика)
-							|| publicationTypes.find((type) => type.name === publication.type?.name)?.display_name
-							// Если ничего не помогло
-							|| 'Неизвестный тип'}
-						{/* --- КОНЕЦ ИЗМЕНЕНИЯ --- */}
+						Тип: {publication.type?.display_name || 'Неизвестный тип'}
 					</Typography>
-					{renderStatus(publication.status, publication.returned_for_revision, isReviewer)}
-					<Typography variant="body1" sx={{ color: '#757575', mb: 2 }}>
-						Опубликовал: {publication.user.full_name}
-					</Typography>
+					{/* --- Рендеринг статуса --- */}
+					{renderStatus(publication.status, publication.returned_for_revision)}
 
-					<Typography variant="h6" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 500 }}>
-						Предпросмотр:
-					</Typography>
-					{fileUrl ? (
-						fileUrl.endsWith('.pdf') ? (
-							<>
-								<DocumentViewer>
-									<Document
-										file={fileUrl}
-										onLoadSuccess={onDocumentLoadSuccess}
-										onLoadError={(err) => setError(`Ошибка загрузки PDF: ${err.message}`)}
-									>
-										<Page
-											pageNumber={pageNumber}
-											scale={1}
-											renderTextLayer={false}
-											renderAnnotationLayer={false}
-										/>
-									</Document>
-								</DocumentViewer>
-								{numPages > 1 && (
-									<Box sx={{ display: 'flex', justifyContent: 'center', mt: 2, mb: 4 }}>
-										<Pagination
-											count={numPages}
-											page={pageNumber}
-											onChange={(event, newPage) => setPageNumber(newPage)}
-											color="primary"
-											sx={{
-												'& .MuiPaginationItem-root': {
-													borderRadius: 20,
-													transition: 'all 0.3s ease',
-													'&:hover': {
-														backgroundColor: 'grey.100',
-														boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
-													},
-													'&.Mui-selected': {
-														backgroundColor: '#1976D2',
-														color: 'white',
-														boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)',
-													},
-												},
-											}}
-										/>
-									</Box>
-								)}
-							</>
-						) : fileUrl.endsWith('.docx') ? (
-							<Typography sx={{ color: '#6E6E73', mb: 2 }}>
-								Файл загружен в формате DOCX, предпросмотр недоступен.
-							</Typography>
-						) : (
-							<Typography sx={{ color: '#6E6E73', mb: 2 }}>
-								Формат файла не поддерживается для отображения (только PDF и DOCX).
-							</Typography>
-						)
-					) : (
-						<Typography sx={{ color: '#6E6E73', mb: 2 }}>
-							Файл не прикреплен к этой публикации.
+					{/* --- ОТОБРАЖЕНИЕ НОВЫХ ПОЛЕЙ (с проверкой на наличие) --- */}
+					{publication.journal_conference_name && (
+						<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
+							Издание: {publication.journal_conference_name}
 						</Typography>
 					)}
-					{fileUrl && (
-						<Box sx={{ mt: 2, mb: 2 }}>
-							<AppleButton startIcon={<DownloadIcon />} onClick={handleDownload}>
-								Скачать
-							</AppleButton>
-						</Box>
+					{publication.volume && (
+						<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
+							Том: {publication.volume}
+						</Typography>
 					)}
-
-					{isReviewer && publication.status === 'needs_review' && (
-						<Box sx={{ mb: 2, display: 'flex', gap: 2 }}>
-							<GreenButton onClick={handlePublish}>Опубликовать</GreenButton>
-							<RedButton onClick={handleReject} disabled={!hasReviewerComment}>
-								Отправить на доработку
-							</RedButton>
-						</Box>
+					{publication.number && (
+						<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
+							Номер/Выпуск: {publication.number}
+						</Typography>
 					)}
+					{publication.pages && (
+						<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
+							Страницы: {publication.pages}
+						</Typography>
+					)}
+					{publication.publisher && (
+						<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
+							Издательство: {publication.publisher}
+						</Typography>
+					)}
+					{publication.publisher_location && (
+						<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
+							Место издательства: {publication.publisher_location}
+						</Typography>
+					)}
+					<Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 1 }}> {/* Группируем ID */}
+						{publication.doi && (
+							<Typography variant="body1" sx={{ color: '#757575' }}>DOI: {publication.doi}</Typography>
+						)}
+						{publication.issn && (
+							<Typography variant="body1" sx={{ color: '#757575' }}>ISSN: {publication.issn}</Typography>
+						)}
+						{publication.isbn && (
+							<Typography variant="body1" sx={{ color: '#757575' }}>ISBN: {publication.isbn}</Typography>
+						)}
+						{publication.quartile && (
+							<Typography variant="body1" sx={{ color: '#757575' }}>Q: {publication.quartile}</Typography>
+						)}
+					</Box>
+					<Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 2, mb: 1 }}> {/* Группируем объем и тираж */}
+						{publication.printed_sheets_volume != null && ( // Проверка на null
+							<Typography variant="body1" sx={{ color: '#757575' }}>
+								Объем (п.л.): {publication.printed_sheets_volume}
+							</Typography>
+						)}
+						{publication.circulation != null && ( // Проверка на null
+							<Typography variant="body1" sx={{ color: '#757575' }}>
+								Тираж: {publication.circulation}
+							</Typography>
+						)}
+					</Box>
+					{publication.department && (
+						<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
+							Кафедра: {publication.department}
+						</Typography>
+					)}
+					{publication.classification_code && (
+						<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
+							Код классификатора: {publication.classification_code}
+						</Typography>
+					)}
+					{publication.notes && (
+						<Typography variant="body1" sx={{ color: '#757575', mb: 2 }}> {/* Увеличил отступ */}
+							Примечание: {publication.notes}
+						</Typography>
+					)}
+					{/* --- КОНЕЦ ОТОБРАЖЕНИЯ НОВЫХ ПОЛЕЙ --- */}
 
-					<Typography variant="h5" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 600 }}>
-						Комментарии
+					<Typography variant="h6" sx={{ color: '#1D1D1F', mt: 2, mb: 1, fontWeight: 500 }}> {/* Добавил отступы */}
+						Документ:
 					</Typography>
-					{publication.comments && (
-						<CommentSection
-							comments={publication.comments}
-							publicationId={publication.id}
-							onCommentAdded={handleCommentAdded}
-						/>
-					)}
+					{/* --- Блок файла и кнопок --- */}
+					<Box sx={{ mb: 3 }}> {/* Отступ для блока файла и кнопок */}
+						{fileUrl ? (
+							fileUrl.toLowerCase().endsWith('.pdf') ? (
+								<>
+									<DocumentViewer>
+										<Document
+											file={fileUrl}
+											onLoadSuccess={onDocumentLoadSuccess}
+											onLoadError={(err) => {
+												console.error("PDF Load Error:", err);
+												setError(`Ошибка загрузки PDF: ${err.message}. Попробуйте скачать файл.`);
+											}}
+											loading={<CircularProgress sx={{ color: '#0071E3', my: 2 }} />} // Индикатор загрузки PDF
+											error={<Typography color="error" sx={{ p: 2 }}>Не удалось загрузить PDF.</Typography>}
+										>
+											<PdfPageWrapper>
+												<Page
+													key={`page_${pageNumber}`}
+													pageNumber={pageNumber}
+													renderTextLayer={false}
+													// renderAnnotationLayer={true} // Можно включить, если нужны аннотации PDF
+													width={ // Адаптивная ширина страницы PDF
+														Math.min(window.innerWidth * 0.8, 800) // Например, 80% ширины окна, но не более 800px
+													}
+												/>
+											</PdfPageWrapper>
+										</Document>
+									</DocumentViewer>
+									{numPages && numPages > 1 && (
+										<Box sx={{ display: 'flex', justifyContent: 'center', mt: 1 }}>
+											<Pagination
+												count={numPages}
+												page={pageNumber}
+												onChange={handlePageChange}
+												color="primary"
+												size="small" // Уменьшим пагинацию
+												sx={{
+													'& .MuiPaginationItem-root': { borderRadius: '50%' }, // Круглые кнопки
+													'& .Mui-selected': { backgroundColor: '#0071E3', color: '#fff' }
+												}}
+											/>
+										</Box>
+									)}
+								</>
+							) : fileUrl.toLowerCase().endsWith('.docx') ? (
+								<Typography sx={{ color: '#6E6E73', my: 2 }}>
+									Файл загружен в формате DOCX, предпросмотр недоступен. Вы можете скачать файл.
+								</Typography>
+							) : (
+								<Typography sx={{ color: '#6E6E73', my: 2 }}>
+									Формат файла не поддерживается для предпросмотра. Вы можете скачать файл.
+								</Typography>
+							)
+						) : (
+							<Typography sx={{ color: '#6E6E73', my: 2 }}>
+								Файл не прикреплен к этой публикации.
+							</Typography>
+						)}
+						{/* Кнопки действий */}
+						<Box sx={{ mt: 2, display: 'flex', gap: 2, flexWrap: 'wrap' }}>
+							{fileUrl && (
+								<AppleButton startIcon={<DownloadIcon />} onClick={handleDownload}>
+									Скачать файл
+								</AppleButton>
+							)}
+							{/* Кнопки для рецензента */}
+							{isReviewer && publication.status === 'needs_review' && (
+								<>
+									<GreenButton onClick={handlePublish} disabled={isLoadingPublication}>
+										Опубликовать
+									</GreenButton>
+									<RedButton onClick={handleReject} disabled={!hasReviewerComment || isLoadingPublication}>
+										Вернуть на доработку
+										{!hasReviewerComment && " (нужен комментарий)"}
+									</RedButton>
+								</>
+							)}
+						</Box>
+					</Box>
+
+
+					{/* --- Секция комментариев --- */}
+					<Typography variant="h5" sx={{ color: '#1D1D1F', mb: 2, fontWeight: 600 }}>
+						Обсуждение
+					</Typography>
+					{/* Передаем publication.comments убедившись, что это массив */}
+					<CommentSection
+						comments={publication.comments || []}
+						publicationId={publication.id}
+						onCommentAdded={handleCommentAdded} // Передаем callback для обновления UI или перезагрузки
+					/>
+
 				</CardContent>
 			</AppleCard>
 		</Container>
@@ -449,3 +525,5 @@ function Publication() {
 }
 
 export default Publication;
+
+// --- END OF FILE Publication.js ---
