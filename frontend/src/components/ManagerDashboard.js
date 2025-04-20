@@ -1180,7 +1180,7 @@ function ManagerDashboard() {
 														<Fade in={true} timeout={500} key={pubHistoryTransitionKey}>
 															<TableBody>
 																{pubActionHistory.map((action) => (
-																	<TableRow key={`${action.id}-${action.timestamp}`}>
+																	<TableRow key={`${action.history_id}-${action.timestamp}`}>
 																		<TableCell sx={{ minWidth: '200px', whiteSpace: 'normal', wordWrap: 'break-word' }}>
 																			<Typography
 																				sx={{
@@ -1191,7 +1191,7 @@ function ManagerDashboard() {
 																				}}
 																				onClick={() => {
 																					handleCloseHistoryDrawer();
-																					navigate(`/publication/${action.id}`);
+																					navigate(`/publication/${action.publication_id}`);
 																				}}
 																			>
 																				{action.title}
@@ -1765,7 +1765,7 @@ function ManagerDashboard() {
 														<Fade in={true} timeout={500} key={planHistoryTransitionKey}>
 															<TableBody>
 																{planActionHistory.map((action) => (
-																	<TableRow key={action.id}>
+																	<TableRow key={action.history_id}>
 																		<TableCell sx={{ minWidth: '150px', whiteSpace: 'nowrap' }}>
 																			<Typography
 																				sx={{
@@ -1775,7 +1775,7 @@ function ManagerDashboard() {
 																					'&:hover': { textDecoration: 'none' },
 																				}}
 																				onClick={() => {
-																					if (action.id) {
+																					if (action.plan_id) {
 																						handleClosePlanHistoryDrawer();
 																						// navigate(`/plan/${action.id}`); // Раскомментируйте, если есть страница плана
 																					} else {

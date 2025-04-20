@@ -1802,7 +1802,22 @@ function Dashboard() {
 		}
 	};
 	const handleSubmitPlanForReview = async (plan) => {
+
 		try {
+			// ---> НАЧАЛО ИЗМЕНЕНИЙ
+			// Проверяем, есть ли записи в плане
+			if (!plan || !plan.entries || plan.entries.length === 0) {
+				setError('Нельзя отправить пустой план на проверку.');
+				setOpenError(true);
+				return; // Прерываем выполнение функции
+			}
+			// Проверяем, что все заголовки заполнены (оставляем эту проверку)
+			if (!areAllTitlesFilled(plan)) {
+				setError('Все записи плана должны иметь заполненные заголовки перед отправкой.');
+				setOpenError(true);
+				return; // Прерываем выполнение функции
+			}
+			// <--- КОНЕЦ ИЗМЕНЕНИЙ
 			await refreshCsrfToken();
 			const response = await axios.post(
 				`http://localhost:5000/api/plans/${plan.id}/submit-for-review`,
@@ -2974,32 +2989,59 @@ function Dashboard() {
 															<StatusChip status={plan.status} role={user.role} />
 															{(plan.status === 'draft' || plan.status === 'returned') && (
 																<>
+																	{/* --- КНОПКА РЕДАКТИРОВАТЬ --- */}
 																	<IconButton
 																		onClick={(e) => {
 																			e.stopPropagation();
 																			handleEditPlanClick(plan.id);
 																		}}
 																		sx={{ color: '#0071E3' }}
+																		// ИСПРАВЛЕННОЕ условие disabled: Проверяем только статус
+																		disabled={plan.status !== 'draft' && plan.status !== 'returned'}
+																		// ИСПРАВЛЕННЫЙ title
+																		title="Редактировать план"
 																	>
 																		<EditIcon />
 																	</IconButton>
+
+																	{/* --- КНОПКА УДАЛИТЬ (Оставить как есть или скорректировать) --- */}
 																	<IconButton
 																		onClick={(e) => {
 																			e.stopPropagation();
 																			handleDeletePlanClick(plan);
 																		}}
 																		sx={{ color: '#FF3B30' }}
+																		// Оставляем проверку по статусу, если нужно, или убираем, если удаление всегда разрешено для draft/returned
+																		disabled={plan.status !== 'draft' && plan.status !== 'returned'} // Или скорректируйте по необходимости
+																		title="Удалить план" // Добавляем подсказку
 																	>
 																		<DeleteIcon />
 																	</IconButton>
+
+																	{/* --- КНОПКА ОТПРАВИТЬ (Проверяем её условия) --- */}
 																	<IconButton
 																		onClick={(e) => {
 																			e.stopPropagation();
 																			handleSubmitPlanForReview(plan);
 																		}}
 																		sx={{ color: '#0071E3' }}
-																		disabled={!areAllTitlesFilled(plan)}
-																		title={areAllTitlesFilled(plan) ? 'Отправить на проверку' : 'Заполните все заголовки'}
+																		// ПРОВЕРЕННОЕ/КОРРЕКТНОЕ условие disabled для ОТПРАВКИ
+																		disabled={
+																			!plan.entries || // Проверка 1: Существует ли 'entries'?
+																			plan.entries.length === 0 || // Проверка 2: Пуст ли 'entries'?
+																			!areAllTitlesFilled(plan) || // Проверка 3: Заполнены ли все заголовки?
+																			(plan.status !== 'draft' && plan.status !== 'returned') // Проверка 4: Корректный ли статус?
+																		}
+																		// ПРОВЕРЕННЫЙ/КОРРЕКТНЫЙ title для ОТПРАВКИ
+																		title={
+																			(plan.status !== 'draft' && plan.status !== 'returned')
+																				? `Нельзя отправить план в статусе '${plan.status}'` // Причина: статус
+																				: (!plan.entries || plan.entries.length === 0)
+																					? 'Нельзя отправить пустой план' // Причина: пустой план
+																					: !areAllTitlesFilled(plan)
+																						? 'Заполните все заголовки перед отправкой' // Причина: заголовки
+																						: 'Отправить на проверку' // По умолчанию, если активна
+																		}
 																	>
 																		<PublishIcon />
 																	</IconButton>

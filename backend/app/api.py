@@ -551,7 +551,8 @@ def get_plan_action_history():
     history = []
     for action in paginated_actions.items:
         history.append({
-            'id': action.plan_id,
+            'history_id': action.id,  # <--- Используем ID самой записи истории
+            'plan_id': action.plan_id, # <--- Оставляем ID плана, если он нужен
             'year': action.plan.year,
             'action_type': action.action_type,
             'timestamp': action.timestamp.isoformat(),
@@ -614,7 +615,8 @@ def get_publication_action_history():
     paginated_actions = query.paginate(page=page, per_page=per_page, error_out=False)
 
     history = [{
-        'id': action.publication_id,
+        'history_id': action.id, # <--- ID записи истории
+        'publication_id': action.publication_id, # <--- ID публикации
         'title': action.publication.title,
         'action_type': action.action_type,
         'timestamp': action.timestamp.isoformat(),
@@ -649,8 +651,8 @@ def get_statistics():
                     # Получаем display_name (русское или fallback)
                     if entry.display_name:
                         display_name = entry.display_name.display_name
-                    elif entry.type and entry.type.display_names.count() > 0:
-                        display_name = entry.type.display_names.first().display_name
+                    elif entry.type and entry.type.display_names:
+                        display_name = entry.type.display_names[0].display_name
                     elif entry.type:
                         display_name = entry.type.name
                     else:
