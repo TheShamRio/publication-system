@@ -207,7 +207,7 @@ function Home() {
 								value={filterYear}
 								onChange={(e) => setFilterYear(e.target.value)}
 								variant="outlined"
-								sx={{ boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)', borderRadius: 16, '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+								sx={{  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)', borderRadius: 16, '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
 							/>
 						</Grid>
 						<Grid item xs={12}>

@@ -41,6 +41,7 @@ import RefreshIcon from '@mui/icons-material/Refresh';
 import ContentCopyIcon from '@mui/icons-material/ContentCopy';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
+import LightbulbOutlinedIcon from '@mui/icons-material/LightbulbOutlined';
 import HistoryIcon from '@mui/icons-material/History';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
@@ -211,7 +212,10 @@ function ManagerDashboard() {
 	const [editTypeDisplayNames, setEditTypeDisplayNames] = useState(['']);
 	const [openDeleteTypeConfirmDialog, setOpenDeleteTypeConfirmDialog] = useState(false);
 	const [typeToDelete, setTypeToDelete] = useState(null); // Храним весь объект типа для сообщения
-
+	const [publicationHints, setPublicationHints] = useState({});
+	const [openHintsDialog, setOpenHintsDialog] = useState(false);
+	const [editedHints, setEditedHints] = useState({});
+	const [loadingHints, setLoadingHints] = useState(false);
 
 	// Функция сортировки и фильтрации статистики
 	const sortAndFilterStatistics = (stats, query) => {
@@ -239,6 +243,60 @@ function ManagerDashboard() {
 				return aName.localeCompare(bName);
 			});
 	};
+
+	const hintableFields = [
+		{ field: 'display_name_id', label: 'Тип' },
+		{ field: 'title', label: 'Название' },
+		{ field: 'authors_json', label: 'Авторы' },
+		{ field: 'year', label: 'Год' },
+		{ field: 'journal_conference_name', label: 'Наименование журнала/конференции' },
+		{ field: 'doi', label: 'DOI' },
+		{ field: 'issn', label: 'ISSN' },
+		{ field: 'isbn', label: 'ISBN' },
+		{ field: 'quartile', label: 'Квартиль (Q)' },
+		{ field: 'volume', label: 'Том' },
+		{ field: 'number', label: 'Номер/Выпуск' },
+		{ field: 'pages', label: 'Страницы' },
+		{ field: 'department', label: 'Кафедра' },
+		{ field: 'publisher', label: 'Издательство' },
+		{ field: 'publisher_location', label: 'Место издательства' },
+		{ field: 'printed_sheets_volume', label: 'Объем (п.л.)' },
+		{ field: 'circulation', label: 'Тираж' },
+		{ field: 'classification_code', label: 'Код по классификатору' },
+		{ field: 'notes', label: 'Примечание' },
+		{ field: 'file', label: 'Файл публикации' },
+	];
+
+	const fetchPublicationHints = async () => {
+		setLoadingHints(true);
+		try {
+			const response = await axios.get('http://localhost:5000/admin_api/admin/publication-hints', {
+				withCredentials: true,
+				headers: { 'X-CSRFToken': csrfToken },
+			});
+			setPublicationHints(response.data);
+			setEditedHints(response.data); // Инициализируем редактируемые подсказки
+			setError('');
+		} catch (err) {
+			console.error("Ошибка загрузки подсказок:", err);
+			setError("Не удалось загрузить подсказки.");
+			setOpenError(true);
+		} finally {
+			setLoadingHints(false);
+		}
+	};
+
+	useEffect(() => {
+		if (!isAuthenticated || user.role !== 'manager') navigate('/login');
+		setLoadingInitial(true);
+		Promise.all([
+			fetchPublications(currentPagePublications),
+			fetchPlans(currentPagePlans),
+			fetchPubActionHistory(pubHistoryPage, dateFilterRange.start, dateFilterRange.end),
+			fetchPlanActionHistory(planHistoryPage, dateFilterRange.start, dateFilterRange.end),
+			fetchPublicationHints(), // <--- Вызов здесь
+		]).finally(() => setLoadingInitial(false));
+	}, [isAuthenticated, user, navigate]); // Добавьте csrfToken если нужно обновлять токен чаще
 
 	// Эффект для автоматического закрытия уведомлений
 	useEffect(() => {
@@ -356,6 +414,28 @@ function ManagerDashboard() {
 			console.error('Ошибка загрузки публикаций:', err);
 			setError('Не удалось загрузить публикации. Попробуйте позже.');
 			setOpenError(true);
+		}
+	};
+
+	const handleSaveHints = async () => {
+		setLoadingHints(true); // Можно использовать тот же лоадер
+		try {
+			const response = await axios.put('http://localhost:5000/admin_api/admin/publication-hints', editedHints, {
+				withCredentials: true,
+				headers: { 'X-CSRFToken': csrfToken },
+			});
+			setPublicationHints(response.data); // Обновляем основные подсказки
+			setEditedHints(response.data);     // Обновляем и редактируемые
+			setOpenHintsDialog(false);
+			setSuccess("Подсказки успешно сохранены!");
+			setOpenSuccess(true);
+			setError('');
+		} catch (err) {
+			console.error("Ошибка сохранения подсказок:", err);
+			setError(err.response?.data?.error || "Не удалось сохранить подсказки.");
+			setOpenError(true);
+		} finally {
+			setLoadingHints(false);
 		}
 	};
 
@@ -989,7 +1069,32 @@ function ManagerDashboard() {
 									<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
 										Работы на проверке
 									</Typography>
-									<AppleCard sx={{ mt: 2, mb: 2, p: 2, backgroundColor: '#F5F5F7', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
+									<AppleCard sx={{
+										mt: 2, mb: 2, p: 2, backgroundColor: '#F5F5F7',
+										borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+										position: 'relative' // <--- Необходимо для позиционирования иконки
+									}}>
+										{/* --- ИКОНКА ПОДСКАЗКИ --- */}
+										<IconButton
+											aria-label="edit-hints"
+											onClick={() => {
+												setEditedHints(publicationHints); // Сбрасываем изменения при открытии
+												setOpenHintsDialog(true);
+											}}
+											sx={{
+												position: 'absolute',
+												top: 125, // Отступ сверху
+												right: 16, // Отступ справа
+												color: '#FFA500', // Оранжевый цвет для заметности
+												backgroundColor: 'rgba(255, 165, 0, 0.1)',
+												'&:hover': {
+													backgroundColor: 'rgba(255, 165, 0, 0.2)',
+												},
+											}}
+											title="Редактировать подсказки для формы публикации"
+										>
+											<LightbulbOutlinedIcon />
+										</IconButton>
 										<AppleTextField
 											fullWidth
 											label="Поиск по названию, авторам или году"
@@ -2145,7 +2250,49 @@ function ManagerDashboard() {
 					</DialogActions>
 				</Dialog>
 
-
+				<Dialog
+					open={openHintsDialog}
+					onClose={() => setOpenHintsDialog(false)}
+					fullWidth
+					maxWidth="md" // Сделаем пошире для удобства
+					PaperProps={{ sx: { borderRadius: '16px', p: 2 } }}
+				>
+					<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600 }}>
+						Редактирование подсказок для полей публикации
+					</DialogTitle>
+					<DialogContent>
+						{loadingHints ? (
+							<Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}><CircularProgress /></Box>
+						) : (
+							<Box sx={{ display: 'flex', flexDirection: 'column', gap: 2, mt: 1 }}>
+								{hintableFields.map(({ field, label }) => (
+									<div key={field}>
+										<Typography variant="subtitle1" sx={{ fontWeight: 500, color: '#6E6E73', mb: 0.5 }}>
+											{label}:
+										</Typography>
+										<AppleTextField
+											fullWidth
+											multiline
+											minRows={2} // Минимум 2 строки для удобства
+											variant="outlined"
+											value={editedHints[field] || ''}
+											onChange={(e) => setEditedHints({ ...editedHints, [field]: e.target.value })}
+											placeholder={`Введите текст подсказки для поля "${label}"...`}
+										/>
+									</div>
+								))}
+							</Box>
+						)}
+					</DialogContent>
+					<DialogActions sx={{ p: 2 }}>
+						<CancelButton onClick={() => setOpenHintsDialog(false)}>
+							Отмена
+						</CancelButton>
+						<AppleButton onClick={handleSaveHints} disabled={loadingHints}>
+							Сохранить подсказки
+						</AppleButton>
+					</DialogActions>
+				</Dialog>
 
 
 

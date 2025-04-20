@@ -4,7 +4,7 @@ from flask_login import login_required, current_user
 from flask import current_app
 from collections import defaultdict
 from app.extensions import db
-from app.models import Publication, User, Plan, PlanEntry, PlanActionHistory, PublicationActionHistory, PublicationType, PublicationTypeDisplayName
+from app.models import Publication, User, Plan, PlanEntry, PlanActionHistory, PublicationActionHistory, PublicationType, PublicationTypeDisplayName, PublicationFieldHint
 import os
 import logging
 from io import BytesIO
@@ -68,6 +68,95 @@ def get_users():
         'pages': paginated_users.pages,
         'total': paginated_users.total
     }), 200
+
+@bp.route('/admin/publication-hints', methods=['GET'])
+@admin_or_manager_required
+def get_admin_publication_hints():
+    """Возвращает все подсказки, создавая записи для отсутствующих полей."""
+    try:
+        hints_db = PublicationFieldHint.query.all()
+        hints_dict = {hint.field_name: hint.hint_text for hint in hints_db}
+
+        # Убедимся, что для всех полей из списка есть запись (даже с пустой подсказкой)
+        for field_name in PUBLICATION_FIELDS_WITH_HINTS:
+            if field_name not in hints_dict:
+                hints_dict[field_name] = '' # Добавляем поле с пустой подсказкой
+
+        return jsonify(hints_dict), 200
+    except Exception as e:
+        logger.error(f"Ошибка получения админских подсказок полей публикации: {str(e)}")
+        return jsonify({"error": "Не удалось загрузить подсказки для редактирования."}), 500
+
+@bp.route('/admin/publication-hints', methods=['PUT'])
+@admin_or_manager_required
+def update_admin_publication_hints():
+    """Обновляет подсказки для полей публикации."""
+    data = request.get_json()
+    if not isinstance(data, dict):
+        return jsonify({"error": "Ожидается объект с подсказками."}), 400
+
+    try:
+        updated_count = 0
+        created_count = 0
+        for field_name, hint_text in data.items():
+            # Обновляем только те поля, которые есть в нашем списке
+            if field_name in PUBLICATION_FIELDS_WITH_HINTS:
+                hint = PublicationFieldHint.query.filter_by(field_name=field_name).first()
+                cleaned_hint_text = hint_text.strip() if isinstance(hint_text, str) else ''
+
+                if hint:
+                    if hint.hint_text != cleaned_hint_text:
+                        hint.hint_text = cleaned_hint_text
+                        hint.updated_at = datetime.utcnow()
+                        # Опционально: hint.updated_by_user_id = current_user.id
+                        updated_count += 1
+                else:
+                    new_hint = PublicationFieldHint(
+                        field_name=field_name,
+                        hint_text=cleaned_hint_text
+                        # Опционально: updated_by_user_id=current_user.id
+                    )
+                    db.session.add(new_hint)
+                    created_count += 1
+
+        db.session.commit()
+        logger.info(f"Подсказки обновлены пользователем {current_user.id}. Обновлено: {updated_count}, Создано: {created_count}")
+        # Получаем и возвращаем актуальный список подсказок
+        all_hints = PublicationFieldHint.query.all()
+        hints_dict = {hint.field_name: hint.hint_text for hint in all_hints}
+        # Дополняем отсутствующими полями
+        for field_name in PUBLICATION_FIELDS_WITH_HINTS:
+            if field_name not in hints_dict:
+                 hints_dict[field_name] = ''
+        return jsonify(hints_dict), 200
+    except Exception as e:
+        db.session.rollback()
+        logger.error(f"Ошибка обновления подсказок: {str(e)}")
+        return jsonify({"error": "Ошибка при сохранении подсказок."}), 500
+
+PUBLICATION_FIELDS_WITH_HINTS = [
+    'type_id', # ID базового типа (статья, монография)
+    'display_name_id', # ID отображаемого названия (Статья РИНЦ, Статья ВАК)
+    'title',
+    'authors_json', # Или просто 'authors', если на фронте ключ такой
+    'year',
+    'journal_conference_name',
+    'doi',
+    'issn',
+    'isbn',
+    'quartile',
+    'volume',
+    'number',
+    'pages',
+    'department',
+    'publisher',
+    'publisher_location',
+    'printed_sheets_volume',
+    'circulation',
+    'classification_code',
+    'notes',
+    'file', # Подсказка для поля загрузки файла
+]
 
 @bp.route('/admin/users/<int:user_id>', methods=['PUT'])
 @admin_required

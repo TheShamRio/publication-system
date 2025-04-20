@@ -14,6 +14,25 @@ class Comment(db.Model):
     user = db.relationship('User', backref='comments', lazy=True)
     publication = db.relationship('Publication', backref='comments', lazy=True)
     parent = db.relationship('Comment', remote_side=[id], backref='replies', lazy=True)
+    
+class PublicationFieldHint(db.Model):
+    __tablename__ = 'publication_field_hint' # Явное имя таблицы
+
+    # Название поля в модели Publication (e.g., 'title', 'year', 'authors', 'doi', 'journal_conference_name')
+    field_name = db.Column(db.String(100), primary_key=True, unique=True)
+    # Текст подсказки
+    hint_text = db.Column(db.Text, nullable=True, default='') # Разрешаем пустые подсказки
+    updated_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow())
+    # Опционально: можно добавить user_id, кто последний редактировал
+    # updated_by_user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)
+    # updated_by = db.relationship('User')
+
+    def to_dict(self):
+        return {
+            'field_name': self.field_name,
+            'hint_text': self.hint_text,
+            'updated_at': self.updated_at.isoformat() if self.updated_at else None
+        }
 
 class User(db.Model, UserMixin):
     id = db.Column(db.Integer, primary_key=True)

@@ -1,6 +1,6 @@
 from flask import Blueprint, jsonify, request, make_response, current_app, send_file
 from .extensions import db, login_manager, csrf
-from .models import User, Publication, Comment, Plan, PlanEntry, PublicationActionHistory, PublicationType, PublicationAuthor , PublicationTypeDisplayName
+from .models import User, Publication, Comment, Plan, PlanEntry, PublicationActionHistory, PublicationType, PublicationAuthor , PublicationTypeDisplayName, PublicationFieldHint  
 from .utils import allowed_file
 from flask_login import login_user, current_user, logout_user, login_required
 from werkzeug.utils import secure_filename
@@ -22,6 +22,18 @@ bp = Blueprint('api', __name__, url_prefix='/api')
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+
+@bp.route('/publication-hints', methods=['GET'])
+@login_required # Подсказки доступны авторизованным пользователям
+def get_publication_hints():
+    """Возвращает все сохраненные подсказки для полей публикации."""
+    try:
+        hints = PublicationFieldHint.query.all()
+        hints_dict = {hint.field_name: hint.hint_text for hint in hints}
+        return jsonify(hints_dict), 200
+    except Exception as e:
+        logger.error(f"Ошибка получения подсказок полей публикации: {str(e)}")
+        return jsonify({"error": "Не удалось загрузить подсказки."}), 500
 
 @bp.route('/uploads/<path:filename>')
 def download_file(filename):

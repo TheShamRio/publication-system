@@ -55,6 +55,7 @@ import DownloadIcon from '@mui/icons-material/Download';
 import PersonIcon from '@mui/icons-material/Person';
 import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
+import LightbulbOutlinedIcon from '@mui/icons-material/LightbulbOutlined';
 import WarningAmberIcon from '@mui/icons-material/WarningAmber';
 import { minWidth, styled } from '@mui/system';
 import axios from 'axios';
@@ -334,7 +335,9 @@ function Dashboard() {
 	const validPublicationTypes = ['article', 'monograph', 'conference'];
 	const validPlanStatuses = ['planned', 'in_progress', 'completed'];
 
-
+	const [publicationHints, setPublicationHints] = useState({});
+	const [openHintsDialog, setOpenHintsDialog] = useState(false);
+	const [loadingHints, setLoadingHints] = useState(false);
 	// --- НОВЫЕ состояния для формы СОЗДАНИЯ ---
 	const [journalConferenceName, setJournalConferenceName] = useState('');
 	const [doi, setDoi] = useState('');
@@ -370,6 +373,65 @@ function Dashboard() {
 	const [editClassificationCode, setEditClassificationCode] = useState('');
 	const [editNotes, setEditNotes] = useState('');
 	// --- КОНЕЦ НОВЫХ состояний для формы РЕДАКТИРОВАНИЯ ---
+
+
+	const hintableFieldsForDisplay = [
+		{ field: 'display_name_id', label: 'Тип' },
+		{ field: 'title', label: 'Название' },
+		{ field: 'authors_json', label: 'Авторы' },
+		{ field: 'year', label: 'Год' },
+		{ field: 'journal_conference_name', label: 'Наименование журнала/конференции' },
+		{ field: 'doi', label: 'DOI' },
+		{ field: 'issn', label: 'ISSN' },
+		{ field: 'isbn', label: 'ISBN' },
+		{ field: 'quartile', label: 'Квартиль (Q)' },
+		{ field: 'volume', label: 'Том' },
+		{ field: 'number', label: 'Номер/Выпуск' },
+		{ field: 'pages', label: 'Страницы' },
+		{ field: 'department', label: 'Кафедра' },
+		{ field: 'publisher', label: 'Издательство' },
+		{ field: 'publisher_location', label: 'Место издательства' },
+		{ field: 'printed_sheets_volume', label: 'Объем (п.л.)' },
+		{ field: 'circulation', label: 'Тираж' },
+		{ field: 'classification_code', label: 'Код по классификатору' },
+		{ field: 'notes', label: 'Примечание' },
+		{ field: 'file', label: 'Файл публикации' },
+	];
+
+	const fetchPublicationHints = async () => {
+		setLoadingHints(true);
+		try {
+			// Используем публичный эндпоинт /api/publication-hints
+			const response = await axios.get('http://localhost:5000/api/publication-hints', {
+				withCredentials: true,
+				headers: { 'X-CSRFToken': csrfToken }, // Токен все равно может быть нужен
+			});
+			setPublicationHints(response.data);
+			setError('');
+		} catch (err) {
+			console.error("Ошибка загрузки подсказок:", err);
+			// Не показываем ошибку пользователю, просто не будет подсказок
+		} finally {
+			setLoadingHints(false);
+		}
+	};
+
+	useEffect(() => {
+		const loadInitialData = async () => {
+			setInitializing(true);
+			try {
+				await fetchPublicationHints(); // <--- Вызов здесь
+				// ... остальная параллельная загрузка ...
+				// const [publishedPubs, allPubs, plansResponse] = await Promise.all([ ... ]);
+				// ...
+			} catch (err) {
+				// ... обработка других ошибок ...
+			} finally {
+				setInitializing(false);
+			}
+		};
+		loadInitialData();
+	}, []); // Пустой массив зависимостей, если подсказки грузятся один раз
 
 	useEffect(() => {
 		if (user !== null) {
@@ -2296,7 +2358,30 @@ function Dashboard() {
 									>
 										Загрузка публикаций
 									</Typography>
-									<AppleCard sx={{ mb: 4, p: 3, backgroundColor: '#F5F5F7', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
+									<AppleCard sx={{
+										mb: 4, p: 3, backgroundColor: '#F5F5F7', borderRadius: '16px',
+										boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+										position: 'relative' // <--- Для позиционирования иконки
+									}}>
+										{/* --- ИКОНКА ПОДСКАЗКИ --- */}
+										<IconButton
+											aria-label="show-hints"
+											onClick={() => setOpenHintsDialog(true)}
+											sx={{
+												position: 'absolute',
+												top: 16, // Отступ сверху
+												right: 16, // Отступ справа
+												color: '#0071E3', // Синий цвет как у кнопок
+												backgroundColor: 'rgba(0, 113, 227, 0.1)',
+												'&:hover': {
+													backgroundColor: 'rgba(0, 113, 227, 0.2)',
+												},
+											}}
+											title="Показать подсказки по заполнению"
+											disabled={loadingHints || Object.keys(publicationHints).length === 0} // Неактивна, если подсказки грузятся или пусты
+										>
+											<LightbulbOutlinedIcon />
+										</IconButton>
 										<Box sx={{ mb: 2, display: 'flex', gap: 2 }}>
 											<AppleButton
 												onClick={() => setUploadType('file')}
@@ -3874,6 +3959,49 @@ function Dashboard() {
 				</DialogActions>
 			</Dialog>
 
+
+			<Dialog
+				open={openHintsDialog}
+				onClose={() => setOpenHintsDialog(false)}
+				fullWidth
+				maxWidth="md" // Можно сделать sm или md
+				PaperProps={{ sx: { borderRadius: '16px', p: 2 } }}
+			>
+				<DialogTitle sx={{ color: '#1D1D1F', fontWeight: 600 }}>
+					Подсказки по заполнению полей
+				</DialogTitle>
+				<DialogContent dividers> {/* dividers добавляет линии */}
+					{loadingHints ? (
+						<Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}><CircularProgress /></Box>
+					) : Object.keys(publicationHints).length > 0 ? (
+						<Box sx={{ display: 'flex', flexDirection: 'column', gap: 2.5 }}>
+							{hintableFieldsForDisplay.map(({ field, label }) => {
+								const hintText = publicationHints[field];
+								// Показываем поле, только если для него есть подсказка
+								return hintText ? (
+									<div key={field}>
+										<Typography variant="h6" sx={{ fontWeight: 500, color: '#1D1D1F', mb: 0.5 }}>
+											{label}
+										</Typography>
+										<Typography variant="body2" sx={{ color: '#6E6E73', whiteSpace: 'pre-wrap' }}> {/* whiteSpace для сохранения переносов строк */}
+											{hintText}
+										</Typography>
+									</div>
+								) : null; // Не рендерим, если подсказки нет
+							})}
+						</Box>
+					) : (
+						<Typography sx={{ color: '#6E6E73', textAlign: 'center', p: 3 }}>
+							Подсказки для полей не найдены.
+						</Typography>
+					)}
+				</DialogContent>
+				<DialogActions sx={{ p: 2 }}>
+					<AppleButton onClick={() => setOpenHintsDialog(false)}>
+						Закрыть
+					</AppleButton>
+				</DialogActions>
+			</Dialog>
 
 			<Dialog
 				open={openCreatePlanDialog}
