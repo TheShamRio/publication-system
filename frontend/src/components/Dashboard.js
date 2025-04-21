@@ -47,6 +47,7 @@ import { useNavigate } from 'react-router-dom';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
 import SaveIcon from '@mui/icons-material/Save';
+
 import PublishIcon from '@mui/icons-material/Publish';
 import LinkIcon from '@mui/icons-material/Link'; // Добавляем иконку для привязки
 import UnlinkIcon from '@mui/icons-material/LinkOff';
@@ -415,6 +416,62 @@ function Dashboard() {
 			setLoadingHints(false);
 		}
 	};
+
+	const handleExportExcel = async () => {
+		try {
+			// Обновляем CSRF токен на всякий случай, если он используется для GET запросов (обычно нет)
+			// await refreshCsrfToken(); // <-- Возможно, это не нужно для GET
+
+			const response = await axios.get('http://localhost:5000/api/publications/export-excel', {
+				withCredentials: true,
+				responseType: 'blob', // ВАЖНО: ожидаем бинарные данные (файл)
+				// headers: { 'X-CSRFToken': csrfToken } // <-- Добавьте, если CSRF нужен для GET
+			});
+
+			// Получаем имя файла из заголовка Content-Disposition
+			const contentDisposition = response.headers['content-disposition'];
+			let filename = 'publications_report.xlsx'; // Имя по умолчанию
+			if (contentDisposition) {
+				const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
+				if (filenameMatch && filenameMatch.length === 2) {
+					filename = filenameMatch[1];
+				}
+			}
+
+			// Создаем ссылку для скачивания
+			const url = window.URL.createObjectURL(new Blob([response.data]));
+			const link = document.createElement('a');
+			link.href = url;
+			link.setAttribute('download', filename); // Используем имя файла из заголовка
+			document.body.appendChild(link);
+			link.click();
+
+			// Очистка
+			link.parentNode.removeChild(link);
+			window.URL.revokeObjectURL(url);
+
+			setSuccess('Отчет Excel успешно скачан!'); // Опциональное уведомление
+			setOpenSuccess(true);
+
+		} catch (err) {
+			console.error('Ошибка скачивания Excel отчета:', err.response?.data || err.message);
+			let errorMsg = 'Не удалось скачать отчет Excel.';
+			// Попытка прочитать ошибку из blob, если сервер вернул JSON в ошибке
+			if (err.response && err.response.data instanceof Blob && err.response.data.type === "application/json") {
+				try {
+					const errorJson = JSON.parse(await err.response.data.text());
+					errorMsg = errorJson.error || errorMsg;
+				} catch (parseError) {
+					console.error("Ошибка парсинга JSON из Blob ошибки:", parseError);
+				}
+			} else if (err.response?.data?.error) {
+				errorMsg = err.response.data.error;
+			}
+			setError(errorMsg);
+			setOpenError(true);
+		}
+	};
+
 
 	useEffect(() => {
 		const loadInitialData = async () => {
@@ -3376,12 +3433,23 @@ function Dashboard() {
 									>
 										Экспорт публикаций
 									</Typography>
-									<AppleCard sx={{ p: 4, borderRadius: '16px', backgroundColor: '#FFFFFF', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
+									<AppleCard sx={{ p: 4, /* ... стили ... */ }}>
 										<CardContent>
 											<Typography variant="body1" sx={{ color: '#6E6E73', mb: 2 }}>
-												Вы можете экспортировать свои публикации в формате BibTeX.
+												Вы можете экспортировать свои публикации в формате BibTeX или Excel.
 											</Typography>
-											<AppleButton onClick={handleExportBibTeX}>Экспортировать в BibTeX</AppleButton>
+											<Box sx={{ display: 'flex', gap: 2 }}> {/* Оборачиваем кнопки */}
+												<AppleButton onClick={handleExportBibTeX}>
+													Экспортировать в BibTeX
+												</AppleButton>
+												{/* Новая кнопка */}
+												<AppleButton
+													onClick={handleExportExcel}
+													startIcon={<DownloadIcon />} // Добавляем иконку
+												>
+													Экспортировать в Excel
+												</AppleButton>
+											</Box>
 										</CardContent>
 									</AppleCard>
 								</Box>

@@ -101,14 +101,14 @@ class PublicationTypeDisplayName(db.Model):
     )
 class Publication(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    title = db.Column(db.String(200), nullable=False)
+    title = db.Column(db.String(5000), nullable=False)
     year = db.Column(db.Integer, nullable=False)
     type_id = db.Column(db.Integer, db.ForeignKey('publication_type.id', ondelete='SET NULL'), nullable=True)
     type = db.relationship('PublicationType', backref='publications')
     display_name_id = db.Column(db.Integer, db.ForeignKey('publication_type_display_name.id', ondelete='SET NULL'), nullable=True)
     display_name = db.relationship('PublicationTypeDisplayName', backref='publications', lazy=True)
     status = db.Column(db.String(50), nullable=False, default='draft')
-    file_url = db.Column(db.String(200), nullable=True)
+    file_url = db.Column(db.String(1000), nullable=True)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id', ondelete='SET NULL'), nullable=True)
     updated_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), onupdate=lambda: datetime.utcnow(), nullable=False)
     returned_for_revision = db.Column(db.Boolean, default=False)
@@ -133,7 +133,7 @@ class Publication(db.Model):
     pages = db.Column(db.String(50), nullable=True)                    # 8. Страницы
     # Сдвигаем нумерацию остальных полей
     department = db.Column(db.String(150), nullable=True)               # 9. Кафедра
-    publisher = db.Column(db.String(200), nullable=True)                # 10. Издательство
+    publisher = db.Column(db.String(5000), nullable=True)                # 10. Издательство
     publisher_location = db.Column(db.String(150), nullable=True)       # 11. Место издательства
     printed_sheets_volume = db.Column(db.Float, nullable=True)           # 12. Объем в п.л.
     circulation = db.Column(db.Integer, nullable=True)                   # 13. Тираж
@@ -198,7 +198,7 @@ class PublicationAuthor(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     publication_id = db.Column(db.Integer, db.ForeignKey('publication.id', ondelete='CASCADE'), nullable=False, index=True) # Добавлен index
-    name = db.Column(db.String(200), nullable=False) # Имя автора (Хасаншин Ш.Р.)
+    name = db.Column(db.String(1000), nullable=False) # Имя автора (Хасаншин Ш.Р.)
     is_employee = db.Column(db.Boolean, default=False, nullable=False) # Является ли сотрудником
     # Связь обратно к Publication (опционально, но полезно для некоторых запросов)
     # publication = db.relationship('Publication', back_populates='authors') # Закомментировано, т.к. back_populates определен в Publication
@@ -295,7 +295,7 @@ class Plan(db.Model):
 class PlanEntry(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     plan_id = db.Column(db.Integer, db.ForeignKey('plan.id'), nullable=False)
-    title = db.Column(db.String(200), nullable=True)
+    title = db.Column(db.String(5000), nullable=True)
     type_id = db.Column(db.Integer, db.ForeignKey('publication_type.id', ondelete='SET NULL'), nullable=True)
     display_name_id = db.Column(db.Integer, db.ForeignKey('publication_type_display_name.id', ondelete='SET NULL'), nullable=True)
     type = db.relationship('PublicationType', backref='plan_entries')

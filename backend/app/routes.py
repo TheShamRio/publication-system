@@ -6,6 +6,8 @@ from flask_login import login_user, current_user, logout_user, login_required
 from werkzeug.utils import secure_filename
 from flask_wtf.csrf import generate_csrf
 import os
+from .report_generator import generate_excel_report # Импортируйте вашу новую функцию
+from io import BytesIO
 from .analytics import get_publications_by_year
 import bibtexparser
 from reportlab.platypus import SimpleDocTemplate, Paragraph
@@ -76,6 +78,37 @@ def get_publication(pub_id):
 
     return jsonify(publication_data), 200
 
+@bp.route('/publications/export-excel', methods=['GET'])
+@login_required
+def export_excel_report():
+    """
+    Генерирует и отдает Excel отчет по публикациям текущего пользователя.
+    """
+    user_id = current_user.id
+    logger.debug(f"Запрос на генерацию Excel отчета для пользователя {user_id}")
+
+    try:
+        # Вызываем функцию генерации отчета
+        excel_data_bytes = generate_excel_report(user_id)
+
+        # Формируем имя файла
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"publications_report_{current_user.username}_{timestamp}.xlsx"
+
+        logger.debug(f"Excel отчет сгенерирован. Отправка файла: {filename}")
+
+        # Отправляем файл пользователю
+        return send_file(
+            BytesIO(excel_data_bytes),
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename # Используем новое имя файла
+        )
+
+    except Exception as e:
+        logger.error(f"Ошибка при генерации Excel отчета для пользователя {user_id}: {str(e)}", exc_info=True)
+        # Возвращаем ошибку пользователю
+        return jsonify({'error': f'Не удалось сгенерировать отчет: {str(e)}'}), 500
 
 @bp.route('/publications/<int:pub_id>/comments', methods=['POST'])
 @login_required
