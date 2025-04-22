@@ -141,7 +141,7 @@ function AdminDashboard() {
 	const [editFirstName, setEditFirstName] = useState('');
 	const [publicationTypes, setPublicationTypes] = useState([]); // Для типов
 	const [loadingPublicationTypes, setLoadingPublicationTypes] = useState(true);
-
+	const [checkingUserDependencies, setCheckingUserDependencies] = useState(false); // Новое состояние
 	// Состояния для редактирования ПУБЛИКАЦИИ (заменяем старые/добавляем новые)
 	const [editPublication, setEditPublication] = useState(null);
 	const [editTitle, setEditTitle] = useState('');
@@ -354,13 +354,65 @@ function AdminDashboard() {
 	};
 
 	// Обработчики удаления
-	const handleDeleteClick = (type, item) => {
+	const handleDeleteClick = async (type, item) => { // Делаем функцию async
 		if (type === 'user') {
-			setUserToDelete(item);
-		} else {
+			// --- Начало изменений для пользователя ---
+			setCheckingUserDependencies(true); // Показываем загрузку (опционально, можно добавить индикатор у кнопки)
+			const targetUser = item; // Сохраняем пользователя локально
+			setUserToDelete(null); // Сбрасываем, пока не проверим
+
+			try {
+				await refreshCsrfToken(); // Убедимся что токен свежий
+				const response = await axios.get(`http://localhost:5000/admin_api/admin/users/${targetUser.id}/check-dependencies`, {
+					withCredentials: true,
+					headers: { 'X-CSRFToken': csrfToken },
+				});
+
+				const { has_published_publications, has_plans } = response.data;
+
+				let errors = [];
+				if (has_published_publications) {
+					errors.push("опубликованные публикации");
+				}
+				if (has_plans) {
+					errors.push("планы");
+				}
+
+				if (errors.length > 0) {
+					// Если есть зависимости, показываем ошибку и НЕ открываем диалог
+					setError(`Невозможно удалить пользователя «${targetUser.username}». Найдены связанные: ${errors.join(' и ')}.`);
+					setOpenError(true);
+					setUserToDelete(null); // Убедимся что он сброшен
+					setOpenDeleteDialog(false); // Убедимся что диалог закрыт
+				} else {
+					// Зависимостей нет, открываем диалог подтверждения
+					setUserToDelete(targetUser); // Устанавливаем пользователя для удаления
+					setOpenDeleteDialog(true); // Открываем диалог
+				}
+
+			} catch (err) {
+				console.error("Ошибка проверки зависимостей пользователя:", err);
+				setError(err.response?.data?.error || 'Не удалось проверить возможность удаления пользователя.');
+				setOpenError(true);
+				setUserToDelete(null);
+				setOpenDeleteDialog(false);
+			} finally {
+				setCheckingUserDependencies(false); // Скрываем загрузку
+			}
+			// --- Конец изменений для пользователя ---
+
+		} else if (type === 'publication') {
+			// Логика для удаления публикации остается без изменений
 			setPublicationToDelete(item);
+			setUserToDelete(null); // Сбрасываем пользователя на всякий случай
+			setOpenDeleteDialog(true);
+		} else {
+			// На всякий случай, если появятся другие типы
+			console.warn("Неизвестный тип для handleDeleteClick:", type);
+			setOpenDeleteDialog(false);
+			setUserToDelete(null);
+			setPublicationToDelete(null);
 		}
-		setOpenDeleteDialog(true);
 	};
 
 	const handleDeleteCancel = () => {
@@ -458,6 +510,9 @@ function AdminDashboard() {
 
 
 	const handleEditCancel = () => {
+		if (document.activeElement instanceof HTMLElement) {
+			document.activeElement.blur(); // Убираем фокус с текущего активного элемента
+		}
 		setOpenEditDialog(false);
 		setEditUser(null);
 		setEditPublication(null); // <-- Сброс публикации
@@ -498,10 +553,7 @@ function AdminDashboard() {
 
 
 		// Сброс ошибок/успеха
-		setError('');
-		setSuccess('');
-		setOpenError(false);
-		setOpenSuccess(false);
+
 	};
 
 	const refreshCsrfToken = async () => {
@@ -565,7 +617,7 @@ function AdminDashboard() {
 				setAllUsers(allUsers.map((user) => (user.id === editUser.id ? response.data.user : user)));
 				setSuccess('Пользователь успешно обновлён.');
 				setOpenSuccess(true);
-				handleEditCancel();
+				handleEditCancel(); // <--- ИЗМЕНЕНИЕ ЗДЕСЬ
 			} else if (editPublication) {
 				// --- ОБНОВЛЕННАЯ ЛОГИКА ОБНОВЛЕНИЯ ПУБЛИКАЦИИ ---
 				// Валидация
@@ -664,7 +716,9 @@ function AdminDashboard() {
 				setAllPublications(allPublications.map((pub) => (pub.id === editPublication.id ? response.data.publication : pub)));
 				setSuccess('Публикация успешно обновлена.');
 				setOpenSuccess(true);
-				handleEditCancel(); // Закрываем диалог сразу
+				setOpenEditDialog(false); // Закрываем только диалог
+				setEditUser(null);
+				setEditPublication(null);; // Даём уведомлению отобразиться // <--- ИЗМЕНЕНИЕ ЗДЕСЬ // Закрываем диалог сразу
 			}
 		} catch (err) {
 			// Обработка ошибок (без изменений, но добавил больше логов)
@@ -892,6 +946,38 @@ function AdminDashboard() {
 
 	return (
 		<Container maxWidth="lg" sx={{ mt: 8, mb: 4 }}>
+			<Collapse in={openSuccess} sx={{ position: 'fixed', top: 70, left: '50%', transform: 'translateX(-50%)', zIndex: 1500, width: 'fit-content' }}>
+				{success && (
+					<Alert
+						severity="success"
+						onClose={() => { setSuccess(''); setOpenSuccess(false); }}
+						sx={{
+							borderRadius: '12px',
+							backgroundColor: '#E7F8E7', // Светло-зеленый
+							color: '#1D1D1F',          // Темный текст
+							boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+						}}
+					>
+						{success}
+					</Alert>
+				)}
+			</Collapse>
+			<Collapse in={openError} sx={{ position: 'fixed', top: openSuccess ? 130 : 70, left: '50%', transform: 'translateX(-50%)', zIndex: 1499, width: 'fit-content' }}>
+				{error && (
+					<Alert
+						severity="error"
+						onClose={() => { setError(''); setOpenError(false); }}
+						sx={{
+							borderRadius: '12px',
+							backgroundColor: '#FFF1F0', // Светло-красный
+							color: '#1D1D1F',          // Темный текст
+							boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+						}}
+					>
+						{error}
+					</Alert>
+				)}
+			</Collapse>
 			<AppleCard sx={{ p: 4, backgroundColor: '#FFFFFF', borderRadius: '16px', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)' }}>
 				<Typography variant="h4" gutterBottom sx={{ color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}>
 					Панель администратора
@@ -1001,40 +1087,7 @@ function AdminDashboard() {
 											</AppleButton>
 											<AppleButton onClick={handleCreateUser}>Создать</AppleButton>
 										</Box>
-										<Collapse in={openError}>
-											{error && (
-												<Alert
-													severity="error"
-													sx={{
-														mt: 2,
-														borderRadius: '12px',
-														backgroundColor: '#FFF1F0',
-														color: '#1D1D1F',
-														boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-													}}
-													onClose={() => setOpenError(false)}
-												>
-													{error}
-												</Alert>
-											)}
-										</Collapse>
-										<Collapse in={openSuccess}>
-											{success && (
-												<Alert
-													severity="success"
-													sx={{
-														mt: 2,
-														borderRadius: '12px',
-														backgroundColor: '#E7F8E7',
-														color: '#1D1D1F',
-														boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-													}}
-													onClose={() => setOpenSuccess(false)}
-												>
-													{success}
-												</Alert>
-											)}
-										</Collapse>
+
 									</form>
 								</AppleCard>
 
@@ -1688,40 +1741,7 @@ function AdminDashboard() {
 											</Box>
 										</>
 									)}
-									<Collapse in={openError}>
-										{error && (
-											<Alert
-												severity="error"
-												sx={{
-													mt: 2,
-													borderRadius: '12px',
-													backgroundColor: '#FFF1F0',
-													color: '#1D1D1F',
-													boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-												}}
-												onClose={() => setOpenError(false)}
-											>
-												{error}
-											</Alert>
-										)}
-									</Collapse>
-									<Collapse in={openSuccess}>
-										{success && (
-											<Alert
-												severity="success"
-												sx={{
-													mt: 2,
-													borderRadius: '12px',
-													backgroundColor: '#E7F8E7',
-													color: '#1D1D1F',
-													boxShadow: '0 2px 4px rgba(0, 0, 0, 0.05)',
-												}}
-												onClose={() => setOpenSuccess(false)}
-											>
-												{success}
-											</Alert>
-										)}
-									</Collapse>
+
 									<DialogActions sx={{ padding: '16px 0', borderTop: '1px solid #E5E5EA' }}>
 										<CancelButton onClick={handleEditCancel}>Отмена</CancelButton>
 										<AppleButton type="submit">Сохранить</AppleButton>

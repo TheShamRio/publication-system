@@ -7,12 +7,12 @@ class Comment(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     content = db.Column(db.Text, nullable=False)
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=False)
-    publication_id = db.Column(db.Integer, db.ForeignKey('publication.id'), nullable=False)
+    publication_id = db.Column(db.Integer, db.ForeignKey('publication.id', ondelete='CASCADE'), nullable=False) # Добавлено ondelete='CASCADE'
     parent_id = db.Column(db.Integer, db.ForeignKey('comment.id'), nullable=True)
     created_at = db.Column(db.DateTime, default=lambda: datetime.utcnow(), nullable=False)
 
     user = db.relationship('User', backref='comments', lazy=True)
-    publication = db.relationship('Publication', backref='comments', lazy=True)
+    publication = db.relationship('Publication', backref=db.backref('comments', cascade='all, delete-orphan', lazy=True))
     parent = db.relationship('Comment', remote_side=[id], backref='replies', lazy=True)
     
 class PublicationFieldHint(db.Model):
@@ -225,13 +225,15 @@ class PlanActionHistory(db.Model):
     
 class PublicationActionHistory(db.Model):
     id = db.Column(db.Integer, primary_key=True)
-    publication_id = db.Column(db.Integer, db.ForeignKey('publication.id'), nullable=False)
+    publication_id = db.Column(db.Integer, db.ForeignKey('publication.id', ondelete='CASCADE'), nullable=False)
     action_type = db.Column(db.String(20), nullable=False)  # 'approved', 'returned'
     timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
     comment = db.Column(db.Text, nullable=True)  # Комментарий для возврата
     user_id = db.Column(db.Integer, db.ForeignKey('user.id'), nullable=True)  # Кто выполнил действие
 
-    publication = db.relationship('Publication', backref=db.backref('action_history', lazy='dynamic'))
+    publication = db.relationship('Publication', backref=db.backref('action_history',
+                                                           lazy='dynamic',
+                                                           cascade='all, delete-orphan')) # Добавлено cascade
     user = db.relationship('User', backref='publication_actions')     
 
 class Achievement(db.Model):

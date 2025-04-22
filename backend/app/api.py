@@ -209,6 +209,33 @@ def delete_user(user_id):
         db.session.rollback()
         logger.error(f"Ошибка при удалении пользователя {user_id}: {str(e)}")
         return jsonify({"error": "Ошибка при удалении пользователя. Попробуйте позже."}), 500
+    
+@bp.route('/admin/users/<int:user_id>/check-dependencies', methods=['GET'])
+@admin_required  # Доступно только администратору
+def check_user_dependencies(user_id):
+    """Проверяет, есть ли у пользователя зависимости, мешающие удалению."""
+    try:
+        # Проверка наличия опубликованных публикаций
+        has_published_publications = db.session.query(Publication.id)\
+            .filter_by(user_id=user_id, status='published')\
+            .limit(1).scalar() is not None # Эффективно проверить хотя бы одну
+
+        # Проверка наличия любых планов (независимо от статуса)
+        has_plans = db.session.query(Plan.id)\
+            .filter_by(user_id=user_id)\
+            .limit(1).scalar() is not None # Эффективно проверить хотя бы один
+
+        logger.debug(f"Проверка зависимостей для user {user_id}: "\
+                     f"опубл. публикации={has_published_publications}, планы={has_plans}")
+
+        return jsonify({
+            "has_published_publications": has_published_publications,
+            "has_plans": has_plans
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Ошибка при проверке зависимостей пользователя {user_id}: {str(e)}")
+        return jsonify({"error": "Ошибка сервера при проверке зависимостей пользователя."}), 500
 
 @bp.route('/admin/publications', methods=['GET'])
 @admin_or_manager_required
