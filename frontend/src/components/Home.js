@@ -44,7 +44,7 @@ const SearchInput = styled(TextField)({
 
 function Home() {
 	const [searchTerm, setSearchTerm] = useState('');
-	const [filterType, setFilterType] = useState('');
+	const [filterDisplayNameId, setFilterDisplayNameId] = useState(''); // Используем ID русского названия
 	const [filterYear, setFilterYear] = useState('');
 	const [publications, setPublications] = useState([]);
 	const [publicationTypes, setPublicationTypes] = useState([]);
@@ -59,6 +59,7 @@ function Home() {
 
 	// Функция форматирования времени
 	const formatTimeAgo = (dateStr) => {
+		// ... (rest of the function remains the same)
 		if (!dateStr) return 'Неизвестное время';
 
 		const date = new Date(dateStr);
@@ -106,15 +107,18 @@ function Home() {
 	useEffect(() => {
 		const fetchPublishedPublications = async () => {
 			try {
+				const params = {
+					page: currentPage,
+					per_page: publicationsPerPage,
+					search: searchTerm || undefined,
+					year: filterYear || undefined,
+					display_name_id: filterDisplayNameId || undefined, // <--- Отправляем ID русского названия
+				};
+				console.log("Sending params to backend:", params); // Для отладки
+
 				const response = await axios.get('http://localhost:5000/api/public/publications', {
 					withCredentials: true,
-					params: {
-						page: currentPage,
-						per_page: publicationsPerPage,
-						search: searchTerm || undefined,
-						type: filterType || undefined,
-						year: filterYear || undefined,
-					},
+					params: params,
 				});
 				console.log('Server response for publications:', response.data);
 				setPublications(response.data.publications || []);
@@ -128,7 +132,7 @@ function Home() {
 		};
 
 		fetchPublishedPublications();
-	}, [searchTerm, filterType, filterYear, currentPage]);
+	}, [searchTerm, filterDisplayNameId, filterYear, currentPage]); // <--- Зависимость от filterDisplayNameId
 
 	// Обработчик смены страницы
 	const handlePageChange = (event, newPage) => {
@@ -137,12 +141,13 @@ function Home() {
 
 	// Обработчик применения фильтров
 	const handleFilterChange = () => {
-		setCurrentPage(1);
+		setCurrentPage(1); // Reset to first page when filters change
 	};
 
 	return (
 		<Container maxWidth="lg" sx={{ mt: 4, minHeight: 'calc(100vh - 64px)', backgroundColor: 'white', borderRadius: 20, boxShadow: '0 12px 32px rgba(0, 0, 0, 0.15)' }}>
 			<Box sx={{ p: 4 }}>
+				{/* ... Title and Description ... */}
 				<Typography variant="h2" gutterBottom sx={{ color: '#212121', fontWeight: 700, textAlign: 'center', mb: 2 }}>
 					Добро пожаловать в Систему Публикаций
 				</Typography>
@@ -172,21 +177,23 @@ function Home() {
 							<FormControl fullWidth variant="outlined" sx={{ borderRadius: 16, boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)' }}>
 								<InputLabel>Тип</InputLabel>
 								<Select
-									value={filterType}
-									onChange={(e) => setFilterType(e.target.value)}
+									value={filterDisplayNameId} // <--- Используем filterDisplayNameId
+									onChange={(e) => setFilterDisplayNameId(e.target.value)} // <--- Используем setFilterDisplayNameId
 									label="Тип"
 									sx={{ borderRadius: 16, '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
 								>
 									<MenuItem value="">Все</MenuItem>
+									{/* Используем display_name_id как ключ и значение */}
 									{publicationTypes.map((type) => (
-										<MenuItem key={type.id} value={type.name}>
-											{type.display_name}
+										<MenuItem key={type.display_name_id} value={type.display_name_id}>
+											{type.display_name} {/* Отображаем русское название */}
 										</MenuItem>
 									))}
 								</Select>
 							</FormControl>
 						</Grid>
 						<Grid item xs={12} sm={4}>
+							{/* Status field remains the same */}
 							<FormControl fullWidth variant="outlined" sx={{ borderRadius: 16, bgcolor: 'grey.100', boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)' }}>
 								<InputLabel>Статус</InputLabel>
 								<Select
@@ -207,14 +214,41 @@ function Home() {
 								value={filterYear}
 								onChange={(e) => setFilterYear(e.target.value)}
 								variant="outlined"
-								sx={{  boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)', borderRadius: 16, '&:hover': { boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' } }}
+								// Apply styles similar to FormControl/Select using the sx prop
+								sx={{
+									'& .MuiOutlinedInput-root': { // Target the root of the outlined input
+										borderRadius: 16,
+										boxShadow: '0 2px 8px rgba(0, 0, 0, 0.05)',
+										backgroundColor: 'white', // Explicitly set background to match if needed
+										transition: 'box-shadow 0.3s ease',
+										height: '42px',
+										'&:hover': {
+											boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
+										},
+										// Optional: Style the border on hover to prevent default changes if desired
+										'&:hover .MuiOutlinedInput-notchedOutline': {
+											// borderColor: 'rgba(0, 0, 0, 0.23)', // Keep default hover border or customize
+										},
+										// Optional: Style the border on focus
+										'&.Mui-focused .MuiOutlinedInput-notchedOutline': {
+											// borderColor: '#1976D2', // Keep default focus border or customize
+											// borderWidth: '1px', // Ensure consistent border width
+										}
+									},
+									'& .MuiInputLabel-root': { // Style label if needed
+										// color: '#757575',
+									},
+									'& .MuiInputLabel-root.Mui-focused': { // Style focused label if needed
+										// color: '#1976D2',
+									}
+								}}
 							/>
 						</Grid>
 						<Grid item xs={12}>
 							<Button
 								variant="contained"
 								color="primary"
-								onClick={handleFilterChange}
+								onClick={handleFilterChange} // Use handleFilterChange here to reset page
 								sx={{ mt: 2, borderRadius: 16, transition: 'all 0.3s ease', '&:hover': { transform: 'scale(1.05)', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' } }}
 							>
 								Применить фильтры
@@ -223,6 +257,7 @@ function Home() {
 					</Grid>
 				</Box>
 
+				{/* ... Rest of the component ... */}
 				<Typography variant="h5" gutterBottom sx={{ mt: 4, color: '#212121', fontWeight: 600, textAlign: 'center' }}>
 					Последние опубликованные работы
 				</Typography>

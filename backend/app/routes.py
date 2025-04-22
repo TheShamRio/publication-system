@@ -368,7 +368,7 @@ def change_password():
 def get_public_publications():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
-    pub_type = request.args.get('type', 'all')
+    display_name_id = request.args.get('display_name_id', type=int) # Получаем ID русского названия
     search = request.args.get('search', '').lower()
     year = request.args.get('year', type=str)
     author_search = request.args.get('author', '').lower()
@@ -376,14 +376,17 @@ def get_public_publications():
 
     query = Publication.query.filter_by(status='published')
 
-    if pub_type and pub_type != 'all':
-        type_ = PublicationType.query.filter_by(name=pub_type).first()
-        if type_:
-            logger.debug(f"Фильтр по типу: {pub_type}, type_id: {type_.id}")
-            query = query.filter(Publication.type_id == type_.id)
-        else:
-            logger.warning(f"Тип публикации не найден: {pub_type}")
-            return jsonify({'publications': [], 'total': 0, 'pages': 0, 'current_page': page}), 200
+    if display_name_id:
+        display_name_exists = db.session.query(PublicationTypeDisplayName.id)\
+        .filter_by(id=display_name_id).scalar() is not None
+        if display_name_exists:
+         logger.debug(f"Фильтр по русскому названию: display_name_id={display_name_id}")
+         # Фильтруем публикации напрямую по display_name_id
+         query = query.filter(Publication.display_name_id == display_name_id)
+    else:
+         logger.warning(f"Русское название с ID {display_name_id} не найдено. Игнорируем фильтр.")
+         # Можно вернуть пустой список, если ID неверный
+         # return jsonify({'publications': [], 'total': 0, 'pages': 0, 'current_page': page}), 200
 
     search_filters = []
     if search:

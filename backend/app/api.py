@@ -4,13 +4,15 @@ from flask_login import login_required, current_user
 from flask import current_app
 from collections import defaultdict
 from app.extensions import db
-from app.models import Publication, User, Plan, PlanEntry, PlanActionHistory, PublicationActionHistory, PublicationType, PublicationTypeDisplayName, PublicationFieldHint
+from app.models import Publication, User, Plan, PlanEntry, PlanActionHistory, PublicationActionHistory, PublicationType, PublicationTypeDisplayName, PublicationFieldHint, PublicationAuthor
 import os
 import logging
 from io import BytesIO
 import bibtexparser
 from datetime import datetime
 from sqlalchemy import or_
+import json
+
 
 bp = Blueprint('admin_api', __name__, url_prefix='/admin_api')
 logger = logging.getLogger(__name__)
@@ -214,7 +216,7 @@ def get_publications():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
     search = request.args.get('search', '', type=str)
-    pub_type = request.args.get('type', 'all', type=str)
+    display_name_id_filter = request.args.get('display_name_id', default=None, type=int) # Получаем ID как int или None
     status = request.args.get('status', 'all', type=str)
     sort_status = request.args.get('sort_status', None, type=str)
     sort_by = request.args.get('sort_by', 'updated_at', type=str)
@@ -230,12 +232,8 @@ def get_publications():
             (db.cast(Publication.year, db.String).ilike(search_pattern))
         )
 
-    if pub_type != 'all':
-        type_ = PublicationType.query.filter_by(name=pub_type).first()
-        if type_:
-            query = query.filter_by(type_id=type_.id)
-        else:
-            return jsonify({'error': 'Invalid publication type'}), 400
+    if display_name_id_filter is not None:
+        query = query.filter(Publication.display_name_id == display_name_id_filter)
 
     valid_statuses = ['draft', 'needs_review', 'returned_for_revision', 'published']
     if status != 'all':
@@ -290,102 +288,283 @@ def get_publications():
 @admin_or_manager_required
 def update_publication(pub_id):
     publication = Publication.query.get_or_404(pub_id)
+    data = {} # Инициализируем словарь для данных
 
-    if 'file' in request.files:
+    logger = current_app.logger # Используем логгер приложения
+
+    # --- Определяем источник данных (Form или JSON) ---
+    is_multipart = 'file' in request.files # Флаг, если есть загрузка файла
+    if is_multipart:
+        data = request.form.to_dict() # Берем данные из формы
+    else:
+        # Если не multipart, ожидаем JSON
+        content_type = request.content_type
+        if content_type and 'application/json' in content_type.lower():
+            try:
+                json_data = request.get_json()
+                if not isinstance(json_data, dict):
+                    logger.warning(f"Некорректный JSON получен для публикации {pub_id} (не словарь)")
+                    return jsonify({"error": "Ожидались данные в формате JSON."}), 400
+                data = json_data
+            except Exception as e:
+                 logger.error(f"Ошибка парсинга JSON для публикации {pub_id}: {e}")
+                 return jsonify({"error": "Не удалось обработать JSON данные."}), 400
+        else:
+            # Если Content-Type не JSON и нет файла - это ошибка
+            logger.error(f"Некорректный Content-Type '{content_type}' для обновления публикации {pub_id} без файла.")
+            return jsonify({"error": "Content-Type должен быть 'application/json', если файл не загружается."}), 415
+
+    # --- Обработка Файла (только если is_multipart) ---
+    if is_multipart:
         file = request.files['file']
-        if file and allowed_file(file.filename):
-            if publication.file_url:
-                old_file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], publication.file_url.split('/')[-1])
-                if os.path.exists(old_file_path):
-                    os.remove(old_file_path)
-            filename = secure_filename(file.filename)
-            file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
-            if os.path.exists(file_path):
+        if file and file.filename != '': # Проверяем, что файл действительно был выбран
+            if allowed_file(file.filename):
+                # Логика сохранения файла (удаление старого, генерация имени, сохранение)
+                if publication.file_url:
+                    # Преобразуем URL в путь к файлу на сервере
+                    filename_from_url = publication.file_url.split('/')[-1]
+                    old_file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename_from_url)
+                    if os.path.exists(old_file_path):
+                         try:
+                              os.remove(old_file_path)
+                              logger.info(f"Старый файл {old_file_path} удален для публикации {pub_id}")
+                         except OSError as e:
+                              logger.error(f"Не удалось удалить старый файл {old_file_path}: {e}")
+                # Генерация нового имени файла и сохранение
+                filename = secure_filename(file.filename)
+                file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
+                # Генерация уникального имени, если файл существует
                 base, extension = os.path.splitext(filename)
                 counter = 1
                 while os.path.exists(file_path):
                     filename = f"{base}_{counter}{extension}"
                     file_path = os.path.join(current_app.config['UPLOAD_FOLDER'], filename)
                     counter += 1
-            try:
-                file.save(file_path)
-                publication.file_url = f"/uploads/{filename}"
-            except Exception as e:
-                logger.error(f"Ошибка при сохранении файла: {str(e)}")
-                return jsonify({"error": "Ошибка при сохранении файла. Попробуйте снова."}), 500
+                try:
+                    file.save(file_path)
+                    publication.file_url = f"/uploads/{filename}" # Сохраняем относительный URL
+                    logger.info(f"Новый файл {filename} сохранен для публикации {pub_id}")
+                except Exception as e:
+                    logger.error(f"Ошибка при сохранении файла для публикации {pub_id}: {str(e)}")
+                    return jsonify({"error": "Ошибка при сохранении файла."}), 500
+            else:
+                 logger.warning(f"Загружен недопустимый тип файла для публикации {pub_id}: {file.filename}")
+                 return jsonify({"error": f"Недопустимый тип файла. Разрешены: {', '.join(ALLOWED_EXTENSIONS)}"}), 400
 
-    data = request.form if 'file' in request.files else request.get_json()
+
+    # --- Обновление Основных Полей (Работаем со словарем data) ---
+    # Используем data.get с запасным вариантом publication.field, чтобы не сбрасывать значение, если ключ отсутствует
     publication.title = data.get('title', publication.title)
-    publication.authors = data.get('authors', publication.authors)
-    publication.year = int(data.get('year', publication.year))
-    type_id = data.get('type_id')  # Теперь ожидаем type_id
-    display_name_id = data.get('display_name_id')  # Новый параметр
-    if type_id:
-        try:
-            type_id = int(type_id)
-            type_ = PublicationType.query.get(type_id)
-            if not type_:
-                return jsonify({'error': 'Invalid publication type'}), 400
-            publication.type_id = type_id
-        except ValueError:
-            return jsonify({'error': 'type_id должен быть числом'}), 400
-
-    if display_name_id:
-        try:
-            display_name_id = int(display_name_id)
-            display_name = PublicationTypeDisplayName.query.get(display_name_id)
-            if not display_name or (type_id and display_name.publication_type_id != type_id):
-                return jsonify({'error': 'Недопустимое русское название'}), 400
-            publication.display_name_id = display_name_id
-        except ValueError:
-            return jsonify({'error': 'display_name_id должен быть числом'}), 400
-
-    new_status = data.get('status', publication.status)
-    comment = data.get('return_comment', '')
-
-    if new_status != publication.status:
-        timestamp = datetime.utcnow()
-        if new_status == 'published':
-            publication.published_at = timestamp
-            publication.returned_for_revision = False
-            publication.returned_at = None
-            publication.return_comment = None
-            action_type = 'published'
-        elif new_status == 'returned_for_revision':
-            publication.returned_for_revision = True
-            publication.returned_at = timestamp
-            publication.return_comment = comment
-            action_type = 'returned'
-        else:
-            action_type = new_status
-            if publication.status in ['published', 'returned_for_revision']:
-                publication.published_at = None
-                publication.returned_at = None
-                publication.return_comment = None
-                publication.returned_for_revision = False
-
-        action = PublicationActionHistory(
-            publication_id=publication.id,
-            user_id=current_user.id,
-            action_type=action_type,
-            timestamp=timestamp,
-            comment=comment if comment.strip() else None
-        )
-        db.session.add(action)
-
-    publication.status = new_status
 
     try:
+        year_str = data.get('year')
+        if year_str is not None: # Обновляем только если год пришел
+             publication.year = int(year_str)
+    except (ValueError, TypeError):
+         logger.warning(f"Не удалось преобразовать год '{data.get('year')}' в число для публикации {pub_id}")
+         return jsonify({'error': 'Год должен быть числом'}), 400 # Возвращаем ошибку
+
+    # Обновление Type ID и Display Name ID
+    type_id_str = data.get('type_id')
+    display_name_id_str = data.get('display_name_id')
+    current_type_id = publication.type_id # Запоминаем текущий для проверки display_name_id
+
+    if type_id_str is not None:
+        try:
+            type_id = int(type_id_str)
+            type_ = PublicationType.query.get(type_id)
+            if not type_:
+                logger.warning(f"Неверный type_id {type_id} при обновлении публикации {pub_id}")
+                return jsonify({'error': 'Недопустимый базовый тип публикации'}), 400
+            publication.type_id = type_id
+            current_type_id = type_id # Обновляем для последующей проверки display_name_id
+        except (ValueError, TypeError):
+             logger.warning(f"Неверный формат type_id '{type_id_str}' для публикации {pub_id}")
+             return jsonify({'error': 'type_id должен быть числом'}), 400
+
+    if display_name_id_str is not None:
+        try:
+            display_name_id_int = int(display_name_id_str)
+            display_name_obj = PublicationTypeDisplayName.query.get(display_name_id_int)
+            # Проверяем существование И принадлежность текущему (или новому) базовому типу
+            if not display_name_obj or (current_type_id is not None and display_name_obj.publication_type_id != current_type_id):
+                logger.warning(f"Недопустимый display_name_id {display_name_id_int} (базовый тип: {current_type_id}) при обновлении публикации {pub_id}")
+                return jsonify({'error': 'Недопустимое отображаемое название для выбранного базового типа'}), 400
+            publication.display_name_id = display_name_id_int
+        except (ValueError, TypeError):
+            logger.warning(f"Неверный формат display_name_id '{display_name_id_str}' для публикации {pub_id}")
+            return jsonify({'error': 'display_name_id должен быть числом'}), 400
+    # Если display_name_id_str не пришел, НЕ сбрасываем publication.display_name_id
+    # Оно могло остаться валидным от предыдущего сохранения
+
+    # --- Обновление Авторов ---
+    authors_list = None
+    if is_multipart and 'authors_json' in data:
+        # При multipart данные приходят как строка JSON
+        try:
+            authors_list = json.loads(data['authors_json'])
+            if not isinstance(authors_list, list): raise ValueError("authors_json is not a list")
+        except (json.JSONDecodeError, ValueError, TypeError) as e:
+            logger.error(f"Ошибка парсинга 'authors_json' из FormData для pub {pub_id}: {e}")
+            return jsonify({"error": "Некорректный формат данных авторов в authors_json."}), 400
+    elif not is_multipart and 'authors' in data and isinstance(data.get('authors'), list):
+        # При JSON данные приходят как список
+        authors_list = data['authors']
+
+    if authors_list is not None: # Обновляем только если данные авторов корректны
+        try:
+            # Эффективное обновление: Удаляем старых, добавляем новых
+            PublicationAuthor.query.filter_by(publication_id=publication.id).delete()
+            db.session.flush() # Важно применить удаление перед добавлением
+
+            if not authors_list: # Проверяем, что список авторов не пустой после фильтрации на фронте
+                 raise ValueError("Список авторов не может быть пустым.")
+
+            for author_data in authors_list:
+                if isinstance(author_data, dict) and author_data.get('name', '').strip():
+                    name = author_data['name'].strip()
+                    is_employee = author_data.get('is_employee', False)
+                    # Безопасное преобразование в bool
+                    if isinstance(is_employee, str):
+                        is_employee = is_employee.lower() in ['true', '1', 'yes']
+                    else:
+                        is_employee = bool(is_employee)
+
+                    new_author = PublicationAuthor(
+                        publication_id=publication.id,
+                        name=name,
+                        is_employee=is_employee
+                    )
+                    db.session.add(new_author)
+                else:
+                    # Если автор пустой или некорректный, но пришел в списке - это ошибка формата
+                    logger.warning(f"Некорректные данные автора (отсутствует имя или не словарь) в списке для pub {pub_id}: {author_data}")
+                    raise ValueError("Найдены некорректные данные в списке авторов.")
+            # db.session.flush() # Flush здесь не обязателен, commit сделает это
+        except Exception as e:
+            db.session.rollback()
+            logger.error(f"Ошибка при обновлении авторов для pub {pub_id}: {str(e)}")
+            return jsonify({"error": f"Ошибка при обновлении списка авторов: {str(e)}"}), 500
+
+    # --- Обновление Дополнительных Полей (берем из data) ---
+    # Используем get(key, current_value), чтобы не сбрасывать значение, если ключ отсутствует
+    publication.journal_conference_name = data.get('journal_conference_name', publication.journal_conference_name)
+    publication.doi = data.get('doi', publication.doi)
+    publication.issn = data.get('issn', publication.issn)
+    publication.isbn = data.get('isbn', publication.isbn)
+    publication.quartile = data.get('quartile', publication.quartile)
+    publication.volume = data.get('volume', publication.volume)
+    publication.number = data.get('number', publication.number)
+    publication.pages = data.get('pages', publication.pages)
+    publication.department = data.get('department', publication.department)
+    publication.publisher = data.get('publisher', publication.publisher)
+    publication.publisher_location = data.get('publisher_location', publication.publisher_location)
+    publication.classification_code = data.get('classification_code', publication.classification_code)
+    publication.notes = data.get('notes', publication.notes)
+
+    # Обновление числовых полей с обработкой None/пустой строки/ошибки
+    printed_sheets_str = data.get('printed_sheets_volume')
+    if printed_sheets_str is not None: # Только если ключ есть в данных
+        if printed_sheets_str == '' or printed_sheets_str is None: publication.printed_sheets_volume = None
+        else:
+            try: publication.printed_sheets_volume = float(printed_sheets_str)
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid printed_sheets_volume '{printed_sheets_str}' for pub {pub_id}")
+                # Можно вернуть ошибку 400
+                return jsonify({"error": f"Некорректное значение для объема (п.л.): '{printed_sheets_str}'"}), 400
+
+    circulation_str = data.get('circulation')
+    if circulation_str is not None: # Только если ключ есть в данных
+        if circulation_str == '' or circulation_str is None: publication.circulation = None
+        else:
+            try: publication.circulation = int(circulation_str)
+            except (ValueError, TypeError):
+                logger.warning(f"Invalid circulation '{circulation_str}' for pub {pub_id}")
+                 # Можно вернуть ошибку 400
+                return jsonify({"error": f"Некорректное значение для тиража: '{circulation_str}'"}), 400
+
+
+    # --- Обработка Статуса и Истории ---
+    new_status = data.get('status', publication.status)
+    # Получаем комментарий, если он пришел (например, для возврата)
+    comment = data.get('return_comment', '')
+
+    # Проверка прав на изменение статуса
+    allowed_statuses_for_role = {
+         'admin': ['draft', 'needs_review', 'published', 'returned_for_revision'],
+         'manager': ['needs_review', 'published', 'returned_for_revision'],
+     }
+    if new_status not in allowed_statuses_for_role.get(current_user.role, []):
+         logger.warning(f"Пользователь {current_user.id} ({current_user.role}) попытался установить недопустимый статус '{new_status}' для публикации {pub_id}")
+         return jsonify({"error": f"Ваша роль ({current_user.role}) не позволяет установить статус '{new_status}'."}), 403
+
+    # Логика изменения статуса и записи истории
+    if new_status != publication.status:
+        timestamp = datetime.utcnow()
+        action_type = new_status # Тип действия по умолчанию - сам статус
+        action_comment = None    # Комментарий по умолчанию
+
+        if new_status == 'published':
+             publication.published_at = timestamp
+             publication.returned_for_revision = False
+             publication.returned_at = None
+             publication.return_comment = None
+             action_type = 'published'
+        elif new_status == 'returned_for_revision':
+             # Для админа/менеджера комментарий может быть обязательным
+             if current_user.role in ['admin', 'manager'] and not comment:
+                 logger.warning(f"Пользователь {current_user.id} не указал комментарий при возврате публикации {pub_id}")
+                 # Решите, обязательно ли это для них
+                 # return jsonify({"error": "Комментарий обязателен при возврате на доработку."}), 400
+                 pass # Пока пропускаем, если админ/менеджер не указал
+
+             publication.returned_for_revision = True
+             publication.returned_at = timestamp
+             publication.return_comment = comment # Сохраняем комментарий
+             publication.published_at = None     # Сбрасываем дату публикации
+             action_type = 'returned'
+             action_comment = comment if comment else None # Сохраняем непустой комментарий в историю
+        else: # Для draft, needs_review
+             publication.published_at = None
+             publication.returned_for_revision = False
+             publication.returned_at = None
+             publication.return_comment = None
+             action_type = new_status # Тип действия - сам статус
+
+        # Создаем запись истории только при смене статуса
+        action = PublicationActionHistory(
+             publication_id=publication.id,
+             user_id=current_user.id,
+             action_type=action_type,
+             timestamp=timestamp,
+             comment=action_comment
+         )
+        db.session.add(action)
+
+    # Обновляем статус публикации в любом случае (даже если не менялся, т.к. могли прийти другие данные)
+    publication.status = new_status
+
+    # Если статус остался returned_for_revision, но обновился комментарий
+    if publication.status == 'returned_for_revision' and comment and publication.return_comment != comment:
+         publication.return_comment = comment
+         publication.returned_at = datetime.utcnow() # Обновляем дату возврата
+         # Опционально: Добавить запись в историю об обновлении комментария
+         logger.info(f"Комментарий для возвращенной публикации {pub_id} обновлен пользователем {current_user.id}")
+
+
+    # --- Сохранение изменений ---
+    try:
         db.session.commit()
-        logger.debug(f"Публикация {pub_id} обновлена пользователем {current_user.id}, новый статус: {new_status}")
+        logger.info(f"Публикация {pub_id} обновлена пользователем {current_user.id}. Новый статус: {publication.status}, название: '{publication.title}'")
+        # Возвращаем обновленные данные публикации
         return jsonify({
             'message': 'Публикация успешно обновлена',
-            'publication': publication.to_dict()
+            'publication': publication.to_dict() # Убедитесь, что to_dict актуален
         }), 200
     except Exception as e:
-        db.session.rollback()
-        logger.error(f"Ошибка при обновлении публикации {pub_id}: {str(e)}")
-        return jsonify({"error": "Ошибка при обновлении публикации. Попробуйте позже."}), 500
+         db.session.rollback()
+         logger.exception(f"Ошибка SQLAlchemy при сохранении публикации {pub_id}: {str(e)}") # Используем logger.exception для traceback
+         return jsonify({"error": "Внутренняя ошибка сервера при сохранении публикации."}), 500
 
 @bp.route('/admin/publications/<int:pub_id>', methods=['DELETE'])
 @admin_or_manager_required

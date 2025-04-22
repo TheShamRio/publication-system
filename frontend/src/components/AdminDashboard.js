@@ -19,14 +19,19 @@ import {
 	TextField,
 	IconButton,
 	CircularProgress,
+	Grid,
 	Alert,
 	Pagination,
 	Fade,
 } from '@mui/material';
+import { Autocomplete } from '@mui/material'; // Добавить если нужно автозаполнение для авторов
+import MuiTooltip from '@mui/material/Tooltip'; // Для подсказок у иконок
 import MenuItem from '@mui/material/MenuItem';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import EditIcon from '@mui/icons-material/Edit';
+import AddIcon from '@mui/icons-material/Add';
+import PersonIcon from '@mui/icons-material/Person';
 import DeleteIcon from '@mui/icons-material/Delete';
 import DownloadIcon from '@mui/icons-material/Download';
 import Visibility from '@mui/icons-material/Visibility';
@@ -121,7 +126,6 @@ function AdminDashboard() {
 	const [loadingInitial, setLoadingInitial] = useState(true);
 	const [searchQueryUsers, setSearchQueryUsers] = useState('');
 	const [searchQueryPublications, setSearchQueryPublications] = useState('');
-	const [filterType, setFilterType] = useState('all');
 	const [filterStatus, setFilterStatus] = useState('all');
 	const [error, setError] = useState('');
 	const [success, setSuccess] = useState('');
@@ -131,23 +135,46 @@ function AdminDashboard() {
 	const [userToDelete, setUserToDelete] = useState(null);
 	const [publicationToDelete, setPublicationToDelete] = useState(null);
 	const [editUser, setEditUser] = useState(null);
-	const [editPublication, setEditPublication] = useState(null);
 	const [editUsername, setEditUsername] = useState('');
 	const [editRole, setEditRole] = useState('');
 	const [editLastName, setEditLastName] = useState('');
 	const [editFirstName, setEditFirstName] = useState('');
+	const [publicationTypes, setPublicationTypes] = useState([]); // Для типов
+	const [loadingPublicationTypes, setLoadingPublicationTypes] = useState(true);
+
+	// Состояния для редактирования ПУБЛИКАЦИИ (заменяем старые/добавляем новые)
+	const [editPublication, setEditPublication] = useState(null);
+	const [editTitle, setEditTitle] = useState('');
+	const [editYear, setEditYear] = useState('');
+	// const [editType, setEditType] = useState(''); // <-- УБРАТЬ
+	const [editStatus, setEditStatus] = useState('');
+	const [editFile, setEditFile] = useState(null);
+	const [editAuthorsList, setEditAuthorsList] = useState([{ id: Date.now(), name: '', is_employee: false }]); // Для авторов
+	const [editSelectedDisplayNameId, setEditSelectedDisplayNameId] = useState(''); // Для типа
+	// Новые состояния для доп. полей публикации (скопировать из Dashboard.js)
+	const [editJournalConferenceName, setEditJournalConferenceName] = useState('');
+	const [editDoi, setEditDoi] = useState('');
+	const [editIssn, setEditIssn] = useState('');
+	const [editIsbn, setEditIsbn] = useState('');
+	const [editQuartile, setEditQuartile] = useState('');
+	const [editVolume, setEditVolume] = useState('');
+	const [editNumber, setEditNumber] = useState('');
+	const [editPages, setEditPages] = useState('');
+	const [editDepartment, setEditDepartment] = useState('');
+	const [editPublisher, setEditPublisher] = useState('');
+	const [editPublisherLocation, setEditPublisherLocation] = useState('');
+	const [editPrintedSheetsVolume, setEditPrintedSheetsVolume] = useState('');
+	const [editCirculation, setEditCirculation] = useState('');
+	const [editClassificationCode, setEditClassificationCode] = useState('');
+	const [editNotes, setEditNotes] = useState('');
 	const [editMiddleName, setEditMiddleName] = useState('');
 	const [editNewPassword, setEditNewPassword] = useState('');
 	const [showEditPassword, setShowEditPassword] = useState(false);
-	const [editTitle, setEditTitle] = useState('');
 	const [editAuthors, setEditAuthors] = useState('');
-	const [editYear, setEditYear] = useState('');
 	const [editType, setEditType] = useState('');
-	const [editStatus, setEditStatus] = useState('');
-	const [editFile, setEditFile] = useState(null);
 	const [openEditDialog, setOpenEditDialog] = useState(false);
 	const navigate = useNavigate();
-	const { csrfToken } = useAuth();
+	const { csrfToken, setCsrfToken } = useAuth(); // Добавляем setCsrfToken сюда
 	const [newLastName, setNewLastName] = useState('');
 	const [newFirstName, setNewFirstName] = useState('');
 	const [newMiddleName, setNewMiddleName] = useState('');
@@ -159,7 +186,7 @@ function AdminDashboard() {
 	const [middleNameError, setMiddleNameError] = useState('');
 	const [usersTransitionKey, setUsersTransitionKey] = useState(0);
 	const [publicationsTransitionKey, setPublicationsTransitionKey] = useState(0);
-
+	const [filterDisplayNameId, setFilterDisplayNameId] = useState('all');
 	const ITEMS_PER_PAGE = 10;
 
 	// Таймеры для автозакрытия уведомлений
@@ -198,7 +225,7 @@ function AdminDashboard() {
 				params: {
 					page: currentPagePublications,
 					per_page: ITEMS_PER_PAGE,
-					type: filterType === 'all' ? undefined : filterType,
+					display_name_id: filterDisplayNameId === 'all' ? undefined : parseInt(filterDisplayNameId, 10),
 					status: filterStatus === 'all' ? undefined : filterStatus,
 				},
 				headers: { 'X-CSRFToken': csrfToken },
@@ -223,10 +250,31 @@ function AdminDashboard() {
 		fetchUsers();
 	}, [currentPageUsers]);
 
+	useEffect(() => {
+		const fetchPublicationTypes = async () => {
+			setLoadingPublicationTypes(true);
+			try {
+				const response = await axios.get('http://localhost:5000/admin_api/admin/publication-types', { // <-- Админский эндпоинт
+					withCredentials: true,
+					headers: { 'X-CSRFToken': csrfToken },
+				});
+				setPublicationTypes(response.data || []); // Устанавливаем или пустой массив
+			} catch (err) {
+				console.error('Ошибка загрузки типов публикаций:', err);
+				setError('Не удалось загрузить типы публикаций.');
+				setOpenError(true);
+			} finally {
+				setLoadingPublicationTypes(false);
+			}
+		};
+		fetchPublicationTypes();
+	}, [csrfToken]); // Зависимость от csrfToken
+	// Обработчики изменения полей}
+
 	// Обновление публикаций при смене страницы или фильтров
 	useEffect(() => {
 		fetchPublications();
-	}, [currentPagePublications, filterType, filterStatus]);
+	}, [currentPagePublications, filterDisplayNameId, filterStatus]);
 
 	// Локальная фильтрация пользователей
 	useEffect(() => {
@@ -242,13 +290,24 @@ function AdminDashboard() {
 		setUsers(filtered);
 	}, [allUsers, searchQueryUsers]);
 
+
+
 	// Локальная фильтрация публикаций
 	useEffect(() => {
 		const filtered = allPublications.filter((pub) => {
 			const search = searchQueryPublications.toLowerCase();
 			return (
 				(pub.title?.toLowerCase() ?? '').includes(search) ||
-				(pub.authors?.toLowerCase() ?? '').includes(search) ||
+				// Поиск по авторам (ИСПРАВЛЕНО)
+				(
+					Array.isArray(pub.authors) && // Проверяем, что это массив
+					pub.authors.some(author => // Проверяем, есть ли ХОТЯ БЫ ОДИН автор...
+						author.name && // ... у которого есть имя ...
+						typeof author.name === 'string' && // ... и это имя - строка ...
+						author.name.toLowerCase().includes(search) // ... которое содержит поисковый запрос
+					)
+				) ||
+				// Поиск по году (остается как есть)
 				(pub.year?.toString() ?? '').includes(search)
 			);
 		});
@@ -260,7 +319,6 @@ function AdminDashboard() {
 		setValue(newValue);
 		setSearchQueryUsers('');
 		setSearchQueryPublications('');
-		setFilterType('all');
 		setFilterStatus('all');
 		setCurrentPageUsers(1);
 		setCurrentPagePublications(1);
@@ -284,11 +342,11 @@ function AdminDashboard() {
 		setSearchQueryPublications(e.target.value);
 	};
 
-	// Обработчики фильтров
-	const handleFilterTypeChange = (e) => {
-		setFilterType(e.target.value);
-		setCurrentPagePublications(1);
+	const handleFilterDisplayNameIdChange = (e) => {
+		setFilterDisplayNameId(e.target.value);
+		setCurrentPagePublications(1); // Сбрасываем страницу при смене фильтра
 	};
+
 
 	const handleFilterStatusChange = (e) => {
 		setFilterStatus(e.target.value);
@@ -310,6 +368,9 @@ function AdminDashboard() {
 		setUserToDelete(null);
 		setPublicationToDelete(null);
 	};
+
+
+
 
 	const handleDeleteConfirm = async () => {
 		try {
@@ -343,30 +404,65 @@ function AdminDashboard() {
 	// Обработчики редактирования
 	const handleEditClick = (type, item) => {
 		if (type === 'user') {
+			// ... код для пользователя без изменений ...
 			setEditUser(item);
 			setEditUsername(item.username);
 			setEditRole(item.role);
-			setEditLastName(item.last_name);
-			setEditFirstName(item.first_name);
+			setEditLastName(item.last_name || ''); // Добавить || '' на всякий случай
+			setEditFirstName(item.first_name || '');
 			setEditMiddleName(item.middle_name || '');
 			setEditNewPassword('');
 			setShowEditPassword(false);
-		} else {
+		} else { // type === 'publication'
+			console.log('Editing publication item:', item); // Для отладки
 			setEditPublication(item);
-			setEditTitle(item.title);
-			setEditAuthors(item.authors);
-			setEditYear(item.year);
-			setEditType(item.type);
-			setEditStatus(item.status);
-			setEditFile(null);
+			setEditTitle(item.title || '');
+			setEditYear(item.year || '');
+			setEditStatus(item.status || 'draft'); // Устанавливаем статус
+			setEditFile(null); // Сбрасываем файл
+
+			// Инициализация авторов
+			if (item.authors && Array.isArray(item.authors) && item.authors.length > 0) {
+				setEditAuthorsList(item.authors.map((author, index) => ({
+					...author,
+					// Добавляем временный ID, если у автора с бэкенда его нет (маловероятно, но для надежности)
+					id: author.id || `temp-${Date.now()}-${index}`
+				})));
+			} else {
+				// Если авторов нет, начинаем с одного пустого поля
+				setEditAuthorsList([{ id: Date.now(), name: '', is_employee: false }]);
+			}
+
+			// Инициализация типа
+			setEditSelectedDisplayNameId(item.display_name_id || ''); // Используем display_name_id
+
+			// Инициализация дополнительных полей
+			setEditJournalConferenceName(item.journal_conference_name || '');
+			setEditDoi(item.doi || '');
+			setEditIssn(item.issn || '');
+			setEditIsbn(item.isbn || '');
+			setEditQuartile(item.quartile || '');
+			setEditVolume(item.volume || '');
+			setEditNumber(item.number || '');
+			setEditPages(item.pages || '');
+			setEditDepartment(item.department || '');
+			setEditPublisher(item.publisher || '');
+			setEditPublisherLocation(item.publisher_location || '');
+			setEditPrintedSheetsVolume(item.printed_sheets_volume != null ? String(item.printed_sheets_volume) : '');
+			setEditCirculation(item.circulation != null ? String(item.circulation) : '');
+			setEditClassificationCode(item.classification_code || '');
+			setEditNotes(item.notes || '');
 		}
 		setOpenEditDialog(true);
 	};
 
+
 	const handleEditCancel = () => {
 		setOpenEditDialog(false);
 		setEditUser(null);
-		setEditPublication(null);
+		setEditPublication(null); // <-- Сброс публикации
+
+		// Сброс состояний пользователя
 		setEditUsername('');
 		setEditRole('');
 		setEditLastName('');
@@ -374,22 +470,83 @@ function AdminDashboard() {
 		setEditMiddleName('');
 		setEditNewPassword('');
 		setShowEditPassword(false);
+
+		// Сброс состояний публикации (заменяем/добавляем)
 		setEditTitle('');
-		setEditAuthors('');
 		setEditYear('');
-		setEditType('');
 		setEditStatus('');
 		setEditFile(null);
+		setEditAuthorsList([{ id: Date.now(), name: '', is_employee: false }]); // Сброс списка авторов
+		setEditSelectedDisplayNameId(''); // Сброс ID типа
+
+		// Сброс доп. полей публикации
+		setEditJournalConferenceName('');
+		setEditDoi('');
+		setEditIssn('');
+		setEditIsbn('');
+		setEditQuartile('');
+		setEditVolume('');
+		setEditNumber('');
+		setEditPages('');
+		setEditDepartment('');
+		setEditPublisher('');
+		setEditPublisherLocation('');
+		setEditPrintedSheetsVolume('');
+		setEditCirculation('');
+		setEditClassificationCode('');
+		setEditNotes('');
+
+
+		// Сброс ошибок/успеха
 		setError('');
 		setSuccess('');
 		setOpenError(false);
 		setOpenSuccess(false);
 	};
 
+	const refreshCsrfToken = async () => {
+		try {
+			// Используем эндпоинт для получения токена, убедитесь, что он правильный
+			const response = await axios.get('http://localhost:5000/api/csrf-token', {
+				withCredentials: true,
+			});
+			setCsrfToken(response.data.csrf_token); // Обновляем токен из контекста
+			console.log('CSRF Token обновлён (AdminDashboard):', response.data.csrf_token);
+		} catch (err) {
+			console.error('Ошибка обновления CSRF Token (AdminDashboard):', err);
+			// Здесь можно добавить обработку ошибки, например, показать уведомление
+			setError('Не удалось обновить токен безопасности. Попробуйте повторить операцию.');
+			setOpenError(true);
+			// Можно выбросить ошибку, чтобы прервать выполнение родительской функции
+			// throw new Error("CSRF token refresh failed");
+		}
+	};
+
+	const handleEditAddAuthor = () => {
+		setEditAuthorsList([...editAuthorsList, { id: Date.now(), name: '', is_employee: false }]);
+	};
+
+	const handleEditAuthorChange = (index, field, value) => {
+		const updatedAuthors = [...editAuthorsList];
+		updatedAuthors[index][field] = value;
+		setEditAuthorsList(updatedAuthors);
+	};
+
+	const handleEditRemoveAuthor = (index) => {
+		// Не позволяем удалять последнего автора, если он единственный
+		if (editAuthorsList.length <= 1) return;
+		const updatedAuthors = editAuthorsList.filter((_, i) => i !== index);
+		setEditAuthorsList(updatedAuthors);
+	};
+
+
 	const handleEditSubmit = async (e) => {
 		e.preventDefault();
 		try {
+			await refreshCsrfToken(); // Обновляем токен перед запросом
+
 			if (editUser) {
+				// --- ЛОГИКА ОБНОВЛЕНИЯ ПОЛЬЗОВАТЕЛЯ (ОСТАВЛЯЕМ КАК ЕСТЬ) ---
 				const updatedUser = {
 					username: editUsername,
 					role: editRole,
@@ -402,34 +559,130 @@ function AdminDashboard() {
 				}
 				const response = await axios.put(`http://localhost:5000/admin_api/admin/users/${editUser.id}`, updatedUser, {
 					withCredentials: true,
-					headers: { 'X-CSRFToken': csrfToken },
+					headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'application/json' }, // Явно указываем JSON
 				});
+				// Обновляем состояние пользователей и закрываем диалог
 				setAllUsers(allUsers.map((user) => (user.id === editUser.id ? response.data.user : user)));
 				setSuccess('Пользователь успешно обновлён.');
 				setOpenSuccess(true);
-				setTimeout(() => handleEditCancel(), 2000);
+				handleEditCancel();
 			} else if (editPublication) {
-				const formData = new FormData();
-				formData.append('title', editTitle);
-				formData.append('authors', editAuthors);
-				formData.append('year', editYear);
-				formData.append('type', editType);
-				formData.append('status', editStatus);
-				if (editFile) {
-					formData.append('file', editFile);
+				// --- ОБНОВЛЕННАЯ ЛОГИКА ОБНОВЛЕНИЯ ПУБЛИКАЦИИ ---
+				// Валидация
+				const validAuthors = editAuthorsList.filter(a => a.name?.trim());
+				if (!editTitle.trim() || validAuthors.length === 0 || !editYear || !editSelectedDisplayNameId || !editStatus) {
+					setError('Название, год, тип, статус и хотя бы один автор с именем обязательны.');
+					setOpenError(true);
+					return;
 				}
-				const response = await axios.put(`http://localhost:5000/admin_api/admin/publications/${editPublication.id}`, formData, {
+				const selectedTypeObject = publicationTypes.find(t => t.display_name_id === editSelectedDisplayNameId);
+				if (!selectedTypeObject) {
+					setError('Выбран неверный тип публикации.');
+					setOpenError(true);
+					return;
+				}
+				const baseTypeId = selectedTypeObject.id;
+				const authorsToSend = validAuthors.map(({ id, publication_id, ...rest }) => rest);
+
+				let dataToSend;
+				let requestConfig = { // Используем объект конфигурации для Axios
 					withCredentials: true,
-					headers: { 'X-CSRFToken': csrfToken, 'Content-Type': 'multipart/form-data' },
-				});
+					headers: { 'X-CSRFToken': csrfToken }
+				};
+
+				if (editFile) {
+					// Если есть файл, используем FormData
+					requestConfig.headers['Content-Type'] = 'multipart/form-data'; // Хотя Axios сам определит
+					dataToSend = new FormData();
+					dataToSend.append('file', editFile);
+					// Добавляем остальные поля в FormData
+					dataToSend.append('title', editTitle.trim());
+					dataToSend.append('year', parseInt(editYear, 10));
+					dataToSend.append('type_id', baseTypeId);
+					dataToSend.append('display_name_id', editSelectedDisplayNameId);
+					dataToSend.append('status', editStatus);
+					dataToSend.append('authors_json', JSON.stringify(authorsToSend)); // Авторы JSON-строкой
+					// Доп. поля как строки
+					dataToSend.append('journal_conference_name', editJournalConferenceName || '');
+					dataToSend.append('doi', editDoi || '');
+					dataToSend.append('issn', editIssn || '');
+					dataToSend.append('isbn', editIsbn || '');
+					dataToSend.append('quartile', editQuartile || '');
+					dataToSend.append('volume', editVolume || '');
+					dataToSend.append('number', editNumber || '');
+					dataToSend.append('pages', editPages || '');
+					dataToSend.append('department', editDepartment || '');
+					dataToSend.append('publisher', editPublisher || '');
+					dataToSend.append('publisher_location', editPublisherLocation || '');
+					dataToSend.append('printed_sheets_volume', editPrintedSheetsVolume || '');
+					dataToSend.append('circulation', editCirculation || '');
+					dataToSend.append('classification_code', editClassificationCode || '');
+					dataToSend.append('notes', editNotes || '');
+
+				} else {
+					// Если файла нет, используем обычный JSON объект
+					requestConfig.headers['Content-Type'] = 'application/json';
+					dataToSend = {
+						title: editTitle.trim(),
+						year: parseInt(editYear, 10),
+						type_id: baseTypeId,
+						display_name_id: editSelectedDisplayNameId,
+						status: editStatus,
+						authors: authorsToSend, // Авторы как массив объектов
+						// Остальные поля
+						journal_conference_name: editJournalConferenceName || null,
+						doi: editDoi || null,
+						issn: editIssn || null,
+						isbn: editIsbn || null,
+						quartile: editQuartile || null,
+						volume: editVolume || null,
+						number: editNumber || null,
+						pages: editPages || null,
+						department: editDepartment || null,
+						publisher: editPublisher || null,
+						publisher_location: editPublisherLocation || null,
+						printed_sheets_volume: editPrintedSheetsVolume ? parseFloat(editPrintedSheetsVolume) : null,
+						circulation: editCirculation ? parseInt(editCirculation, 10) : null,
+						classification_code: editClassificationCode || null,
+						notes: editNotes || null,
+					};
+				}
+
+				// --- Отправка запроса ---
+				console.log("Sending PUT request to:", `http://localhost:5000/admin_api/admin/publications/${editPublication.id}`);
+				console.log("Request Config:", requestConfig);
+				console.log("Request Data:", editFile ? 'FormData content - see Network tab' : dataToSend);
+
+
+				const response = await axios.put(
+					`http://localhost:5000/admin_api/admin/publications/${editPublication.id}`,
+					dataToSend, // Отправляем подготовленные данные
+					requestConfig // Передаем конфиг с заголовками
+				);
+
+				// Обработка успеха (обновление стейта и закрытие диалога)
 				setAllPublications(allPublications.map((pub) => (pub.id === editPublication.id ? response.data.publication : pub)));
 				setSuccess('Публикация успешно обновлена.');
 				setOpenSuccess(true);
-				setTimeout(() => handleEditCancel(), 2000);
+				handleEditCancel(); // Закрываем диалог сразу
 			}
 		} catch (err) {
-			setError(err.response?.data?.error || 'Ошибка при обновлении. Попробуйте позже.');
+			// Обработка ошибок (без изменений, но добавил больше логов)
+			console.error("Ошибка при обновлении:", err.response || err.request || err.message || err); // Логируем всю ошибку
+			if (err.response) {
+				console.error("Response Data:", err.response.data);
+				console.error("Response Status:", err.response.status);
+				console.error("Response Headers:", err.response.headers);
+				setError(err.response.data?.error || `Сервер вернул ошибку ${err.response.status}`);
+			} else if (err.request) {
+				console.error("No response received:", err.request);
+				setError("Нет ответа от сервера. Проверьте соединение и работу сервера.");
+			} else {
+				console.error('Error message:', err.message);
+				setError(`Произошла ошибка при отправке запроса: ${err.message}`);
+			}
 			setOpenError(true);
+			setSuccess(''); // Сбросить сообщение об успехе при ошибке
 		}
 	};
 
@@ -929,15 +1182,26 @@ function AdminDashboard() {
 										<AppleTextField
 											select
 											label="Тип публикации"
-											value={filterType}
-											onChange={handleFilterTypeChange}
+											value={filterDisplayNameId} // Используем новый state
+											onChange={handleFilterDisplayNameIdChange} // Используем новый обработчик
 											margin="normal"
 											variant="outlined"
+											disabled={loadingPublicationTypes || publicationTypes.length === 0} // Блокируем пока грузится или пусто
+											sx={{ minWidth: 200 }} // Можно настроить ширину
 										>
+											{/* Опция "Все" */}
 											<MenuItem value="all">Все</MenuItem>
-											<MenuItem value="article">Статья</MenuItem>
-											<MenuItem value="monograph">Монография</MenuItem>
-											<MenuItem value="conference">Доклад/конференция</MenuItem>
+
+											{/* Placeholder или динамические опции */}
+											{loadingPublicationTypes ? (
+												<MenuItem value="all" disabled>Загрузка типов...</MenuItem>
+											) : (
+												publicationTypes.map((type) => (
+													<MenuItem key={type.display_name_id} value={type.display_name_id}>
+														{type.display_name}
+													</MenuItem>
+												))
+											)}
 										</AppleTextField>
 										<AppleTextField
 											select
@@ -993,19 +1257,25 @@ function AdminDashboard() {
 																{pub.title}
 															</Typography>
 														</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.authors}</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>
+															{/* Проверяем, что pub.authors - это массив и он не пустой */}
+															{Array.isArray(pub.authors) && pub.authors.length > 0
+																// Если да, берем имя каждого автора и соединяем через запятую
+																? pub.authors.map(author => author.name).join(', ')
+																// Если нет, или массив пустой, пишем "Нет авторов"
+																: 'Нет авторов'
+															}
+														</TableCell>
 														<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
 														<TableCell sx={{ color: '#1D1D1F' }}>
-															{pub.type === 'article'
-																? 'Статья'
-																: pub.type === 'monograph'
-																	? 'Монография'
-																	: pub.type === 'conference'
-																		? 'Доклад/конференция'
-																		: 'Неизвестный тип'}
+															{/* Пробуем отображаемое имя, потом имя базового типа, потом заглушку */}
+															{pub.type?.display_name || pub.type?.name || 'Неизвестный тип'}
 														</TableCell>
 														<TableCell sx={{ color: '#1D1D1F' }}>{renderStatus(pub.status)}</TableCell>
-														<TableCell sx={{ color: '#1D1D1F' }}>{pub.user?.full_name || 'Не указан'}</TableCell>
+														<TableCell sx={{ color: '#1D1D1F' }}>
+															{/* Обращение к данным пользователя должно быть таким */}
+															{pub.user?.full_name || 'Не указан'}
+														</TableCell>
 														<TableCell sx={{ textAlign: 'center' }}>
 															<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
 																<IconButton
@@ -1212,20 +1482,108 @@ function AdminDashboard() {
 										<>
 											<AppleTextField
 												fullWidth
+												select
+												label="Тип публикации"
+												// Используем editSelectedDisplayNameId или пустую строку, если оно null/undefined
+												value={
+													// Если типы еще не загружены ИЛИ (типы загружены НО нужный ID не найден)
+													// -> используем '', иначе используем ID
+													loadingPublicationTypes || !publicationTypes.find(t => t.display_name_id === editSelectedDisplayNameId)
+														? ''
+														: editSelectedDisplayNameId
+												}
+												onChange={(e) => setEditSelectedDisplayNameId(e.target.value === '' ? null : e.target.value)} // Можно сбрасывать в null если пусто
+												margin="normal"
+												variant="outlined"
+												// Блокируем, пока типы не загружены
+												disabled={loadingPublicationTypes}
+												error={!editSelectedDisplayNameId && !loadingPublicationTypes && publicationTypes.length > 0} // Показываем ошибку, если тип обязателен и не выбран после загрузки
+												helperText={!editSelectedDisplayNameId && !loadingPublicationTypes && publicationTypes.length > 0 ? 'Выберите тип' : ''}
+											>
+												{/* Показываем опцию "Загрузка..." */}
+												{loadingPublicationTypes && <MenuItem value="" disabled>Загрузка типов...</MenuItem>}
+												{/* Показываем "Не найдены", если массив пуст после загрузки */}
+												{!loadingPublicationTypes && publicationTypes.length === 0 && <MenuItem value="" disabled>Типы не найдены</MenuItem>}
+												{/* Отображаем опции, только если они есть */}
+												{!loadingPublicationTypes && publicationTypes.length > 0 && publicationTypes.map((type) => (
+													<MenuItem key={type.display_name_id} value={type.display_name_id}>
+														{type.display_name}
+													</MenuItem>
+												))}
+											</AppleTextField>
+
+											{/* === Название === */}
+											<AppleTextField
+												fullWidth
 												label="Название"
 												value={editTitle}
 												onChange={(e) => setEditTitle(e.target.value)}
 												margin="normal"
 												variant="outlined"
 											/>
-											<AppleTextField
-												fullWidth
-												label="Авторы"
-												value={editAuthors}
-												onChange={(e) => setEditAuthors(e.target.value)}
-												margin="normal"
-												variant="outlined"
-											/>
+
+											{/* === Динамический список авторов === */}
+											<Box sx={{ mt: 2, border: '1px solid #D1D1D6', borderRadius: '12px', p: 2, backgroundColor: '#FFFFFF' }}>
+												<Typography variant="subtitle1" sx={{ mb: 1, color: '#1D1D1F' }}>Авторы</Typography>
+												{editAuthorsList.map((author, index) => (
+													<Grid container spacing={1} key={author.id} sx={{ mb: 1, alignItems: 'center' }}>
+														<Grid item xs={true}> {/* Занимает все доступное место */}
+															<AppleTextField
+																fullWidth
+																required
+																label={`Автор ${index + 1}`}
+																value={author.name}
+																onChange={(e) => handleEditAuthorChange(index, 'name', e.target.value)}
+																size="small" // Делаем поля компактнее
+																variant="outlined"
+															/>
+														</Grid>
+														{/* Иконка "Сотрудник" */}
+														<Grid item xs="auto">
+															<MuiTooltip title={author.is_employee ? "Автор сотрудник КНИТУ-КАИ" : "Автор не сотрудник КНИТУ-КАИ"} arrow>
+																<IconButton
+																	onClick={() => handleEditAuthorChange(index, 'is_employee', !author.is_employee)}
+																	size="small"
+																	sx={{
+																		color: author.is_employee ? '#0071E3' : 'grey.500',
+																		'&:hover': {
+																			backgroundColor: author.is_employee ? 'rgba(0, 113, 227, 0.1)' : 'rgba(0, 0, 0, 0.04)',
+																		}
+																	}}
+																	aria-label={author.is_employee ? "Пометить как не сотрудника" : "Пометить как сотрудника"}
+																>
+																	<PersonIcon fontSize="small" />
+																</IconButton>
+															</MuiTooltip>
+														</Grid>
+														{/* Кнопка удаления */}
+														<Grid item xs="auto">
+															{editAuthorsList.length > 1 && (
+																<IconButton
+																	onClick={() => handleEditRemoveAuthor(index)}
+																	size="small"
+																	sx={{ color: '#FF3B30' }} // Красный цвет для удаления
+																	aria-label="Удалить автора"
+																>
+																	<DeleteIcon fontSize="small" />
+																</IconButton>
+															)}
+														</Grid>
+													</Grid>
+												))}
+												{/* Кнопка добавления автора */}
+												<Button
+													startIcon={<AddIcon />}
+													onClick={handleEditAddAuthor}
+													size="small"
+													sx={{ mt: 1, textTransform: 'none', color: '#0071E3' }}
+												>
+													Добавить автора
+												</Button>
+											</Box>
+
+
+											{/* === Год === */}
 											<AppleTextField
 												fullWidth
 												label="Год"
@@ -1235,19 +1593,9 @@ function AdminDashboard() {
 												margin="normal"
 												variant="outlined"
 											/>
-											<AppleTextField
-												fullWidth
-												select
-												label="Тип публикации"
-												value={editType}
-												onChange={(e) => setEditType(e.target.value)}
-												margin="normal"
-												variant="outlined"
-											>
-												<MenuItem value="article">Статья</MenuItem>
-												<MenuItem value="monograph">Монография</MenuItem>
-												<MenuItem value="conference">Доклад/конференция</MenuItem>
-											</AppleTextField>
+
+											{/* === Статус (для Админа/Менеджера) === */}
+											{/* Оставим пока как есть, админ может менять статус */}
 											<AppleTextField
 												fullWidth
 												select
@@ -1256,17 +1604,73 @@ function AdminDashboard() {
 												onChange={(e) => setEditStatus(e.target.value)}
 												margin="normal"
 												variant="outlined"
-												disabled={!editPublication?.file_url && !editFile}
+											// Может быть логика disabled, если файл не прикреплен и т.д.
 											>
 												<MenuItem value="draft">Черновик</MenuItem>
 												<MenuItem value="needs_review">Нуждается в проверке</MenuItem>
-												<MenuItem value="published" disabled={!editPublication?.file_url && !editFile}>
-													Опубликовано
-												</MenuItem>
+												<MenuItem value="returned_for_revision">Возвращено на доработку</MenuItem> {/* Добавлен статус */}
+												<MenuItem value="published">Опубликовано</MenuItem>
 											</AppleTextField>
+
+
+											{/* --- Дополнительные поля (скопировать из Dashboard.js) --- */}
+											<AppleTextField
+												fullWidth
+												label="Наименование журнала/конференции"
+												value={editJournalConferenceName}
+												onChange={(e) => setEditJournalConferenceName(e.target.value)}
+												margin="normal"
+												variant="outlined"
+											/>
+											<Grid container spacing={2}>
+												<Grid item xs={12} sm={6}>
+													<AppleTextField fullWidth label="DOI" value={editDoi} onChange={(e) => setEditDoi(e.target.value)} margin="normal" variant="outlined" />
+												</Grid>
+												<Grid item xs={12} sm={6}>
+													<AppleTextField fullWidth label="Квартиль (Q)" value={editQuartile} onChange={(e) => setEditQuartile(e.target.value)} margin="normal" variant="outlined" />
+												</Grid>
+												<Grid item xs={12} sm={6}>
+													<AppleTextField fullWidth label="ISSN" value={editIssn} onChange={(e) => setEditIssn(e.target.value)} margin="normal" variant="outlined" />
+												</Grid>
+												<Grid item xs={12} sm={6}>
+													<AppleTextField fullWidth label="ISBN" value={editIsbn} onChange={(e) => setEditIsbn(e.target.value)} margin="normal" variant="outlined" />
+												</Grid>
+											</Grid>
+											<Grid container spacing={2}>
+												<Grid item xs={12} sm={4}>
+													<AppleTextField fullWidth label="Том" value={editVolume} onChange={(e) => setEditVolume(e.target.value)} margin="normal" variant="outlined" />
+												</Grid>
+												<Grid item xs={12} sm={4}>
+													<AppleTextField fullWidth label="Номер/Выпуск" value={editNumber} onChange={(e) => setEditNumber(e.target.value)} margin="normal" variant="outlined" />
+												</Grid>
+												<Grid item xs={12} sm={4}>
+													<AppleTextField fullWidth label="Страницы" value={editPages} onChange={(e) => setEditPages(e.target.value)} margin="normal" variant="outlined" />
+												</Grid>
+											</Grid>
+											<Grid container spacing={2}>
+												<Grid item xs={12} sm={6}>
+													<AppleTextField fullWidth label="Издательство" value={editPublisher} onChange={(e) => setEditPublisher(e.target.value)} margin="normal" variant="outlined" />
+												</Grid>
+												<Grid item xs={12} sm={6}>
+													<AppleTextField fullWidth label="Место издательства" value={editPublisherLocation} onChange={(e) => setEditPublisherLocation(e.target.value)} margin="normal" variant="outlined" />
+												</Grid>
+												<Grid item xs={12} sm={4}>
+													<AppleTextField fullWidth label="Объем (п.л.)" type="number" value={editPrintedSheetsVolume} onChange={(e) => setEditPrintedSheetsVolume(e.target.value)} margin="normal" variant="outlined" inputProps={{ step: "0.1" }} />
+												</Grid>
+												<Grid item xs={12} sm={4}>
+													<AppleTextField fullWidth label="Тираж" type="number" value={editCirculation} onChange={(e) => setEditCirculation(e.target.value)} margin="normal" variant="outlined" />
+												</Grid>
+												<Grid item xs={12} sm={4}>
+													<AppleTextField fullWidth label="Кафедра" value={editDepartment} onChange={(e) => setEditDepartment(e.target.value)} margin="normal" variant="outlined" />
+												</Grid>
+											</Grid>
+											<AppleTextField fullWidth label="Код по классификатору" value={editClassificationCode} onChange={(e) => setEditClassificationCode(e.target.value)} margin="normal" variant="outlined" />
+											<AppleTextField fullWidth label="Примечание" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} margin="normal" variant="outlined" multiline rows={2} />
+
+											{/* --- Поле для загрузки файла (без изменений) --- */}
 											<Box sx={{ mt: 2 }}>
 												<Typography variant="body2" sx={{ color: '#6E6E73', mb: 1 }}>
-													Текущий файл: {editPublication?.file_url || 'Нет файла'}
+													Текущий файл: {editPublication?.file_url ? editPublication.file_url.split('/').pop() : 'Нет файла'}
 												</Typography>
 												<input
 													type="file"
