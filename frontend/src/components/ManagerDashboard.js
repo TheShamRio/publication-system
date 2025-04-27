@@ -205,6 +205,8 @@ function ManagerDashboard() {
 	const [newTypeName, setNewTypeName] = useState('');
 	const [newTypeDisplayName, setNewTypeDisplayName] = useState('');
 	const [editingType, setEditingType] = useState(null);
+	const [overallStatistics, setOverallStatistics] = useState({ plan: {}, actual: {} });
+	const [loadingOverallStatistics, setLoadingOverallStatistics] = useState(false);
 	const [editTypeName, setEditTypeName] = useState('');
 	const [editTypeDisplayName, setEditTypeDisplayName] = useState('');
 	const [openEditTypeDialog, setOpenEditTypeDialog] = useState(false);
@@ -290,7 +292,6 @@ function ManagerDashboard() {
 		if (!isAuthenticated || user.role !== 'manager') navigate('/login');
 		setLoadingInitial(true);
 		Promise.all([
-			fetchPublications(currentPagePublications),
 			fetchPlans(currentPagePlans),
 			fetchPubActionHistory(pubHistoryPage, dateFilterRange.start, dateFilterRange.end),
 			fetchPlanActionHistory(planHistoryPage, dateFilterRange.start, dateFilterRange.end),
@@ -436,6 +437,27 @@ function ManagerDashboard() {
 			setOpenError(true);
 		} finally {
 			setLoadingHints(false);
+		}
+	};
+
+	const fetchOverallStatistics = async (year) => {
+		if (!isAuthenticated || user.role !== 'manager') return; // Доп. проверка
+		setLoadingOverallStatistics(true);
+		setError(''); // Сбросить предыдущие ошибки
+		try {
+			const response = await axios.get('http://localhost:5000/admin_api/admin/overall-statistics', {
+				withCredentials: true,
+				headers: { 'X-CSRFToken': csrfToken },
+				params: { year },
+			});
+			setOverallStatistics(response.data || { plan: {}, actual: {} }); // Установить данные или пустой объект
+		} catch (err) {
+			console.error('Ошибка загрузки общей статистики:', err);
+			setError('Не удалось загрузить общую статистику по кафедре.');
+			setOpenError(true);
+			setOverallStatistics({ plan: {}, actual: {} }); // Сбросить в случае ошибки
+		} finally {
+			setLoadingOverallStatistics(false);
 		}
 	};
 
@@ -675,22 +697,9 @@ function ManagerDashboard() {
 	};
 
 	// Инициализация данных
-	useEffect(() => {
-		if (!isAuthenticated || user.role !== 'manager') navigate('/login');
-		setLoadingInitial(true);
-		Promise.all([
-			fetchPublications(currentPagePublications),
-			fetchPlans(currentPagePlans),
-			fetchPubActionHistory(pubHistoryPage, dateFilterRange.start, dateFilterRange.end),
-			fetchPlanActionHistory(planHistoryPage, dateFilterRange.start, dateFilterRange.end),
-		]).finally(() => setLoadingInitial(false));
-	}, [isAuthenticated, user, navigate]);
+
 
 	// Обновление истории публикаций
-	useEffect(() => {
-		fetchPubActionHistory(pubHistoryPage, dateFilterRange.start, dateFilterRange.end);
-	}, [pubHistoryPage, dateFilterRange.start, dateFilterRange.end]);
-
 	// Обновление публикаций
 	useEffect(() => {
 		fetchPublications(currentPagePublications);
@@ -703,10 +712,17 @@ function ManagerDashboard() {
 
 	// Загрузка статистики
 	useEffect(() => {
-		if (value === 1) {
+		// Выполняем только если вкладка Статистики активна и пользователь аутентифицирован
+		if (value === 1 && isAuthenticated && user?.role === 'manager') {
 			fetchStatistics(selectedYear);
+			fetchOverallStatistics(selectedYear); // <-- Вызываем новую функцию здесь
 		}
-	}, [value, selectedYear]);
+		// Сбрасываем статистику при уходе с вкладки (опционально)
+		// else {
+		//     setStatistics([]);
+		//     setOverallStatistics({ plan: {}, actual: {} });
+		// }
+	}, [value, selectedYear, isAuthenticated, user, csrfToken]); // Добавили зависимости
 
 	// Обработчики
 	const handleTabChange = (event, newValue) => setValue(newValue);
@@ -1009,7 +1025,7 @@ function ManagerDashboard() {
 					</Box>
 					<Box sx={{ display: 'flex', gap: 4, backgroundColor: '#FFFFFF', border: '1px solid #D1D1D6', borderRadius: '8px', p: 2 }}>
 						<Box sx={{ flex: 1 }}>
-							<Typography sx={{ fontWeight: 600, color: '#0071E3', mb: 1 }}>План</Typography>
+							<Typography sx={{ fontWeight: 600, color: '#0071E3', mb: 1 }}>План ({totalPlan})</Typography>
 							{Object.entries(plan).map(([key, value]) => (
 								<Typography key={key} sx={{ color: '#1D1D1F' }}>
 									{key}: {value}
@@ -1017,7 +1033,7 @@ function ManagerDashboard() {
 							))}
 						</Box>
 						<Box sx={{ flex: 1 }}>
-							<Typography sx={{ fontWeight: 600, color: '#00A94F', mb: 1 }}>Факт</Typography>
+							<Typography sx={{ fontWeight: 600, color: '#00A94F', mb: 1 }}>Факт ({totalActual})</Typography>
 							{Object.entries(actual).map(([key, value]) => (
 								<Typography key={key} sx={{ color: '#1D1D1F' }}>
 									{key}: {value}
@@ -1418,6 +1434,41 @@ function ManagerDashboard() {
 											placeholder="Введите ФИО"
 										/>
 									</Box>
+
+									<Accordion
+										defaultExpanded={false} // Открыт по умолчанию
+										sx={{
+											mb: 3, // Сохраняем отступ снизу
+											borderRadius: '16px',
+											boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+											'&:before': { display: 'none' }, // Убираем разделитель
+											border: '1px solid #E5E5EA' // Добавляем рамку для визуального отделения
+										}}
+									>
+										<AccordionSummary
+											expandIcon={<ExpandMoreIcon sx={{ color: '#0071E3' }} />}
+											sx={{
+												backgroundColor: '#F5F5F7', // Цвет как у пользовательских аккордеонов
+												borderRadius: '16px', // Скругляем углы Summary
+												'& .MuiAccordionSummary-content': { alignItems: 'center' },
+											}}
+										>
+											{/* Заголовок переносим в AccordionSummary */}
+											<Typography variant="h6" sx={{ color: '#1D1D1F', fontWeight: 600 }}>
+												Общая статистика по кафедре за {parseInt(selectedYear, 10) >= 1900 ? selectedYear : new Date().getFullYear()} год
+											</Typography>
+										</AccordionSummary>
+										<AccordionDetails sx={{ backgroundColor: '#FFFFFF', borderRadius: '0 0 16px 16px', p: 3 }}> {/* Паддинг переносим сюда */}
+											{/* Содержимое (лоадер или график) теперь внутри AccordionDetails */}
+											{loadingOverallStatistics ? (
+												<Box sx={{ display: 'flex', justifyContent: 'center', p: 2 }}>
+													<CircularProgress sx={{ color: '#0071E3' }} />
+												</Box>
+											) : (
+												<UserStatisticsChart user={overallStatistics} />
+											)}
+										</AccordionDetails>
+									</Accordion>
 									{loadingStatistics ? (
 										<Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
 											<CircularProgress sx={{ color: '#0071E3' }} />

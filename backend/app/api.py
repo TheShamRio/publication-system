@@ -160,6 +160,68 @@ PUBLICATION_FIELDS_WITH_HINTS = [
     'file', # Подсказка для поля загрузки файла
 ]
 
+@bp.route('/admin/overall-statistics', methods=['GET'])
+@admin_or_manager_required
+def get_overall_statistics():
+    """
+    Возвращает агрегированную статистику (план/факт по типам)
+    по всем УТВЕРЖДЕННЫМ планам СУЩЕСТВУЮЩИХ пользователей с ролью 'user' за указанный год.
+    """
+    year = request.args.get('year', type=int, default=datetime.utcnow().year)
+    logger.info(f"Запрос общей статистики по кафедре за {year} год от пользователя {current_user.id}")
+
+    overall_plan_data = defaultdict(int)
+    overall_actual_data = defaultdict(int)
+
+    try:
+        # --- ИЗМЕНЕНИЕ ЗДЕСЬ ---
+        # Добавляем join с User И ФИЛЬТР по User.role == 'user'
+        approved_plans_query = Plan.query.join(User).filter(
+            Plan.year == year,
+            Plan.status == 'approved',
+            User.role == 'user' # <-- ДОБАВЛЯЕМ ЭТОТ ФИЛЬТР
+        )
+        approved_plans = approved_plans_query.all()
+        # --- КОНЕЦ ИЗМЕНЕНИЯ ---
+
+        if not approved_plans:
+            # Сообщение тоже уточним
+            logger.info(f"Утвержденные планы для существующих пользователей с ролью 'user' на {year} год не найдены.")
+            return jsonify({'plan': {}, 'actual': {}}), 200
+
+        # Остальная логика агрегации остается без изменений
+        for plan in approved_plans:
+            for entry in plan.entries:
+                display_name = 'Не указано'
+                if entry.display_name_id and entry.display_name:
+                    display_name = entry.display_name.display_name
+                elif entry.type_id and entry.type:
+                    if entry.type.display_names:
+                        display_name = entry.type.display_names[0].display_name
+                    else:
+                        display_name = entry.type.name
+                elif entry.title:
+                    display_name = f"План: {entry.title[:30]}..."
+
+                overall_plan_data[display_name] += 1
+
+                if entry.publication_id and entry.publication and entry.publication.status == 'published':
+                    overall_actual_data[display_name] += 1
+
+        for key in overall_plan_data:
+            if key not in overall_actual_data:
+                overall_actual_data[key] = 0
+
+        logger.info(f"Общая статистика для роли 'user' за {year} рассчитана. План: {dict(overall_plan_data)}, Факт: {dict(overall_actual_data)}")
+        return jsonify({
+            'plan': dict(overall_plan_data),
+            'actual': dict(overall_actual_data)
+        }), 200
+
+    except Exception as e:
+        logger.exception(f"Ошибка при расчете общей статистики для роли 'user' за {year} год:")
+        return jsonify({"error": "Ошибка при расчете общей статистики."}), 500
+
 @bp.route('/admin/users/<int:user_id>', methods=['PUT'])
 @admin_required
 def update_user(user_id):
@@ -243,7 +305,7 @@ def get_publications():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
     search = request.args.get('search', '', type=str)
-    display_name_id_filter = request.args.get('display_name_id', default=None, type=int) # Получаем ID как int или None
+    display_name_id_filter = request.args.get('display_name_id', default=None, type=int)
     status = request.args.get('status', 'all', type=str)
     sort_status = request.args.get('sort_status', None, type=str)
     sort_by = request.args.get('sort_by', 'updated_at', type=str)
@@ -253,29 +315,46 @@ def get_publications():
 
     if search:
         search_pattern = f'%{search}%'
+        # --- *** НАЧАЛО ИЗМЕНЕНИЯ *** ---
         query = query.filter(
-            (Publication.title.ilike(search_pattern)) |
-            (Publication.authors.ilike(search_pattern)) |
-            (db.cast(Publication.year, db.String).ilike(search_pattern))
+            or_( # Объединяем условия поиска через OR
+                Publication.title.ilike(search_pattern),
+                # Правильный способ поиска внутри имен связанных авторов
+                Publication.authors.any(PublicationAuthor.name.ilike(search_pattern)),
+                db.cast(Publication.year, db.String).ilike(search_pattern)
+            )
         )
+        # --- *** КОНЕЦ ИЗМЕНЕНИЯ *** ---
 
+    # --- Остальная часть функции остается без изменений ---
     if display_name_id_filter is not None:
         query = query.filter(Publication.display_name_id == display_name_id_filter)
 
     valid_statuses = ['draft', 'needs_review', 'returned_for_revision', 'published']
+
+    # --- Пересматриваем логику фильтрации статуса с учетом роли 'manager' ---
+    role_allowed_statuses = []
+    if current_user.role == 'manager':
+        role_allowed_statuses = ['needs_review', 'returned_for_revision', 'published']
+    else: # Для admin или других ролей, если будут добавлены
+        role_allowed_statuses = valid_statuses
+
+    # Применяем фильтр по статусу из запроса И разрешенные для роли статусы
     if status != 'all':
         status_list = status.split(',')
-        filtered_statuses = [s for s in status_list if s in valid_statuses]
+        # Берем пересечение запрошенных статусов и разрешенных для роли
+        filtered_statuses = [s for s in status_list if s in role_allowed_statuses]
         if not filtered_statuses:
-            return jsonify({"error": "Указаны недопустимые статусы"}), 400
+            # Возвращаем ошибку, если нет валидных статусов после фильтрации
+            return jsonify({"error": "Указаны недопустимые статусы для вашей роли или неверный формат."}), 400
         query = query.filter(Publication.status.in_(filtered_statuses))
     else:
-        filtered_statuses = valid_statuses
+        # Если запрошен 'all', используем только статусы, разрешенные для роли
+        query = query.filter(Publication.status.in_(role_allowed_statuses))
+        filtered_statuses = role_allowed_statuses # Используем для сортировки позже
 
-    if current_user.role == 'manager':
-        allowed_statuses = ['needs_review', 'returned_for_revision', 'published']
-        query = query.filter(Publication.status.in_(allowed_statuses))
-        filtered_statuses = allowed_statuses
+    # --- Конец пересмотра логики фильтрации статуса ---
+
 
     valid_sort_fields = ['id', 'title', 'year', 'updated_at', 'published_at']
     if sort_by not in valid_sort_fields:
@@ -287,6 +366,8 @@ def get_publications():
     else:
         sort_column = sort_column.asc()
 
+    # Проверяем, разрешен ли запрошенный sort_status для текущего пользователя
+    # Используем filtered_statuses, который уже учитывает права роли
     if sort_status and sort_status in filtered_statuses:
         sort_case = db.case(
             {sort_status: 0},
