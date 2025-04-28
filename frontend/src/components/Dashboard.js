@@ -1190,7 +1190,7 @@ function Dashboard() {
 				const newDisables = { vak: false, wos: false, scopus: false };
 
 				// Логика определения ВАК/WoS/Scopus по тексту display_name
-				if (displayName.includes('вак') || displayName.includes('ринц')) { // Добавляем РИНЦ как возможный триггер для ВАК
+				if ((displayName.includes('вак') || displayName.includes('ринц')) && displayName !== 'конференция ринц') {
 					newStatuses.vak = true;
 					newDisables.vak = true; // Блокируем отмену ВАК, если он "встроен" в тип
 				}
@@ -1518,7 +1518,7 @@ function Dashboard() {
 			if (selectedType.name.toLowerCase() === 'article' || selectedType.name.toLowerCase() === 'conference') {
 				isArticleOrConference = true;
 				const displayNameLower = selectedType.display_name.toLowerCase();
-				isVakImplied = displayNameLower.includes('вак') || displayNameLower.includes('ринц');
+				isVakImplied = (displayNameLower.includes('вак') || displayNameLower.includes('ринц')) && displayNameLower !== 'конференция ринц';
 				isWoSImplied = displayNameLower.includes('wos') || displayNameLower.includes('web of science');
 				isScopusImplied = displayNameLower.includes('scopus');
 			}

@@ -165,20 +165,33 @@ def generate_excel_report(user_id: int) -> bytes:
             total_authors = len(pub.authors)
             employee_authors = sum(1 for author in pub.authors if author.is_employee)
             coauthors = ", ".join(author.name for author in pub.authors[1:]) if total_authors > 1 else ""
-            work_type = "" # Значение по умолчанию
-            if pub.type and pub.type.name: # Убедимся, что тип и его имя существуют
+            # --- КОРРЕКТНАЯ логика определения work_type ---
+            work_type = ""  # Значение по умолчанию
+
+            if pub.display_name and pub.display_name.display_name == "Конференция РИНЦ":
+                # 1. Специальный случай: Если display_name ТОЧНО "Конференция РИНЦ"
+                work_type = "Конференция РИНЦ"
+            elif pub.type and pub.type.name:
+                # 2. Если НЕ "Конференция РИНЦ", применяем СТАРУЮ/ОБОБЩЕННУЮ логику
                 type_name_lower = pub.type.name.lower()
                 if type_name_lower == 'article':
-                    work_type = "Статья" # Упрощенное название
+                    # Обобщенное название для статей
+                    work_type = "Статья"
                 elif type_name_lower == 'conference':
-                    work_type = "Конференция" # Упрощенное название
+                    # Обобщенное название для конференций (кроме "Конференция РИНЦ", обработанной выше)
+                    work_type = "Конференция"
                 else:
-                    # Для всех остальных типов используем display_name или базовое имя типа
+                    # 3. Для всех остальных типов (монографии, книги и т.д.)
+                    # используем их специфическое русское имя (display_name) если есть,
+                    # иначе базовое имя типа (type.name)
                     work_type = pub.display_name.display_name if pub.display_name else pub.type.name
-            else:
-                # Если тип или имя типа отсутствуют, используем display_name, если оно есть
-                work_type = pub.display_name.display_name if pub.display_name else ""
+            elif pub.display_name and pub.display_name.display_name:
+                # 4. Запасной вариант: если базовый тип (pub.type.name) не определен,
+                # но русское название (display_name) есть (маловероятно, но на всякий случай)
+                work_type = pub.display_name.display_name
 
+            # Если ничего не подошло, work_type останется пустой строкой ""
+            # --- Конец КОРРЕКТНОЙ логики work_type ---
 
             # --- Формирование строки данных для Excel ---
             data_row_values = [
