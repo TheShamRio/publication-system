@@ -410,6 +410,7 @@ function Dashboard() {
 	const [circulationError, setCirculationError] = useState('');
 	const [departmentError, setDepartmentError] = useState('');
 	const [classificationCodeError, setClassificationCodeError] = useState('');
+	const [quartileError, setQuartileError] = useState('');
 	// Состояние ошибки файла (для проверки типа при выборе)
 	const [fileError, setFileError] = useState('');
 	// Ошибки формы редактирования
@@ -428,6 +429,7 @@ function Dashboard() {
 	const [editCirculationError, setEditCirculationError] = useState('');
 	const [editDepartmentError, setEditDepartmentError] = useState('');
 	const [editClassificationCodeError, setEditClassificationCodeError] = useState('');
+	const [editQuartileError, setEditQuartileError] = useState('');
 	const [editFileError, setEditFileError] = useState('');
 
 
@@ -1100,6 +1102,7 @@ function Dashboard() {
 		setNumberError(''); setPagesError(''); setPublisherError('');
 		setPublisherLocationError(''); setPrintedSheetsVolumeError(''); setCirculationError('');
 		setDepartmentError(''); setClassificationCodeError(''); setFileError('');
+		setQuartileError('');
 		setTitleMandatoryError(false); setYearMandatoryError(false);
 		setAuthorMandatoryError(false); setTypeMandatoryError(false); setFileMandatoryError(false);
 		setSubmitAttempted(false); // <--- Важно
@@ -1140,7 +1143,8 @@ function Dashboard() {
 			{ name: 'publisherLocation', value: publisherLocation, setError: setPublisherLocationError },
 			{ name: 'printedSheetsVolume', value: printedSheetsVolume, setError: setPrintedSheetsVolumeError },
 			{ name: 'circulation', value: circulation, setError: setCirculationError },
-			{ name: 'department', value: department, setError: setDepartmentError },
+			{ name: 'quartile', value: quartile, setError: setQuartileError }, // <--- ДОБАВЬТЕ ЭТО
+			{ name: 'department', value: department, setError: setDepartmentError }, // <-- УЖЕ ДОЛЖНО БЫТЬ
 			{ name: 'classificationCode', value: classificationCode, setError: setClassificationCodeError },
 		];
 
@@ -1495,6 +1499,7 @@ function Dashboard() {
 			{ name: 'publisherLocation', value: editPublisherLocation, setError: setEditPublisherLocationError },
 			{ name: 'printedSheetsVolume', value: editPrintedSheetsVolume, setError: setEditPrintedSheetsVolumeError },
 			{ name: 'circulation', value: editCirculation, setError: setEditCirculationError },
+			{ name: 'quartile', value: editQuartile, setError: setEditQuartileError },         // <--- ДОБАВЬТЕ ЭТО
 			{ name: 'department', value: editDepartment, setError: setEditDepartmentError },
 			{ name: 'classificationCode', value: editClassificationCode, setError: setEditClassificationCodeError },
 			// Валидация *нового* выбранного файла
@@ -1681,6 +1686,12 @@ function Dashboard() {
 				// Проверка только на разрешенные символы. DOI может быть сложным.
 				if (trimmedValue && !/^[a-zA-Z0-9./_();:-]+$/.test(trimmedValue)) return 'Подсказка: DOI содержит недопустимые символы. Разрешены буквы, цифры и символы: ./_();:-';
 				return '';
+			case 'quartile':
+				// Разрешаем Q1, Q2, Q3 или пустое значение
+				if (trimmedValue && !['Q1', 'Q2', 'Q3'].includes(trimmedValue)) {
+					return 'Подсказка: Квартиль должен быть Q1, Q2 или Q3.';
+				}
+				return ''; // Ошибки нет
 			case 'issn':
 				// Проверка только на разрешенные символы. Формат не строгий.
 				if (trimmedValue && !/^[0-9X-]+$/.test(trimmedValue)) return 'Подсказка: ISSN может содержать только цифры, дефис и букву X. Пример: 1234-567X';
@@ -1721,10 +1732,10 @@ function Dashboard() {
 				if (trimmedValue && parseInt(trimmedValue, 10) <= 0) return 'Подсказка: Тираж должен быть больше нуля.';
 				return '';
 			case 'department':
-				// Допускаем буквы (рус/лат), цифры, пробелы, дефисы
-				if (trimmedValue && !/^[a-zA-Zа-яА-ЯёЁ0-9\s-]+$/.test(trimmedValue)) return 'Подсказка: Кафедра может содержать буквы, цифры, пробелы, дефисы. Пример: ИКТЗИ или КАФЕДРА ПМИ';
-				// Можно добавить проверку на большую букву, если надо:
-				// if (trimmedValue && trimmedValue[0] !== trimmedValue[0].toUpperCase()) return 'Подсказка: Название кафедры должно начинаться с заглавной буквы.';
+				// Допускаем только заглавные буквы (рус/лат) или пустое значение
+				if (trimmedValue && !/^[A-ZА-ЯЁ]+$/.test(trimmedValue)) {
+					return 'Подсказка: Кафедра должна состоять только из заглавных букв (аббревиатура). Пример: ПМИ';
+				}
 				return '';
 			case 'classificationCode':
 				if (trimmedValue && !/^[0-9.]+$/.test(trimmedValue)) return 'Подсказка: Код по классификатору может содержать только цифры и точки. Пример: 01.02.03';
@@ -3140,12 +3151,18 @@ function Dashboard() {
 															fullWidth
 															label="Квартиль (Q)"
 															value={quartile}
-															onChange={(e) => setQuartile(e.target.value)} // Простая валидация Q пока не добавлена, можно добавить в validateField при необходимости
+															// ИЗМЕНЕНИЕ onChange: добавляем валидацию
+															onChange={(e) => {
+																const newValue = e.target.value.toUpperCase(); // Можно сразу переводить в верхний регистр при вводе
+																setQuartile(newValue);
+																setQuartileError(validateField('quartile', newValue)); // Вызываем валидацию
+															}}
 															margin="normal"
 															variant="outlined"
-														// error={!!quartileError} // Добавить если нужна валидация
+															error={!!quartileError} // ДОБАВЛЕНО
 														/>
-														{/* {quartileError && <Typography ...>{quartileError}</Typography>} */}
+														{/* ДОБАВЛЕНО: Отображение ошибки квартиля */}
+														{quartileError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{quartileError}</Typography>}
 													</Grid>
 													{/* ISSN */}
 													<Grid item xs={12} sm={6}>
@@ -3317,12 +3334,14 @@ function Dashboard() {
 															onChange={(e) => {
 																const newValue = e.target.value;
 																setDepartment(newValue);
+																// Убедитесь, что здесь 'department'
 																setDepartmentError(validateField('department', newValue));
 															}}
 															margin="normal"
 															variant="outlined"
-															error={!!departmentError}
+															error={!!departmentError} // Должно уже быть
 														/>
+														{/* Это Typography должно уже быть */}
 														{departmentError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{departmentError}</Typography>}
 													</Grid>
 												</Grid>
@@ -3776,324 +3795,275 @@ function Dashboard() {
 										</AppleButton>
 									</Box>
 
-									{plans.map((plan) => {
-										const groupedEntries = tempPlan && tempPlan.id === plan.id ? tempPlan.groupedEntries.filter(g => !g.isDeleted) : groupEntriesByType(plan.entries);
+									{plans.length === 0 ? (
+										// Если планов нет, показать сообщение
+										<Typography sx={{ textAlign: 'center', mt: 4, color: '#6E6E73', fontStyle: 'italic' }}>
+											У вас еще нет планов.
+										</Typography>
+									) : (
+										// Если планы есть, показать их список и пагинацию
+										<>
+											{plans.map((plan) => {
+												const groupedEntries = tempPlan && tempPlan.id === plan.id ? tempPlan.groupedEntries.filter(g => !g.isDeleted) : groupEntriesByType(plan.entries);
 
-										return (
-											<Accordion
-												key={plan.id}
-												expanded={expandedPlanId === plan.id}
-												onChange={(event, isExpanded) => {
-													setExpandedPlanId(isExpanded ? plan.id : null);
-												}}
-												sx={{
-													mb: 2,
-													borderRadius: '16px',
-													boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
-												}}
-											>
-												<AccordionSummary
-													expandIcon={<ExpandMoreIcon />}
-													component="div" // Заменяем <button> на <div>
-													sx={{ cursor: 'pointer' }} // Добавляем курсор для сохранения интерактивности
-												>
-													<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
-														<Typography variant="h6" sx={{ color: '#1D1D1F' }}>
-															План на {plan.year} год (План: {plan.plan_count} | Факт: {plan.fact_count})
-														</Typography>
-														<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
-															<StatusChip status={plan.status} role={user.role} />
-															{(plan.status === 'draft' || plan.status === 'returned') && (
+												return (
+													<Accordion
+														key={plan.id}
+														expanded={expandedPlanId === plan.id}
+														onChange={(event, isExpanded) => {
+															setExpandedPlanId(isExpanded ? plan.id : null);
+														}}
+														sx={{
+															mb: 2,
+															borderRadius: '16px',
+															boxShadow: '0 4px 12px rgba(0, 0, 0, 0.05)',
+														}}
+													>
+														{/* AccordionSummary остается как был */}
+														<AccordionSummary
+															expandIcon={<ExpandMoreIcon />}
+															component="div"
+															sx={{ cursor: 'pointer' }}
+														>
+															<Box sx={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
+																<Typography variant="h6" sx={{ color: '#1D1D1F' }}>
+																	План на {plan.year} год (План: {plan.plan_count} | Факт: {plan.fact_count})
+																</Typography>
+																<Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+																	<StatusChip status={plan.status} role={user.role} />
+																	{(plan.status === 'draft' || plan.status === 'returned') && (
+																		<>
+																			<IconButton
+																				onClick={(e) => { e.stopPropagation(); handleEditPlanClick(plan.id); }}
+																				sx={{ color: '#0071E3' }}
+																				disabled={plan.status !== 'draft' && plan.status !== 'returned'}
+																				title="Редактировать план"
+																			>
+																				<EditIcon />
+																			</IconButton>
+																			<IconButton
+																				onClick={(e) => { e.stopPropagation(); handleDeletePlanClick(plan); }}
+																				sx={{ color: '#FF3B30' }}
+																				disabled={plan.status !== 'draft' && plan.status !== 'returned'}
+																				title="Удалить план"
+																			>
+																				<DeleteIcon />
+																			</IconButton>
+																			<IconButton
+																				onClick={(e) => { e.stopPropagation(); handleSubmitPlanForReview(plan); }}
+																				sx={{ color: '#0071E3' }}
+																				disabled={
+																					!plan.entries ||
+																					plan.entries.length === 0 ||
+																					!areAllTitlesFilled(plan) ||
+																					(plan.status !== 'draft' && plan.status !== 'returned')
+																				}
+																				title={
+																					(plan.status !== 'draft' && plan.status !== 'returned') ? `Нельзя отправить план в статусе '${plan.status}'`
+																						: (!plan.entries || plan.entries.length === 0) ? 'Нельзя отправить пустой план'
+																							: !areAllTitlesFilled(plan) ? 'Заполните все заголовки перед отправкой'
+																								: 'Отправить на проверку'
+																				}
+																			>
+																				<PublishIcon />
+																			</IconButton>
+																		</>
+																	)}
+																</Box>
+															</Box>
+														</AccordionSummary>
+														{/* AccordionDetails остается как был */}
+														<AccordionDetails>
+															{editingPlanId === plan.id ? (
 																<>
-																	{/* --- КНОПКА РЕДАКТИРОВАТЬ --- */}
-																	<IconButton
-																		onClick={(e) => {
-																			e.stopPropagation();
-																			handleEditPlanClick(plan.id);
-																		}}
-																		sx={{ color: '#0071E3' }}
-																		// ИСПРАВЛЕННОЕ условие disabled: Проверяем только статус
-																		disabled={plan.status !== 'draft' && plan.status !== 'returned'}
-																		// ИСПРАВЛЕННЫЙ title
-																		title="Редактировать план"
-																	>
-																		<EditIcon />
-																	</IconButton>
-
-																	{/* --- КНОПКА УДАЛИТЬ (Оставить как есть или скорректировать) --- */}
-																	<IconButton
-																		onClick={(e) => {
-																			e.stopPropagation();
-																			handleDeletePlanClick(plan);
-																		}}
-																		sx={{ color: '#FF3B30' }}
-																		// Оставляем проверку по статусу, если нужно, или убираем, если удаление всегда разрешено для draft/returned
-																		disabled={plan.status !== 'draft' && plan.status !== 'returned'} // Или скорректируйте по необходимости
-																		title="Удалить план" // Добавляем подсказку
-																	>
-																		<DeleteIcon />
-																	</IconButton>
-
-																	{/* --- КНОПКА ОТПРАВИТЬ (Проверяем её условия) --- */}
-																	<IconButton
-																		onClick={(e) => {
-																			e.stopPropagation();
-																			handleSubmitPlanForReview(plan);
-																		}}
-																		sx={{ color: '#0071E3' }}
-																		// ПРОВЕРЕННОЕ/КОРРЕКТНОЕ условие disabled для ОТПРАВКИ
-																		disabled={
-																			!plan.entries || // Проверка 1: Существует ли 'entries'?
-																			plan.entries.length === 0 || // Проверка 2: Пуст ли 'entries'?
-																			!areAllTitlesFilled(plan) || // Проверка 3: Заполнены ли все заголовки?
-																			(plan.status !== 'draft' && plan.status !== 'returned') // Проверка 4: Корректный ли статус?
-																		}
-																		// ПРОВЕРЕННЫЙ/КОРРЕКТНЫЙ title для ОТПРАВКИ
-																		title={
-																			(plan.status !== 'draft' && plan.status !== 'returned')
-																				? `Нельзя отправить план в статусе '${plan.status}'` // Причина: статус
-																				: (!plan.entries || plan.entries.length === 0)
-																					? 'Нельзя отправить пустой план' // Причина: пустой план
-																					: !areAllTitlesFilled(plan)
-																						? 'Заполните все заголовки перед отправкой' // Причина: заголовки
-																						: 'Отправить на проверку' // По умолчанию, если активна
-																		}
-																	>
-																		<PublishIcon />
-																	</IconButton>
+																	{/* ... содержимое редактирования ... */}
+																	{tempPlan?.groupedEntries?.length === 0 ? (
+																		<Typography sx={{ color: '#1D1D1F', mt: 2, fontStyle: 'italic' }}>
+																			Ваш план пуст, выберите планируемые типы публикаций.
+																		</Typography>
+																	) : (
+																		<PlanTable>
+																			<TableHead>
+																				<TableRow>
+																					<TableCell>Тип</TableCell>
+																					<TableCell>Количество</TableCell>
+																					<TableCell>Действия</TableCell>
+																				</TableRow>
+																			</TableHead>
+																			<TableBody>
+																				{tempPlan?.groupedEntries?.map((group, index) => {
+																					const typeData = publicationTypes.find(t => t.name === group.type);
+																					return (
+																						<TableRow key={index} sx={{ backgroundColor: group.isDeleted ? '#E5E5EA' : 'inherit' }}>
+																							<TableCell>
+																								{group.display_name || (publicationTypes.find(t => t.name === group.type)?.display_name) || group.type}
+																							</TableCell>
+																							<TableCell>
+																								<AppleTextField
+																									sx={{ width: '70px' }}
+																									type="number"
+																									value={group.planCount}
+																									onChange={(e) => handlePlanEntryCountChange(plan.id, group.type, group.display_name_id, parseInt(e.target.value) || 1)}
+																									fullWidth
+																									variant="outlined"
+																									disabled={group.isDeleted}
+																								/>
+																							</TableCell>
+																							<TableCell>
+																								{group.isDeleted ? (
+																									<IconButton
+																										onClick={() => handleRestoreType(plan.id, group.type, group.display_name_id)}
+																										sx={{ color: '#34C759' }}
+																										title="Восстановить тип"
+																										disabled={plan.status === 'pending'}
+																									>
+																										<AddIcon />
+																									</IconButton>
+																								) : (
+																									<IconButton
+																										onClick={() => handleDeletePlanEntryByType(plan.id, group.type, group.display_name_id)}
+																										sx={{ color: '#FF3B30' }}
+																										title="Удалить тип"
+																										disabled={plan.status === 'pending'}
+																									>
+																										<DeleteIcon />
+																									</IconButton>
+																								)}
+																							</TableCell>
+																						</TableRow>
+																					);
+																				})}
+																			</TableBody>
+																		</PlanTable>
+																	)}
+																	<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
+																		<FormControl sx={{ minWidth: 200 }}>
+																			<InputLabel>Типы публикаций</InputLabel>
+																			<AppleSelect
+																				multiple
+																				value={selectedNewEntryType}
+																				onChange={(e) => setSelectedNewEntryType(e.target.value)}
+																				renderValue={(selected) =>
+																					selected.length === 0 ? (
+																						<Typography sx={{ color: '#6E6E73' }}>Выберите типы</Typography>
+																					) : (
+																						<Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
+																							{selected.map((value) => (
+																								<Chip
+																									key={value}
+																									label={publicationTypes.find(t => t.display_name_id === value)?.display_name || value}
+																									onMouseDown={(event) => event.stopPropagation()}
+																									onDelete={(event) => {
+																										event.stopPropagation();
+																										setSelectedNewEntryType(selectedNewEntryType.filter((item) => item !== value));
+																									}}
+																								/>
+																							))}
+																						</Box>
+																					)
+																				}
+																			>
+																				{publicationTypes.map(type => (
+																					<MenuItem key={type.display_name_id} value={type.display_name_id}>
+																						{type.display_name}
+																					</MenuItem>
+																				))}
+																			</AppleSelect>
+																		</FormControl>
+																		<AppleButton
+																			startIcon={<AddIcon />}
+																			onClick={() => handleAddPlanEntry(plan.id)}
+																			disabled={selectedNewEntryType.length === 0}
+																		>
+																			Добавить тип
+																		</AppleButton>
+																		<RedCancelButton
+																			onClick={() => {
+																				setEditingPlanId(null);
+																				setTempPlan(null);
+																				setExpandedPlanId(null);
+																			}}
+																		>
+																			Отмена
+																		</RedCancelButton>
+																		<GreenButton
+																			startIcon={<SaveIcon />}
+																			onClick={() => handleSavePlan(plan)}
+																			disabled={
+																				!areAllTitlesFilled({
+																					...plan,
+																					entries: tempPlan.groupedEntries.flatMap((group) => (group.isDeleted ? [] : group.entries)),
+																				})
+																			}
+																		>
+																			Сохранить
+																		</GreenButton>
+																	</Box>
+																</>
+															) : (
+																<>
+																	{/* ... содержимое просмотра ... */}
+																	<Typography sx={{ mb: 1 }}>Прогресс выполнения:</Typography>
+																	<Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
+																		<LinearProgress
+																			variant="determinate"
+																			value={Math.min(calculateProgress(plan), 100)}
+																			sx={{ height: 8, borderRadius: 4, flexGrow: 1, backgroundColor: '#E5E5EA', '& .MuiLinearProgress-bar': { backgroundColor: '#34C759' } }}
+																		/>
+																		<Typography variant="body2" sx={{ minWidth: '50px', textAlign: 'right', color: calculateProgress(plan) > 100 ? '#FF9500' : '#1D1D1F' }}>
+																			{Math.round(calculateProgress(plan))}%
+																		</Typography>
+																	</Box>
+																	{groupedEntries.length === 0 ? (
+																		<Typography sx={{ color: '#1D1D1F', mt: 2, fontStyle: 'italic' }}>
+																			Ваш план пуст, выберите планируемые типы публикаций.
+																		</Typography>
+																	) : (
+																		<PlanTable>
+																			<TableHead>
+																				<TableRow>
+																					<TableCell>План/Факт</TableCell>
+																					<TableCell>Тип</TableCell>
+																					<TableCell>Действия</TableCell>
+																				</TableRow>
+																			</TableHead>
+																			<TableBody>
+																				{groupedEntries.map((group) => (
+																					<TableRow key={group.display_name_id}>
+																						<TableCell>{`${group.planCount}/${group.factCount}`}</TableCell>
+																						<TableCell>{group.display_name || (publicationTypes.find(t => t.name === group.type)?.display_name) || group.type}</TableCell>
+																						<TableCell>
+																							<IconButton onClick={() => handleOpenLinkDialog(plan.id, group)} sx={{ color: '#0071E3' }} title="Привязать публикацию" disabled={plan.status !== 'approved' || group.factCount >= group.planCount}><LinkIcon /></IconButton>
+																							<IconButton onClick={() => handleOpenUnlinkDialog(plan.id, group)} sx={{ color: group.factCount > 0 ? '#FF3B30' : '#D1D1D6' }} title="Отвязать публикацию" disabled={plan.status !== 'approved' || group.factCount === 0}><UnlinkIcon /></IconButton>
+																						</TableCell>
+																					</TableRow>
+																				))}
+																			</TableBody>
+																		</PlanTable>
+																	)}
+																	{plan.return_comment && plan.status !== 'approved' && (
+																		<Typography sx={{ mt: 2, color: '#000000', fontWeight: 600, display: 'flex', alignItems: 'center', gap: 1 }}>
+																			<WarningAmberIcon sx={{ color: '#FF3B30' }} />
+																			Комментарий при возврате: {plan.return_comment}
+																		</Typography>
+																	)}
 																</>
 															)}
-														</Box>
-													</Box>
-												</AccordionSummary>
-												<AccordionDetails>
-													{editingPlanId === plan.id ? (
-														<>
-															{tempPlan?.groupedEntries?.length === 0 ? (
-																<Typography sx={{ color: '#1D1D1F', mt: 2, fontStyle: 'italic' }}>
-																	Ваш план пуст, выберите планируемые типы публикаций.
-																</Typography>
-															) : (
-																<PlanTable>
-																	<TableHead>
-																		<TableRow>
-																			<TableCell>Тип</TableCell>
-																			<TableCell>Количество</TableCell>
-																			<TableCell>Действия</TableCell>
-																		</TableRow>
-																	</TableHead>
-																	<TableBody>
-																		{tempPlan?.groupedEntries?.map((group, index) => {
-																			const typeData = publicationTypes.find(t => t.name === group.type);
-																			return (
-																				<TableRow key={index} sx={{ backgroundColor: group.isDeleted ? '#E5E5EA' : 'inherit' }}>
-																					<TableCell>
-																						{group.display_name || (publicationTypes.find(t => t.name === group.type)?.display_name) || group.type}
-																					</TableCell>
-																					<TableCell>
-																						<AppleTextField
-																							sx={{ width: '70px' }}
-																							type="number"
-																							value={group.planCount}
-																							onChange={(e) => handlePlanEntryCountChange(plan.id, group.type, group.display_name_id, parseInt(e.target.value) || 1)}
-																							fullWidth
-																							variant="outlined"
-																							disabled={group.isDeleted}
-																						/>
-																					</TableCell>
-																					<TableCell>
-																						{group.isDeleted ? (
-																							<IconButton
-																								onClick={() => handleRestoreType(plan.id, group.type, group.display_name_id)}
-																								sx={{ color: '#34C759' }}
-																								title="Восстановить тип"
-																								disabled={plan.status === 'pending'}
-																							>
-																								<AddIcon />
-																							</IconButton>
-																						) : (
-																							<IconButton
-																								onClick={() => handleDeletePlanEntryByType(plan.id, group.type, group.display_name_id)}
-																								sx={{ color: '#FF3B30' }}
-																								title="Удалить тип"
-																								disabled={plan.status === 'pending'}
-																							>
-																								<DeleteIcon />
-																							</IconButton>
-																						)}
-																					</TableCell>
-																				</TableRow>
-																			);
-																		})}
-																	</TableBody>
-																</PlanTable>
-															)}
-															<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-																<FormControl sx={{ minWidth: 200 }}>
-																	<InputLabel>Типы публикаций</InputLabel>
-																	<AppleSelect
-																		multiple
-																		value={selectedNewEntryType}
-																		onChange={(e) => setSelectedNewEntryType(e.target.value)}
-																		renderValue={(selected) =>
-																			selected.length === 0 ? (
-																				<Typography sx={{ color: '#6E6E73' }}>Выберите типы</Typography>
-																			) : (
-																				<Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 0.5 }}>
-																					{selected.map((value) => (
-																						<Chip
-																							key={value}
-																							label={publicationTypes.find(t => t.display_name_id === value)?.display_name || value}
-																							onMouseDown={(event) => event.stopPropagation()}
-																							onDelete={(event) => {
-																								event.stopPropagation();
-																								setSelectedNewEntryType(selectedNewEntryType.filter((item) => item !== value));
-																							}}
-																						/>
-																					))}
-																				</Box>
-																			)
-																		}
-																	>
-																		{publicationTypes.map(type => (
-																			<MenuItem key={type.display_name_id} value={type.display_name_id}>
-																				{type.display_name}
-																			</MenuItem>
-																		))}
-																	</AppleSelect>
-																</FormControl>
-																<AppleButton
-																	startIcon={<AddIcon />}
-																	onClick={() => handleAddPlanEntry(plan.id)}
-																	disabled={selectedNewEntryType.length === 0}
-																>
-																	Добавить тип
-																</AppleButton>
-																<RedCancelButton
-																	onClick={() => {
-																		setEditingPlanId(null);
-																		setTempPlan(null);
-																		setExpandedPlanId(null);
-																	}}
-																>
-																	Отмена
-																</RedCancelButton>
-																<GreenButton
-																	startIcon={<SaveIcon />}
-																	onClick={() => handleSavePlan(plan)}
-																	disabled={
-																		!areAllTitlesFilled({
-																			...plan,
-																			entries: tempPlan.groupedEntries.flatMap((group) => (group.isDeleted ? [] : group.entries)),
-																		})
-																	}
-																>
-																	Сохранить
-																</GreenButton>
-															</Box>
-														</>
-													) : (
-														<>
-															<Typography sx={{ mb: 1 }}>Прогресс выполнения:</Typography>
-															<Box sx={{ display: 'flex', alignItems: 'center', gap: 2, mb: 2 }}>
-																<LinearProgress
-																	variant="determinate"
-																	value={Math.min(calculateProgress(plan), 100)}
-																	sx={{
-																		height: 8,
-																		borderRadius: 4,
-																		flexGrow: 1,
-																		backgroundColor: '#E5E5EA',
-																		'& .MuiLinearProgress-bar': { backgroundColor: '#34C759' },
-																	}}
-																/>
-																<Typography
-																	variant="body2"
-																	sx={{
-																		minWidth: '50px',
-																		textAlign: 'right',
-																		color: calculateProgress(plan) > 100 ? '#FF9500' : '#1D1D1F',
-																	}}
-																>
-																	{Math.round(calculateProgress(plan))}%
-																</Typography>
-															</Box>
-															{groupedEntries.length === 0 ? (
-																<Typography sx={{ color: '#1D1D1F', mt: 2, fontStyle: 'italic' }}>
-																	Ваш план пуст, выберите планируемые типы публикаций.
-																</Typography>
-															) : (
-																<PlanTable>
-																	<TableHead>
-																		<TableRow>
-																			<TableCell>План/Факт</TableCell>
-																			<TableCell>Тип</TableCell>
-																			<TableCell>Действия</TableCell>
-																		</TableRow>
-																	</TableHead>
-																	<TableBody>
-																		{groupedEntries.map((group) => (
-																			<TableRow key={group.display_name_id}>
-																				<TableCell>{`${group.planCount}/${group.factCount}`}</TableCell>
-																				<TableCell>
-																					{group.display_name || (publicationTypes.find(t => t.name === group.type)?.display_name) || group.type}
-																				</TableCell>
-																				<TableCell>
-																					<IconButton
-																						onClick={() => handleOpenLinkDialog(plan.id, group)}
-																						sx={{ color: '#0071E3' }}
-																						title="Привязать публикацию"
-																						disabled={plan.status !== 'approved' || group.factCount >= group.planCount}
-																					>
-																						<LinkIcon />
-																					</IconButton>
-																					<IconButton
-																						onClick={() => handleOpenUnlinkDialog(plan.id, group)}
-																						sx={{ color: group.factCount > 0 ? '#FF3B30' : '#D1D1D6' }}
-																						title="Отвязать публикацию"
-																						disabled={plan.status !== 'approved' || group.factCount === 0}
-																					>
-																						<UnlinkIcon />
-																					</IconButton>
-																				</TableCell>
-																			</TableRow>
-																		))}
-																	</TableBody>
-																</PlanTable>
-															)}
-
-															{plan.return_comment && plan.status !== 'approved' && (
-																<Typography
-																	sx={{
-																		mt: 2,
-																		color: '#000000',
-																		fontWeight: 600,
-																		display: 'flex',
-																		alignItems: 'center',
-																		gap: 1,
-																	}}
-																>
-																	<WarningAmberIcon sx={{ color: '#FF3B30' }} />
-																	Комментарий при возврате: {plan.return_comment}
-																</Typography>
-															)}
-														</>
-													)}
-												</AccordionDetails>
-											</Accordion>
-										);
-									})}
-
-									<Pagination
-										count={planTotalPages}
-										page={planPage}
-										onChange={handlePlanPageChange}
-										sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}
-									/>
-								</>
+														</AccordionDetails>
+													</Accordion>
+												);
+											})}
+											<Pagination
+												count={planTotalPages}
+												page={planPage}
+												onChange={handlePlanPageChange}
+												sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}
+											/>
+										</> // Закрываем фрагмент для списка планов
+									)}
+								</> // Закрываем основной фрагмент для value === 3
 							)}
-
-							{value === 4 && (
+									{value === 4 && (
 								<Box sx={{ mt: 4 }}>
 									<Typography
 										variant="h5"
@@ -4400,12 +4370,19 @@ function Dashboard() {
 									fullWidth
 									label="Квартиль (Q)"
 									value={editQuartile}
-									onChange={(e) => setEditQuartile(e.target.value)} // Простая валидация Q пока не добавлена
+									// ИЗМЕНЕНИЕ onChange: добавляем валидацию
+									onChange={(e) => {
+										const newValue = e.target.value.toUpperCase(); // Можно сразу переводить в верхний регистр при вводе
+										setEditQuartile(newValue);
+										// Валидируем как 'quartile'
+										setEditQuartileError(validateField('quartile', newValue));
+									}}
 									margin="normal"
 									variant="outlined"
-								// error={!!editQuartileError}
+									error={!!editQuartileError} // ДОБАВЛЕНО
 								/>
-								{/* {editQuartileError && <Typography ...>{editQuartileError}</Typography>} */}
+								{/* ДОБАВЛЕНО: Отображение ошибки квартиля (редактирование) */}
+								{editQuartileError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{editQuartileError}</Typography>}
 							</Grid>
 							{/* ISSN */}
 							<Grid item xs={12} sm={6}>
@@ -4577,12 +4554,14 @@ function Dashboard() {
 									onChange={(e) => {
 										const newValue = e.target.value;
 										setEditDepartment(newValue);
+										// Убедитесь, что здесь 'department'
 										setEditDepartmentError(validateField('department', newValue));
 									}}
 									margin="normal"
 									variant="outlined"
-									error={!!editDepartmentError}
+									error={!!editDepartmentError} // ДОБАВЛЕНО
 								/>
+								{/* Это Typography должно уже быть */}
 								{editDepartmentError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{editDepartmentError}</Typography>}
 							</Grid>
 						</Grid>
