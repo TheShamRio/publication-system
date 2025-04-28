@@ -137,18 +137,58 @@ def generate_excel_report(user_id: int) -> bytes:
                 pages_formatted = str(pub.pages).replace('-', '–')
                 num_vol_pages_parts.append(f"С. {pages_formatted}")
             num_vol_pages_str = ", ".join(num_vol_pages_parts)
-            status_str = ""
-            if pub.quartile: status_str = f"1(Scop)/1(WoS)" # Пример
+            status_parts = []
+            # Порядок важен для итоговой строки, если это имеет значение
+            if pub.is_wos:
+                 # status_part = "WoS" # Старый вариант
+                 # if pub.quartile:
+                 #     status_part += f" (Q{pub.quartile})" # Убираем квартиль отсюда
+                 # status_parts.append(status_part)
+                 status_parts.append("1(WoS)") # <--- Новый формат
+
+            if pub.is_scopus:
+                 # status_part = "Scopus" # Старый вариант
+                 # # Добавляем Q для Scopus, только если нет WoS (логика остается)
+                 # if pub.quartile and not pub.is_wos:
+                 #    status_part += f" (Q{pub.quartile})" # Убираем квартиль отсюда
+                 # status_parts.append(status_part)
+                 status_parts.append("1(Scop)") # <--- Новый формат (с сокращением)
+
+            if pub.is_vak:
+                # status_parts.append("ВАК") # Старый вариант
+                status_parts.append("2(BAK)") # <--- Новый формат (с BAK)
+
+            # Соединяем части ПРОБЕЛАМИ
+            status_str = " ".join(status_parts) # <--- Используем пробел как разделитель
+
+            # --- Остальная логика подготовки данных --- (без изменений)
             total_authors = len(pub.authors)
             employee_authors = sum(1 for author in pub.authors if author.is_employee)
             coauthors = ", ".join(author.name for author in pub.authors[1:]) if total_authors > 1 else ""
-            work_type = pub.display_name.display_name if pub.display_name else (pub.type.name if pub.type else "")
+            work_type = "" # Значение по умолчанию
+            if pub.type and pub.type.name: # Убедимся, что тип и его имя существуют
+                type_name_lower = pub.type.name.lower()
+                if type_name_lower == 'article':
+                    work_type = "Статья" # Упрощенное название
+                elif type_name_lower == 'conference':
+                    work_type = "Конференция" # Упрощенное название
+                else:
+                    # Для всех остальных типов используем display_name или базовое имя типа
+                    work_type = pub.display_name.display_name if pub.display_name else pub.type.name
+            else:
+                # Если тип или имя типа отсутствуют, используем display_name, если оно есть
+                work_type = pub.display_name.display_name if pub.display_name else ""
 
+
+            # --- Формирование строки данных для Excel ---
             data_row_values = [
                 i, first_author_name, pub.title or "",
                 pub.journal_conference_name or "", pub.doi or "", pub.issn or "",
-                pub.isbn or "", pub.quartile or "", num_vol_pages_str,
-                status_str, total_authors, employee_authors, pub.department or "",
+                pub.isbn or "",
+                pub.quartile or "", # Квартиль остается в своей колонке (H)
+                num_vol_pages_str,
+                status_str,        # <--- Используем новую строку статусов
+                total_authors, employee_authors, pub.department or "",
                 coauthors, work_type, pub.publisher or "", pub.publisher_location or "",
                 pub.year or "",
                 pub.printed_sheets_volume if pub.printed_sheets_volume is not None else "",

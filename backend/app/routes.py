@@ -655,33 +655,40 @@ def manage_publication(pub_id):
                       dn = PublicationTypeDisplayName.query.get(display_name_id)
                       if not dn or (type_id is not None and dn.publication_type_id != type_id): raise ValueError("Недопустимое русское название")
                 publication.display_name_id = display_name_id
+						
+            if 'is_vak' in data:
+                publication.is_vak = bool(data.get('is_vak')) if isinstance(data.get('is_vak'), bool) else str(data.get('is_vak', '')).lower() == 'true'
+            if 'is_wos' in data:
+                publication.is_wos = bool(data.get('is_wos')) if isinstance(data.get('is_wos'), bool) else str(data.get('is_wos', '')).lower() == 'true'
+            if 'is_scopus' in data:
+                publication.is_scopus = bool(data.get('is_scopus')) if isinstance(data.get('is_scopus'), bool) else str(data.get('is_scopus', '')).lower() == 'true'
 
+            if 'journal_conference_name' in data: publication.journal_conference_name = data.get('journal_conference_name')
+            # ... Обновите остальные поля по аналогии (doi, issn, isbn, quartile, volume, number, pages, etc.)
+            # Используйте проверку 'in data' и data.get('field_name') для всех новых полей.
+            # Это позволит клиенту отправлять частичные обновления, если не все поля были показаны/изменены.
+            if 'doi' in data: publication.doi = data.get('doi')
+            if 'issn' in data: publication.issn = data.get('issn')
+            if 'isbn' in data: publication.isbn = data.get('isbn')
+            if 'quartile' in data: publication.quartile = data.get('quartile')
+            if 'volume' in data: publication.volume = data.get('volume')
+            if 'number' in data: publication.number = data.get('number')
+            if 'pages' in data: publication.pages = data.get('pages')
+            if 'department' in data: publication.department = data.get('department')
+            if 'publisher' in data: publication.publisher = data.get('publisher')
+            if 'publisher_location' in data: publication.publisher_location = data.get('publisher_location')
 
-          # --- Новые поля ---
-            publication.journal_conference_name = data.get('journal_conference_name', publication.journal_conference_name)
-            publication.doi = data.get('doi', publication.doi)
-            publication.issn = data.get('issn', publication.issn)
-            publication.isbn = data.get('isbn', publication.isbn)
-            publication.quartile = data.get('quartile', publication.quartile)
+            # Обработка числовых полей - также через проверку 'in data'
+            if 'printed_sheets_volume' in data:
+                psv = data.get('printed_sheets_volume')
+                publication.printed_sheets_volume = float(psv) if psv is not None and psv != '' else None
+            if 'circulation' in data:
+                circ = data.get('circulation')
+                publication.circulation = int(circ) if circ is not None and circ != '' else None
 
-            publication.volume = data.get('volume', publication.volume)       # <- ДОБАВИТЬ
-            publication.number = data.get('number', publication.number)       # <- ДОБАВИТЬ
-            publication.pages = data.get('pages', publication.pages)         # <- ДОБАВИТЬ
+            if 'classification_code' in data: publication.classification_code = data.get('classification_code')
+            if 'notes' in data: publication.notes = data.get('notes')
 
-            publication.department = data.get('department', publication.department)
-            publication.publisher = data.get('publisher', publication.publisher)
-            publication.publisher_location = data.get('publisher_location', publication.publisher_location)
-
-            # Обработка числовых полей с проверкой на None/пустую строку
-            psv = data.get('printed_sheets_volume')
-            publication.printed_sheets_volume = float(psv) if psv is not None and psv != '' else None
-
-            circ = data.get('circulation')
-            publication.circulation = int(circ) if circ is not None and circ != '' else None
-
-            publication.classification_code = data.get('classification_code', publication.classification_code)
-            publication.notes = data.get('notes', publication.notes)
-            # --- Конец новых полей ---
 
             # Статус не меняем здесь! Если вернули на доработку, сбрасываем флаги
             if publication.status == 'returned_for_revision':
@@ -706,8 +713,8 @@ def manage_publication(pub_id):
             publication.updated_at = datetime.utcnow() # Обновляем дату изменения
 
         except (ValueError, TypeError) as val_err:
-             logger.error(f"Ошибка валидации при обновлении публикации {pub_id}: {val_err}", exc_info=True)
-             return jsonify({'error': f'Ошибка в значении поля: {val_err}'}), 400
+            logger.error(f"Ошибка валидации при обновлении публикации {pub_id}: {val_err}", exc_info=True)
+            return jsonify({'error': f'Ошибка в значении поля: {val_err}'}), 400
 
         # --- Фиксация изменений ---
         try:
@@ -798,6 +805,14 @@ def upload_file():
     classification_code = request.form.get('classification_code')
     notes = request.form.get('notes')
     # --- Конец получения новых полей ---
+    is_vak_str = request.form.get('is_vak', 'false') # Дефолтное значение - строка 'false'
+    is_wos_str = request.form.get('is_wos', 'false')
+    is_scopus_str = request.form.get('is_scopus', 'false')
+
+    is_vak = is_vak_str.lower() == 'true'
+    is_wos = is_wos_str.lower() == 'true'
+    is_scopus = is_scopus_str.lower() == 'true'
+    # --- Конец получения новых полей ---
 
     # --- Валидация обязательных полей ---
     if not title or not year or not type_id or not authors_json:
@@ -876,6 +891,9 @@ def upload_file():
         user_id=current_user.id,
         returned_for_revision=False,
         # --- Передаем новые поля ---
+        is_vak=is_vak,         # <-- НОВОЕ
+        is_wos=is_wos,         # <-- НОВОЕ
+        is_scopus=is_scopus,		 # <-- НОВОЕ
         journal_conference_name=journal_conference_name,
         doi=doi,
         issn=issn,

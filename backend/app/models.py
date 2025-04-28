@@ -138,7 +138,10 @@ class Publication(db.Model):
     printed_sheets_volume = db.Column(db.Float, nullable=True)           # 12. Объем в п.л.
     circulation = db.Column(db.Integer, nullable=True)                   # 13. Тираж
     classification_code = db.Column(db.String(100), nullable=True)      # 14. Направление и код
-    notes = db.Column(db.Text, nullable=True)     
+    notes = db.Column(db.Text, nullable=True)  
+    is_vak = db.Column(db.Boolean, default=False, nullable=False)
+    is_wos = db.Column(db.Boolean, default=False, nullable=False)
+    is_scopus = db.Column(db.Boolean, default=False, nullable=False)   
     # --- КОНЕЦ НОВЫХ ПОЛЕЙ ---
 
     @property
@@ -155,9 +158,9 @@ class Publication(db.Model):
             'title': self.title,
             'authors': [author.to_dict() for author in self.authors],
             'year': self.year,
-            'type': {
+            'type': { # Оставляем эту часть как была
                 'id': self.type.id if self.type else None,
-                'name': self.type.name.lstrip('@') if self.type else None, # Убираем @ если оно есть в БД
+                'name': self.type.name.lstrip('@') if self.type else None,
                 'display_name': self.display_name.display_name if self.display_name else None,
                 'display_names': [dn.display_name for dn in self.type.display_names] if self.type and hasattr(self.type, 'display_names') else []
             } if self.type else None,
@@ -172,16 +175,19 @@ class Publication(db.Model):
             'user': {
                 'full_name': self.user.full_name if self.user else None
             } if self.user else None,
-            # --- Добавляем новые поля в словарь ---
+            # --- Добавляем НОВЫЕ поля в to_dict ---
+            'is_vak': self.is_vak,
+            'is_wos': self.is_wos,
+            'is_scopus': self.is_scopus,
+            # --- Существующие поля ---
             'journal_conference_name': self.journal_conference_name,
             'doi': self.doi,
             'issn': self.issn,
             'isbn': self.isbn,
             'quartile': self.quartile,
-            # 'number_volume_pages': self.number_volume_pages, # <- УДАЛИТЬ
-            'volume': self.volume,                           # <- ДОБАВИТЬ
-            'number': self.number,                           # <- ДОБАВИТЬ
-            'pages': self.pages,                             # <- ДОБАВИТЬ
+            'volume': self.volume,
+            'number': self.number,
+            'pages': self.pages,
             'department': self.department,
             'publisher': self.publisher,
             'publisher_location': self.publisher_location,
@@ -189,7 +195,6 @@ class Publication(db.Model):
             'circulation': self.circulation,
             'classification_code': self.classification_code,
             'notes': self.notes,
-            # --- Конец добавления новых полей ---
         }
 
 

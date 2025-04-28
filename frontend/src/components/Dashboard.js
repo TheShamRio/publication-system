@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { Line } from 'react-chartjs-2';
 import { Snackbar, Slide, Tooltip as MuiTooltip } from '@mui/material';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler } from 'chart.js';
@@ -262,6 +262,22 @@ function Dashboard() {
 	const [type, setType] = useState('article');
 	const [file, setFile] = useState(null);
 	const [error, setError] = useState('');
+	const [newIsVak, setNewIsVak] = useState(false);
+	const [newIsWoS, setNewIsWoS] = useState(false);
+	const [newIsScopus, setNewIsScopus] = useState(false);
+	// Добавляем новые состояния для булевых флагов VAK/WoS/Scopus (редактирование)
+	const [editIsVak, setEditIsVak] = useState(false);
+	const [editIsWoS, setEditIsWoS] = useState(false);
+	const [editIsScopus, setEditIsScopus] = useState(false);
+
+	// Добавляем состояния для управления блокировкой флагов в UI (создание)
+	const [disableNewVak, setDisableNewVak] = useState(false);
+	const [disableNewWoS, setDisableNewWoS] = useState(false);
+	const [disableNewScopus, setDisableNewScopus] = useState(false);
+	// Добавляем состояния для управления блокировкой флагов в UI (редактирование)
+	const [disableEditVak, setDisableEditVak] = useState(false);
+	const [disableEditWoS, setDisableEditWoS] = useState(false);
+	const [disableEditScopus, setDisableEditScopus] = useState(false);
 	const [success, setSuccess] = useState('');
 	const [openError, setOpenError] = useState(false);
 	const [openSuccess, setOpenSuccess] = useState(false);
@@ -399,6 +415,15 @@ function Dashboard() {
 		{ field: 'file', label: 'Файл публикации' },
 	];
 
+	const resetFlagsAndDisables = useCallback(() => {
+		console.log('Calling resetFlagsAndDisables');
+		setEditIsVak(false);
+		setEditIsWoS(false);
+		setEditIsScopus(false);
+		setDisableEditVak(false);
+		setDisableEditWoS(false);
+		setDisableEditScopus(false);
+	}, []);
 	const fetchPublicationHints = async () => {
 		setLoadingHints(true);
 		try {
@@ -1059,22 +1084,25 @@ function Dashboard() {
 		formData.append('year', parseInt(year, 10));
 		formData.append('type_id', selectedType.id); // Передаём type_id
 		formData.append('display_name_id', selectedDisplayNameId); // Передаём display_name_id
-		formData.append('journal_conference_name', journalConferenceName);
-		formData.append('doi', doi);
-		formData.append('issn', issn);
-		formData.append('isbn', isbn);
-		formData.append('quartile', quartile);
-		formData.append('volume', volume);                           // <- ДОБАВИТЬ
-		formData.append('number', number);                           // <- ДОБАВИТЬ
-		formData.append('pages', pages);
-		formData.append('department', department);
-		formData.append('publisher', publisher);
-		formData.append('publisher_location', publisherLocation);
-		// Отправляем как строки, бэкэнд разберется (или пустые строки)
+		formData.append('is_vak', newIsVak ? 'true' : 'false');
+		formData.append('is_wos', newIsWoS ? 'true' : 'false');
+		formData.append('is_scopus', newIsScopus ? 'true' : 'false');
+		formData.append('journal_conference_name', journalConferenceName || ''); // Отправляем пустую строку, если null/undefined
+		formData.append('doi', doi || '');
+		formData.append('issn', issn || '');
+		formData.append('isbn', isbn || '');
+		formData.append('quartile', quartile || '');
+		formData.append('volume', volume || '');
+		formData.append('number', number || '');
+		formData.append('pages', pages || '');
+		formData.append('department', department || '');
+		formData.append('publisher', publisher || '');
+		formData.append('publisher_location', publisherLocation || '');
+		// Для числовых полей, которые могут быть null, отправляем пустую строку если поле пустое в форме
 		formData.append('printed_sheets_volume', printedSheetsVolume || '');
 		formData.append('circulation', circulation || '');
-		formData.append('classification_code', classificationCode);
-		formData.append('notes', notes);
+		formData.append('classification_code', classificationCode || '');
+		formData.append('notes', notes || '');
 
 
 		try {
@@ -1128,6 +1156,12 @@ function Dashboard() {
 			setCirculation('');
 			setClassificationCode('');
 			setNotes('');
+			setNewIsVak(false);
+			setNewIsWoS(false);
+			setNewIsScopus(false);
+			setDisableNewVak(false);
+			setDisableNewWoS(false);
+			setDisableNewScopus(false);
 			await fetchData();
 		} catch (err) {
 			console.error('Ошибка загрузки файла:', err.response?.data || err);
@@ -1140,6 +1174,62 @@ function Dashboard() {
 			setSuccess('');
 		}
 	};
+
+	useEffect(() => {
+		// Этот эффект должен реагировать на изменение selectedDisplayNameId (для создания)
+		const handleTypeChange = (displayNameId, setStatus, setDisable) => {
+			const selectedType = publicationTypes.find(t => t.display_name_id === displayNameId);
+
+			// Сброс всех флагов и блокировок по умолчанию
+			setStatus({ vak: false, wos: false, scopus: false });
+			setDisable({ vak: false, wos: false, scopus: false });
+
+			if (selectedType && (selectedType.name.toLowerCase() === 'article' || selectedType.name.toLowerCase() === 'conference')) {
+				const displayName = selectedType.display_name.toLowerCase();
+				const newStatuses = { vak: false, wos: false, scopus: false };
+				const newDisables = { vak: false, wos: false, scopus: false };
+
+				// Логика определения ВАК/WoS/Scopus по тексту display_name
+				if (displayName.includes('вак') || displayName.includes('ринц')) { // Добавляем РИНЦ как возможный триггер для ВАК
+					newStatuses.vak = true;
+					newDisables.vak = true; // Блокируем отмену ВАК, если он "встроен" в тип
+				}
+				if (displayName.includes('wos') || displayName.includes('web of science')) {
+					newStatuses.wos = true;
+					newDisables.wos = true; // Блокируем отмену WoS
+				}
+				if (displayName.includes('scopus')) {
+					newStatuses.scopus = true;
+					newDisables.scopus = true; // Блокируем отмену Scopus
+				}
+
+				// Применяем вычисленные статусы и блокировки
+				setStatus({ vak: newStatuses.vak, wos: newStatuses.wos, scopus: newStatuses.scopus });
+				setDisable({ vak: newDisables.vak, wos: newDisables.wos, scopus: newDisables.scopus });
+
+				// Если тип из article/conference, но его display_name не содержит ВАК/WoS/Scopus,
+				// оставляем флаги false и НЕ блокируем возможность их включить вручную (блокировка false)
+			}
+			// Для других типов (monograph, book и т.д.) флаги остаются false и блокировки false (так как не отображаются)
+		};
+
+		if (selectedDisplayNameId) {
+			handleTypeChange(
+				selectedDisplayNameId,
+				(statuses) => { setNewIsVak(statuses.vak); setNewIsWoS(statuses.wos); setNewIsScopus(statuses.scopus); },
+				(disables) => { setDisableNewVak(disables.vak); setDisableNewWoS(disables.wos); setDisableNewScopus(disables.scopus); }
+			);
+		} else {
+			// Сбрасываем все, если тип не выбран (например, при очистке формы)
+			setNewIsVak(false);
+			setNewIsWoS(false);
+			setNewIsScopus(false);
+			setDisableNewVak(false);
+			setDisableNewWoS(false);
+			setDisableNewScopus(false);
+		}
+
+	}, [selectedDisplayNameId, publicationTypes]);
 
 	const handleBibtexUpload = async (e) => {
 		e.preventDefault();
@@ -1188,42 +1278,86 @@ function Dashboard() {
 
 	const handleEditClick = (publication) => {
 		console.log('Editing publication:', publication?.id || 'unknown');
-		if (!publication) return; // Добавим проверку
-
-		setEditPublication(publication);
-		setEditTitle(publication.title || '');
-
-		// --- Обновление инициализации авторов ---
-		if (publication.authors && publication.authors.length > 0) {
-			// Добавляем временный ID для каждого автора
-			setEditAuthorsList(publication.authors.map((author, index) => ({
-				...author,
-				id: author.id || `temp-${Date.now()}-${index}` // Используем существующий ID или генерируем временный
-			})));
-		} else {
-			// Если авторов нет, начинаем с одного пустого поля
-			setEditAuthorsList([{ id: Date.now(), name: '', is_employee: false }]);
+		// Добавляем проверку и на publicationTypes
+		if (!publication || !publicationTypes || publicationTypes.length === 0) {
+			console.error("Cannot edit publication, data or types missing:", { publication, publicationTypes });
+			setError("Не удалось загрузить данные для редактирования. Типы публикаций отсутствуют.");
+			setOpenError(true);
+			return;
 		}
 
-		setEditYear(publication?.year || '');
-		setEditSelectedDisplayNameId(publication?.display_name_id); // Пусть будет null или undefined
-		setEditFile(null);
+		setEditPublication(publication); // Сохраняем оригинальный объект
+		setEditTitle(publication.title || '');
+		setEditYear(publication.year || '');
+
+		// Authors
+		if (publication.authors && publication.authors.length > 0) {
+			setEditAuthorsList(publication.authors.map((author, index) => ({
+				...author,
+				// Генерируем стабильный временный ID на основе данных или индекса
+				id: author.id || `temp-edit-${publication.id}-${index}`
+			})));
+		} else {
+			setEditAuthorsList([{ id: `temp-edit-${Date.now()}-0`, name: '', is_employee: false }]);
+		}
+
+		// Other fields
 		setEditJournalConferenceName(publication?.journal_conference_name || '');
 		setEditDoi(publication?.doi || '');
 		setEditIssn(publication?.issn || '');
 		setEditIsbn(publication?.isbn || '');
 		setEditQuartile(publication?.quartile || '');
-		setEditVolume(publication?.volume || '');                           // <- ДОБАВИТЬ
-		setEditNumber(publication?.number || '');                           // <- ДОБАВИТЬ
+		setEditVolume(publication?.volume || '');
+		setEditNumber(publication?.number || '');
 		setEditPages(publication?.pages || '');
 		setEditDepartment(publication?.department || '');
 		setEditPublisher(publication?.publisher || '');
 		setEditPublisherLocation(publication?.publisher_location || '');
-		// Для числовых полей: конвертируем null/undefined в пустую строку для TextField
 		setEditPrintedSheetsVolume(publication?.printed_sheets_volume != null ? String(publication.printed_sheets_volume) : '');
 		setEditCirculation(publication?.circulation != null ? String(publication.circulation) : '');
 		setEditClassificationCode(publication?.classification_code || '');
 		setEditNotes(publication?.notes || '');
+		setEditFile(null);
+
+		// --- Инициализация флагов и блокировок ---
+		const currentType = publicationTypes.find(t => t.display_name_id === publication.display_name_id);
+
+		// 1. НАЧАЛЬНОЕ состояние checked берем из ДАННЫХ публикации
+		const initialIsVak = publication.is_vak || false;
+		const initialIsWoS = publication.is_wos || false; // Убедитесь что поле в БД is_wos
+		const initialIsScopus = publication.is_scopus || false;
+
+		setEditIsVak(initialIsVak);
+		setEditIsWoS(initialIsWoS);
+		setEditIsScopus(initialIsScopus);
+
+		// 2. НАЧАЛЬНОЕ состояние disabled определяем по ИСХОДНОМУ типу публикации
+		let initialDisableVak = false;
+		let initialDisableWoS = false;
+		let initialDisableScopus = false;
+
+		if (currentType && (currentType.name.toLowerCase() === 'article' || currentType.name.toLowerCase() === 'conference')) {
+			const displayName = currentType.display_name.toLowerCase();
+			initialDisableVak = displayName.includes('вак') || displayName.includes('ринц');
+			initialDisableWoS = displayName.includes('wos') || displayName.includes('web of science');
+			initialDisableScopus = displayName.includes('scopus');
+		}
+
+		setDisableEditVak(initialDisableVak);
+		setDisableEditWoS(initialDisableWoS);
+		setDisableEditScopus(initialDisableScopus);
+
+		// Устанавливаем ID типа ПОСЛЕ установки флагов/блокировок
+		setEditSelectedDisplayNameId(publication.display_name_id);
+
+		console.log('Initial edit state set:', {
+			id: publication.id,
+			typeId: publication.display_name_id,
+			vak: initialIsVak, wos: initialIsWoS, sco: initialIsScopus,
+			disVak: initialDisableVak, disWos: initialDisableWoS, disSco: initialDisableScopus
+		});
+
+
 		setOpenEditDialog(true);
 	};
 	const handleEditSubmit = async (e) => {
@@ -1261,21 +1395,24 @@ function Dashboard() {
 			data.append('year', parseInt(editYear, 10));
 			data.append('type_id', selectedType.id);
 			data.append('display_name_id', editSelectedDisplayNameId);
-			data.append('journal_conference_name', editJournalConferenceName);
-			data.append('doi', editDoi);
-			data.append('issn', editIssn);
-			data.append('isbn', editIsbn);
-			data.append('quartile', editQuartile);
-			data.append('volume', editVolume);                         // <- ДОБАВИТЬ
-			data.append('number', editNumber);                         // <- ДОБАВИТЬ
-			data.append('pages', editPages);
-			data.append('department', editDepartment);
-			data.append('publisher', editPublisher);
-			data.append('publisher_location', editPublisherLocation);
-			data.append('printed_sheets_volume', editPrintedSheetsVolume || ''); // Отправляем пустую строку, если null/undefined
-			data.append('circulation', editCirculation || ''); // Отправляем пустую строку, если null/undefined
-			data.append('classification_code', editClassificationCode);
-			data.append('notes', editNotes);
+			data.append('is_vak', editIsVak ? 'true' : 'false');
+			data.append('is_wos', editIsWoS ? 'true' : 'false');
+			data.append('is_scopus', editIsScopus ? 'true' : 'false');
+			data.append('journal_conference_name', editJournalConferenceName || '');
+			data.append('doi', editDoi || '');
+			data.append('issn', editIssn || '');
+			data.append('isbn', editIsbn || '');
+			data.append('quartile', editQuartile || '');
+			data.append('volume', editVolume || '');
+			data.append('number', editNumber || '');
+			data.append('pages', editPages || '');
+			data.append('department', editDepartment || '');
+			data.append('publisher', editPublisher || '');
+			data.append('publisher_location', editPublisherLocation || '');
+			data.append('printed_sheets_volume', editPrintedSheetsVolume || '');
+			data.append('circulation', editCirculation || '');
+			data.append('classification_code', editClassificationCode || '');
+			data.append('notes', editNotes || '');
 		} else {
 			data = {
 				title: editTitle.trim(),
@@ -1283,6 +1420,9 @@ function Dashboard() {
 				year: parseInt(editYear, 10),
 				type_id: selectedType.id,
 				display_name_id: editSelectedDisplayNameId,
+				is_vak: editIsVak,       // <-- Просто передаем булевы значения
+				is_wos: editIsWoS,       // <-- Просто передаем булевы значения
+				is_scopus: editIsScopus,   // <-- Просто передаем булевы значения
 				journal_conference_name: editJournalConferenceName || null, // Отправляем null для пустых необязательных полей
 				doi: editDoi || null,
 				issn: editIssn || null,
@@ -1356,9 +1496,83 @@ function Dashboard() {
 	};
 
 
+
+
+	useEffect(() => {
+		// Срабатывает при смене типа (editSelectedDisplayNameId) или открытии/закрытии диалога
+		console.log(`Edit flags useEffect Triggered. Dialog Open: ${openEditDialog}, Pub ID: ${editPublication?.id}, Selected Type ID: ${editSelectedDisplayNameId}`);
+
+		if (openEditDialog && editPublication && publicationTypes.length > 0 && editSelectedDisplayNameId) {
+			const selectedType = publicationTypes.find(t => t.display_name_id === editSelectedDisplayNameId);
+
+			if (!selectedType) {
+				console.warn("Selected type not found for ID:", editSelectedDisplayNameId);
+				return;
+			}
+
+			let isArticleOrConference = false;
+			let isVakImplied = false;
+			let isWoSImplied = false;
+			let isScopusImplied = false;
+
+			if (selectedType.name.toLowerCase() === 'article' || selectedType.name.toLowerCase() === 'conference') {
+				isArticleOrConference = true;
+				const displayNameLower = selectedType.display_name.toLowerCase();
+				isVakImplied = displayNameLower.includes('вак') || displayNameLower.includes('ринц');
+				isWoSImplied = displayNameLower.includes('wos') || displayNameLower.includes('web of science');
+				isScopusImplied = displayNameLower.includes('scopus');
+			}
+
+			// --- 1. Установить блокировку (disabled) на основе НОВОГО типа ---
+			console.log(`Setting disabled based on type (${selectedType.display_name}):`, { isVakImplied, isWoSImplied, isScopusImplied });
+			setDisableEditVak(isVakImplied);
+			setDisableEditWoS(isWoSImplied);
+			setDisableEditScopus(isScopusImplied);
+
+			// --- 2. Установить состояние checked на основе НОВОГО типа и ДАННЫХ ИСХОДНОЙ ПУБЛИКАЦИИ ---
+			if (isArticleOrConference) {
+				console.log('Setting checked state based on new type and original publication data:', {
+					newVak: isVakImplied ? true : (editPublication.is_vak || false),
+					newWos: isWoSImplied ? true : (editPublication.is_wos || false),
+					newSco: isScopusImplied ? true : (editPublication.is_scopus || false),
+					origVak: editPublication.is_vak, origWos: editPublication.is_wos, origSco: editPublication.is_scopus
+				});
+				// Эта логика ПЕРЕЗАПИСЫВАЕТ ручные клики при смене типа, обеспечивая "сброс"
+				setEditIsVak(isVakImplied ? true : (editPublication.is_vak || false));
+				setEditIsWoS(isWoSImplied ? true : (editPublication.is_wos || false)); // Проверьте имя is_wos
+				setEditIsScopus(isScopusImplied ? true : (editPublication.is_scopus || false));
+			} else {
+				// Если тип НЕ статья/конференция, ВСЕ флаги должны быть false.
+				console.log('Type is not Article/Conf, ensuring all flags are false');
+				setEditIsVak(false);
+				setEditIsWoS(false);
+				setEditIsScopus(false);
+			}
+
+		} else if (!openEditDialog) {
+			// При закрытии диалога - полный сброс через стабильную callback-функцию
+			console.log('Dialog closed, calling resetFlagsAndDisables');
+			resetFlagsAndDisables();
+		}
+
+		// Массив зависимостей: НЕ ВКЛЮЧАЕМ editIsVak, editIsWoS, editIsScopus
+	}, [
+		editSelectedDisplayNameId, // Главный триггер - смена типа
+		openEditDialog,            // Контекст (открыт/закрыт)
+		publicationTypes,          // Нужны для поиска типа
+		editPublication,           // Нужен для доступа к is_vak/wos/scopus исходной публикации
+		resetFlagsAndDisables      // Стабильная ссылка благодаря useCallback
+	]);
+
+	// Важно убедиться, что в handleEditClick происходит правильная начальная инициализация
+	// И также убедимся, что в handleEditCancel используется resetFlagsAndDisables
+
+
 	const handleEditAddAuthor = () => {
 		setEditAuthorsList([...editAuthorsList, { id: Date.now(), name: '', is_employee: false }]);
 	};
+
+
 
 	const handleEditAuthorChange = (index, field, value) => {
 		const updatedAuthors = [...editAuthorsList];
@@ -1395,21 +1609,24 @@ function Dashboard() {
 			data.append('year', parseInt(editYear, 10));
 			data.append('type_id', publicationTypes.find(t => t.display_name_id === editSelectedDisplayNameId)?.id);
 			data.append('display_name_id', editSelectedDisplayNameId);
-			data.append('journal_conference_name', editJournalConferenceName);
-			data.append('doi', editDoi);
-			data.append('issn', editIssn);
-			data.append('isbn', editIsbn);
-			data.append('quartile', editQuartile);
-			data.append('volume', editVolume);                         // <- ДОБАВИТЬ
-			data.append('number', editNumber);                         // <- ДОБАВИТЬ
-			data.append('pages', editPages);
-			data.append('department', editDepartment);
-			data.append('publisher', editPublisher);
-			data.append('publisher_location', editPublisherLocation);
+			data.append('is_vak', editIsVak ? 'true' : 'false');
+			data.append('is_wos', editIsWoS ? 'true' : 'false');
+			data.append('is_scopus', editIsScopus ? 'true' : 'false');
+			data.append('journal_conference_name', editJournalConferenceName || '');
+			data.append('doi', editDoi || '');
+			data.append('issn', editIssn || '');
+			data.append('isbn', editIsbn || '');
+			data.append('quartile', editQuartile || '');
+			data.append('volume', editVolume || '');
+			data.append('number', editNumber || '');
+			data.append('pages', editPages || '');
+			data.append('department', editDepartment || '');
+			data.append('publisher', editPublisher || '');
+			data.append('publisher_location', editPublisherLocation || '');
 			data.append('printed_sheets_volume', editPrintedSheetsVolume || '');
 			data.append('circulation', editCirculation || '');
-			data.append('classification_code', editClassificationCode);
-			data.append('notes', editNotes);
+			data.append('classification_code', editClassificationCode || '');
+			data.append('notes', editNotes || '');
 		} else {
 			data = {
 				title: editTitle.trim(),
@@ -1501,6 +1718,12 @@ function Dashboard() {
 		setEditCirculation('');
 		setEditClassificationCode('');
 		setEditNotes('');
+		setEditIsVak(false);
+		setEditIsWoS(false);
+		setEditIsScopus(false);
+		setDisableEditVak(false);
+		setDisableEditWoS(false);
+		setDisableEditScopus(false);
 	};
 
 	const handleDeleteClick = (publication) => {
@@ -2486,6 +2709,120 @@ function Dashboard() {
 														))
 													)}
 												</AppleTextField>
+
+												{/* --- Поля ВАК, WoS, Scopus (показываются только для Article/Conference) --- */}
+												{selectedDisplayNameId && publicationTypes.find(t => t.display_name_id === selectedDisplayNameId)?.name?.toLowerCase() === 'article' ||
+													selectedDisplayNameId && publicationTypes.find(t => t.display_name_id === selectedDisplayNameId)?.name?.toLowerCase() === 'conference' ? (
+													<Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+														<Typography variant="body2" sx={{ color: '#6E6E73', fontWeight: 500 }}>
+															Индексирование:
+														</Typography>
+														{/* ======================================= */}
+														{/* ВАК Icon/Button - Create (ОБНОВЛЕНО)   */}
+														{/* ======================================= */}
+														<MuiTooltip title={disableNewVak ? "Статус 'ВАК' установлен типом публикации" : (newIsVak ? "Снять статус ВАК" : "Установить статус ВАК")} arrow>
+															<IconButton
+																onClick={() => !disableNewVak && setNewIsVak(!newIsVak)}
+																disabled={disableNewVak}
+																sx={{
+																	// Применяем фон всегда, если newIsVak === true
+																	backgroundColor: newIsVak ? 'rgba(52, 199, 89, 0.15)' : 'transparent', // <-- Увеличили непрозрачность
+																	border: newIsVak ? '1px solid #34C759' : '1px solid #D1D1D6',
+																	p: 1,
+																	transition: 'all 0.2s ease-in-out',
+																	...(disableNewVak && {
+																		cursor: 'not-allowed',
+																		pointerEvents: 'none',
+																	}),
+																	// Hover применяется только если НЕ disabled
+																	...(!disableNewVak && {
+																		'&:hover': {
+																			backgroundColor: newIsVak ? 'rgba(52, 199, 89, 0.25)' : 'rgba(0, 0, 0, 0.04)', // Чуть темнее при ховере
+																			transform: 'scale(1.05)'
+																		},
+																	}),
+																}}
+																aria-label={newIsVak ? "Снять статус ВАК" : "Установить статус ВАК"}
+															>
+																<Typography variant="caption" sx={{
+																	fontWeight: 600,
+																	fontSize: '0.8rem',
+																	color: newIsVak ? '#34C759' : '#6E6E73' // Цвет текста Typography
+																}}>
+																	ВАК
+																</Typography>
+															</IconButton>
+														</MuiTooltip>
+														{/* ======================================= */}
+														{/* WoS Icon/Button - Create (ОБНОВЛЕНО)   */}
+														{/* ======================================= */}
+														<MuiTooltip title={disableNewWoS ? "Статус 'WoS' установлен типом публикации" : (newIsWoS ? "Снять статус WoS" : "Установить статус WoS")} arrow>
+															<IconButton
+																onClick={() => !disableNewWoS && setNewIsWoS(!newIsWoS)}
+																disabled={disableNewWoS}
+																sx={{
+																	backgroundColor: newIsWoS ? 'rgba(0, 113, 227, 0.15)' : 'transparent', // <-- Увеличили непрозрачность
+																	border: newIsWoS ? '1px solid #0071E3' : '1px solid #D1D1D6',
+																	p: 1,
+																	transition: 'all 0.2s ease-in-out',
+																	...(disableNewWoS && {
+																		cursor: 'not-allowed',
+																		pointerEvents: 'none',
+																	}),
+																	...(!disableNewWoS && {
+																		'&:hover': {
+																			backgroundColor: newIsWoS ? 'rgba(0, 113, 227, 0.25)' : 'rgba(0, 0, 0, 0.04)', // Чуть темнее при ховере
+																			transform: 'scale(1.05)'
+																		},
+																	}),
+																}}
+																aria-label={newIsWoS ? "Снять статус WoS" : "Установить статус WoS"}
+															>
+																<Typography variant="caption" sx={{
+																	fontWeight: 600,
+																	fontSize: '0.8rem',
+																	color: newIsWoS ? '#0071E3' : '#6E6E73' // Цвет текста Typography
+																}}>
+																	WoS
+																</Typography>
+															</IconButton>
+														</MuiTooltip>
+														{/* ========================================= */}
+														{/* Scopus Icon/Button - Create (ОБНОВЛЕНО) */}
+														{/* ========================================= */}
+														<MuiTooltip title={disableNewScopus ? "Статус 'Scopus' установлен типом публикации" : (newIsScopus ? "Снять статус Scopus" : "Установить статус Scopus")} arrow>
+															<IconButton
+																onClick={() => !disableNewScopus && setNewIsScopus(!newIsScopus)}
+																disabled={disableNewScopus}
+																sx={{
+																	backgroundColor: newIsScopus ? 'rgba(175, 82, 222, 0.15)' : 'transparent', // <-- Увеличили непрозрачность
+																	border: newIsScopus ? '1px solid #AF52DE' : '1px solid #D1D1D6',
+																	p: 1,
+																	transition: 'all 0.2s ease-in-out',
+																	...(disableNewScopus && {
+																		cursor: 'not-allowed',
+																		pointerEvents: 'none',
+																	}),
+																	...(!disableNewScopus && {
+																		'&:hover': {
+																			backgroundColor: newIsScopus ? 'rgba(175, 82, 222, 0.25)' : 'rgba(0, 0, 0, 0.04)', // Чуть темнее при ховере
+																			transform: 'scale(1.05)'
+																		},
+																	}),
+																}}
+																aria-label={newIsScopus ? "Снять статус Scopus" : "Установить статус Scopus"}
+															>
+																<Typography variant="caption" sx={{
+																	fontWeight: 600,
+																	fontSize: '0.8rem',
+																	color: newIsScopus ? '#AF52DE' : '#6E6E73' // Цвет текста Typography
+																}}>
+																	Scopus
+																</Typography>
+															</IconButton>
+														</MuiTooltip>
+													</Box>
+												) : null}
 												<AppleTextField
 													fullWidth
 													label="Название"
@@ -3587,12 +3924,13 @@ function Dashboard() {
 							fullWidth
 							select
 							label="Тип публикации"
-							value={editSelectedDisplayNameId}
+							value={editSelectedDisplayNameId || ''} // Убедимся, что значение не undefined/null
 							onChange={(e) => setEditSelectedDisplayNameId(e.target.value)}
 							margin="normal"
 							variant="outlined"
 							disabled={publicationTypes.length === 0}
 						>
+							{/* ... опции выбора типов ... */}
 							{publicationTypes.length === 0 ? (
 								<MenuItem value="" disabled>
 									Типы не доступны
@@ -3605,6 +3943,118 @@ function Dashboard() {
 								))
 							)}
 						</AppleTextField>
+
+						{/* --- Поля ВАК, WoS, Scopus для редактирования (показываются только для Article/Conference) --- */}
+						{editSelectedDisplayNameId && publicationTypes.find(t => t.display_name_id === editSelectedDisplayNameId)?.name?.toLowerCase() === 'article' ||
+							editSelectedDisplayNameId && publicationTypes.find(t => t.display_name_id === editSelectedDisplayNameId)?.name?.toLowerCase() === 'conference' ? (
+							<Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+								<Typography variant="body2" sx={{ color: '#6E6E73', fontWeight: 500 }}>
+									Индексирование:
+								</Typography>
+								{/* ======================================= */}
+								{/* ВАК Icon/Button - Edit (ОБНОВЛЕНО)     */}
+								{/* ======================================= */}
+								<MuiTooltip title={disableEditVak ? "Статус 'ВАК' установлен типом публикации" : (editIsVak ? "Снять статус ВАК" : "Установить статус ВАК")} arrow>
+									<IconButton
+										onClick={() => !disableEditVak && setEditIsVak(!editIsVak)}
+										disabled={disableEditVak}
+										sx={{
+											backgroundColor: editIsVak ? 'rgba(52, 199, 89, 0.15)' : 'transparent', // <-- Увеличили непрозрачность
+											border: editIsVak ? '1px solid #34C759' : '1px solid #D1D1D6',
+											p: 1,
+											transition: 'all 0.2s ease-in-out',
+											...(disableEditVak && {
+												cursor: 'not-allowed',
+												pointerEvents: 'none',
+											}),
+											...(!disableEditVak && {
+												'&:hover': {
+													backgroundColor: editIsVak ? 'rgba(52, 199, 89, 0.25)' : 'rgba(0, 0, 0, 0.04)', // Чуть темнее при ховере
+													transform: 'scale(1.05)'
+												},
+											}),
+										}}
+										aria-label={editIsVak ? "Снять статус ВАК" : "Установить статус ВАК"}
+									>
+										<Typography variant="caption" sx={{
+											fontWeight: 600,
+											fontSize: '0.8rem',
+											color: editIsVak ? '#34C759' : '#6E6E73' // Цвет текста Typography
+										}}>
+											ВАК
+										</Typography>
+									</IconButton>
+								</MuiTooltip>
+								{/* ======================================= */}
+								{/* WoS Icon/Button - Edit (ОБНОВЛЕНО)     */}
+								{/* ======================================= */}
+								<MuiTooltip title={disableEditWoS ? "Статус 'WoS' установлен типом публикации" : (editIsWoS ? "Снять статус WoS" : "Установить статус WoS")} arrow>
+									<IconButton
+										onClick={() => !disableEditWoS && setEditIsWoS(!editIsWoS)}
+										disabled={disableEditWoS}
+										sx={{
+											backgroundColor: editIsWoS ? 'rgba(0, 113, 227, 0.15)' : 'transparent', // <-- Увеличили непрозрачность
+											border: editIsWoS ? '1px solid #0071E3' : '1px solid #D1D1D6',
+											p: 1,
+											transition: 'all 0.2s ease-in-out',
+											...(disableEditWoS && {
+												cursor: 'not-allowed',
+												pointerEvents: 'none',
+											}),
+											...(!disableEditWoS && {
+												'&:hover': {
+													backgroundColor: editIsWoS ? 'rgba(0, 113, 227, 0.25)' : 'rgba(0, 0, 0, 0.04)', // Чуть темнее при ховере
+													transform: 'scale(1.05)'
+												},
+											}),
+										}}
+										aria-label={editIsWoS ? "Снять статус WoS" : "Установить статус WoS"}
+									>
+										<Typography variant="caption" sx={{
+											fontWeight: 600,
+											fontSize: '0.8rem',
+											color: editIsWoS ? '#0071E3' : '#6E6E73' // Цвет текста Typography
+										}}>
+											WoS
+										</Typography>
+									</IconButton>
+								</MuiTooltip>
+								{/* ========================================= */}
+								{/* Scopus Icon/Button - Edit (ОБНОВЛЕНО)   */}
+								{/* ========================================= */}
+								<MuiTooltip title={disableEditScopus ? "Статус 'Scopus' установлен типом публикации" : (editIsScopus ? "Снять статус Scopus" : "Установить статус Scopus")} arrow>
+									<IconButton
+										onClick={() => !disableEditScopus && setEditIsScopus(!editIsScopus)}
+										disabled={disableEditScopus}
+										sx={{
+											backgroundColor: editIsScopus ? 'rgba(175, 82, 222, 0.15)' : 'transparent', // <-- Увеличили непрозрачность
+											border: editIsScopus ? '1px solid #AF52DE' : '1px solid #D1D1D6',
+											p: 1,
+											transition: 'all 0.2s ease-in-out',
+											...(disableEditScopus && {
+												cursor: 'not-allowed',
+												pointerEvents: 'none',
+											}),
+											...(!disableEditScopus && {
+												'&:hover': {
+													backgroundColor: editIsScopus ? 'rgba(175, 82, 222, 0.25)' : 'rgba(0, 0, 0, 0.04)', // Чуть темнее при ховере
+													transform: 'scale(1.05)'
+												},
+											}),
+										}}
+										aria-label={editIsScopus ? "Снять статус Scopus" : "Установить статус Scopus"}
+									>
+										<Typography variant="caption" sx={{
+											fontWeight: 600,
+											fontSize: '0.8rem',
+											color: editIsScopus ? '#AF52DE' : '#6E6E73' // Цвет текста Typography
+										}}>
+											Scopus
+										</Typography>
+									</IconButton>
+								</MuiTooltip>
+							</Box>
+						) : null}
 						<AppleTextField
 							fullWidth
 							label="Название"
