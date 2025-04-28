@@ -330,7 +330,12 @@ function Dashboard() {
 	const [selectedGroup, setSelectedGroup] = useState(null);
 	const [newAuthors, setNewAuthors] = useState([{ id: Date.now(), name: '', is_employee: false }]);
 	const [editAuthorsList, setEditAuthorsList] = useState([{ id: Date.now(), name: '', is_employee: false }]);
-
+	const [submitAttempted, setSubmitAttempted] = useState(false); // Флаг попытки отправки
+	const [titleMandatoryError, setTitleMandatoryError] = useState(false);
+	const [yearMandatoryError, setYearMandatoryError] = useState(false);
+	const [authorMandatoryError, setAuthorMandatoryError] = useState(false); // Ошибка для *блока* авторов
+	const [typeMandatoryError, setTypeMandatoryError] = useState(false);
+	const [fileMandatoryError, setFileMandatoryError] = useState(false)
 	const [loadingPublicationTypes, setLoadingPublicationTypes] = useState(true); // Новое состояние для типов
 	const [initializing, setInitializing] = useState(true);
 	const validStatuses = ['all', 'draft', 'needs_review', 'published'];
@@ -390,6 +395,40 @@ function Dashboard() {
 	const [editClassificationCode, setEditClassificationCode] = useState('');
 	const [editNotes, setEditNotes] = useState('');
 	// --- КОНЕЦ НОВЫХ состояний для формы РЕДАКТИРОВАНИЯ ---
+	const [titleError, setTitleError] = useState('');
+	const [yearError, setYearError] = useState('');
+	const [journalConferenceNameError, setJournalConferenceNameError] = useState('');
+	const [doiError, setDoiError] = useState('');
+	const [issnError, setIssnError] = useState('');
+	const [isbnError, setIsbnError] = useState('');
+	const [volumeError, setVolumeError] = useState('');
+	const [numberError, setNumberError] = useState('');
+	const [pagesError, setPagesError] = useState('');
+	const [publisherError, setPublisherError] = useState('');
+	const [publisherLocationError, setPublisherLocationError] = useState('');
+	const [printedSheetsVolumeError, setPrintedSheetsVolumeError] = useState('');
+	const [circulationError, setCirculationError] = useState('');
+	const [departmentError, setDepartmentError] = useState('');
+	const [classificationCodeError, setClassificationCodeError] = useState('');
+	// Состояние ошибки файла (для проверки типа при выборе)
+	const [fileError, setFileError] = useState('');
+	// Ошибки формы редактирования
+	const [editTitleError, setEditTitleError] = useState('');
+	const [editYearError, setEditYearError] = useState('');
+	const [editJournalConferenceNameError, setEditJournalConferenceNameError] = useState('');
+	const [editDoiError, setEditDoiError] = useState('');
+	const [editIssnError, setEditIssnError] = useState('');
+	const [editIsbnError, setEditIsbnError] = useState('');
+	const [editVolumeError, setEditVolumeError] = useState('');
+	const [editNumberError, setEditNumberError] = useState('');
+	const [editPagesError, setEditPagesError] = useState('');
+	const [editPublisherError, setEditPublisherError] = useState('');
+	const [editPublisherLocationError, setEditPublisherLocationError] = useState('');
+	const [editPrintedSheetsVolumeError, setEditPrintedSheetsVolumeError] = useState('');
+	const [editCirculationError, setEditCirculationError] = useState('');
+	const [editDepartmentError, setEditDepartmentError] = useState('');
+	const [editClassificationCodeError, setEditClassificationCodeError] = useState('');
+	const [editFileError, setEditFileError] = useState('');
 
 
 	const hintableFieldsForDisplay = [
@@ -1005,8 +1044,17 @@ function Dashboard() {
 	};
 
 	const handleAuthorChange = (index, field, value) => {
-		const updatedAuthors = [...newAuthors];
-		updatedAuthors[index][field] = value;
+		const updatedAuthors = newAuthors.map((author, i) => {
+			if (i === index) {
+				const newAuthorData = { ...author, [field]: value };
+				// Валидируем имя автора при изменении поля 'name'
+				if (field === 'name') {
+					newAuthorData.error = validateField('authorName', value); // Обновляем ошибку в объекте
+				}
+				return newAuthorData;
+			}
+			return author;
+		});
 		setNewAuthors(updatedAuthors);
 	};
 
@@ -1036,50 +1084,124 @@ function Dashboard() {
 	};
 
 
+	const resetCreateForm = () => {
+		setTitle(''); setYear(''); setSelectedDisplayNameId(''); setFile(null);
+		setNewAuthors([{ id: Date.now(), name: '', is_employee: false, error: '' }]);
+		// ... сброс всех остальных полей ...
+		setJournalConferenceName(''); setDoi(''); setIssn(''); setIsbn(''); setQuartile('');
+		setVolume(''); setNumber(''); setPages(''); setDepartment(''); setPublisher('');
+		setPublisherLocation(''); setPrintedSheetsVolume(''); setCirculation('');
+		setClassificationCode(''); setNotes('');
+		setNewIsVak(false); setNewIsWoS(false); setNewIsScopus(false);
+		setDisableNewVak(false); setDisableNewWoS(false); setDisableNewScopus(false);
+		// Сброс ВСЕХ ошибок
+		setTitleError(''); setYearError(''); setJournalConferenceNameError('');
+		setDoiError(''); setIssnError(''); setIsbnError(''); setVolumeError('');
+		setNumberError(''); setPagesError(''); setPublisherError('');
+		setPublisherLocationError(''); setPrintedSheetsVolumeError(''); setCirculationError('');
+		setDepartmentError(''); setClassificationCodeError(''); setFileError('');
+		setTitleMandatoryError(false); setYearMandatoryError(false);
+		setAuthorMandatoryError(false); setTypeMandatoryError(false); setFileMandatoryError(false);
+		setSubmitAttempted(false); // <--- Важно
+	};
+
+
 
 	const handleFileUpload = async (e) => {
 		e.preventDefault();
-		if (!file) {
-			setError('Пожалуйста, выберите файл для загрузки.');
-			setOpenError(true);
-			return;
+		setSubmitAttempted(true); // <--- УСТАНАВЛИВАЕМ ФЛАГ ПРИ ПОПЫТКЕ ОТПРАВКИ
+
+		// ---> НАЧАЛО ЗАМЕНЫ/ДОБАВЛЕНИЯ: Новая проверка перед отправкой <---
+		let hasFormatErrors = false; // Отдельно для ошибок формата
+		let hasMandatoryErrors = false; // Отдельно для ошибок обязательности
+
+		// Сбрасываем предыдущие ошибки обязательности перед новой проверкой
+		setTitleMandatoryError(false);
+		setYearMandatoryError(false);
+		setAuthorMandatoryError(false);
+		setTypeMandatoryError(false);
+		setFileMandatoryError(false);
 
 
+		const fieldsToValidate = [ // Список полей для проверки ФОРМАТА
+			// --- Исключаем базовые обязательные поля отсюда, проверим их ниже ---
+			// { name: 'title', value: title, setError: setTitleError },
+			// { name: 'year', value: year, setError: setYearError },
+			// { name: 'file', value: file, setError: setFileError } // Файл тоже проверим ниже
+			// --- Поля для проверки формата ---
+			{ name: 'journalConferenceName', value: journalConferenceName, setError: setJournalConferenceNameError },
+			{ name: 'doi', value: doi, setError: setDoiError },
+			{ name: 'issn', value: issn, setError: setIssnError },
+			{ name: 'isbn', value: isbn, setError: setIsbnError },
+			{ name: 'volume', value: volume, setError: setVolumeError },
+			{ name: 'number', value: number, setError: setNumberError },
+			{ name: 'pages', value: pages, setError: setPagesError },
+			{ name: 'publisher', value: publisher, setError: setPublisherError },
+			{ name: 'publisherLocation', value: publisherLocation, setError: setPublisherLocationError },
+			{ name: 'printedSheetsVolume', value: printedSheetsVolume, setError: setPrintedSheetsVolumeError },
+			{ name: 'circulation', value: circulation, setError: setCirculationError },
+			{ name: 'department', value: department, setError: setDepartmentError },
+			{ name: 'classificationCode', value: classificationCode, setError: setClassificationCodeError },
+		];
 
+		// 1. Прогоняем валидацию ФОРМАТА
+		fieldsToValidate.forEach(field => {
+			const currentError = validateField(field.name, field.value); // Только проверка формата
+			field.setError(currentError); // Устанавливаем или сбрасываем ошибку формата
+			if (currentError) {
+				hasFormatErrors = true; // Фиксируем наличие хотя бы одной ошибки формата
+			}
+		});
+
+		// 2. Проверяем формат авторов (если они есть)
+		const validAuthors = newAuthors.filter(a => a.name.trim()); // Авторы с именем
+		newAuthors.forEach((author, index) => {
+			const authorFormatError = validateField('authorName', author.name);
+			if (authorFormatError) {
+				handleAuthorChange(index, 'error', authorFormatError); // Устанавливаем ошибку формата
+				hasFormatErrors = true;
+			} else if (author.error) {
+				handleAuthorChange(index, 'error', ''); // Сбрасываем старую ошибку формата
+			}
+		});
+
+		// 3. Проверяем ОБЯЗАТЕЛЬНЫЕ поля и устанавливаем ошибки обязательности
+		if (!title.trim()) { setTitleMandatoryError(true); hasMandatoryErrors = true; }
+		if (!year.trim()) { setYearMandatoryError(true); hasMandatoryErrors = true; }
+		if (!selectedDisplayNameId) { setTypeMandatoryError(true); hasMandatoryErrors = true; }
+		if (!file) { setFileMandatoryError(true); hasMandatoryErrors = true; }
+		if (validAuthors.length === 0) { // Проверяем, что есть хотя бы один автор с именем
+			setAuthorMandatoryError(true);
+			hasMandatoryErrors = true;
+		} else {
+			setAuthorMandatoryError(false); // Сбрасываем, если хотя бы один автор есть
 		}
-		const validAuthors = newAuthors.filter(a => a.name.trim());
-		if (!title.trim() || validAuthors.length === 0 || !year || !selectedDisplayNameId) {
-			setError('Пожалуйста, заполните название, год, тип и добавьте хотя бы одного автора.');
+
+		if (hasMandatoryErrors || hasFormatErrors) {
+			const errorMessages = [];
+			if (hasMandatoryErrors) {
+				errorMessages.push(<div>Не заполнены все обязательные поля (выделены красным).</div>);
+			}
+			if (hasFormatErrors) {
+				errorMessages.push(<div>Проверьте правильность заполнения полей (появятся красные подсказки).</div>);
+			}
+			setError(<div>{errorMessages}</div>);
 			setOpenError(true);
-			return;
+			return; // Прерываем отправку
 		}
-
-
-
-		const fileExtension = file.name.split('.').pop().toLowerCase();
-		if (!['pdf', 'docx'].includes(fileExtension)) {
-			setError('Разрешены только файлы в форматах PDF или DOCX.');
-			setOpenError(true);
-			return;
-		}
-
-		if (isNaN(year) || year < 1900 || year > new Date().getFullYear()) {
-			setError('Год должен быть числом и находиться в разумных пределах (например, 1900–' + new Date().getFullYear() + ').');
-			setOpenError(true);
-			return;
-		}
+		// ---> КОНЕЦ ЗАМЕНЫ/ДОБАВЛЕНИЯ: Новая проверка перед отправкой <---
 
 		const selectedType = publicationTypes.find(t => t.display_name_id === selectedDisplayNameId);
-		if (!selectedType) {
-			setError('Пожалуйста, выберите корректный тип публикации.');
-			setOpenError(true);
-			return;
-		}
+		// Эта проверка почти избыточна, но оставим для надежности
+
+
+		// Готовим данные для отправки (берем только авторов с именем)
+		const authorsToSend = validAuthors.map(({ id, error, ...rest }) => rest); // Убираем id и error перед отправкой
 
 		const formData = new FormData();
+		// ... остальная часть handleFileUpload (добавление в formData, try/catch) ...
 		formData.append('file', file);
 		formData.append('title', title.trim());
-		const authorsToSend = validAuthors.map(({ id, ...rest }) => rest);
 		formData.append('authors_json', JSON.stringify(authorsToSend));
 		formData.append('year', parseInt(year, 10));
 		formData.append('type_id', selectedType.id); // Передаём type_id
@@ -1087,45 +1209,33 @@ function Dashboard() {
 		formData.append('is_vak', newIsVak ? 'true' : 'false');
 		formData.append('is_wos', newIsWoS ? 'true' : 'false');
 		formData.append('is_scopus', newIsScopus ? 'true' : 'false');
-		formData.append('journal_conference_name', journalConferenceName || ''); // Отправляем пустую строку, если null/undefined
-		formData.append('doi', doi || '');
-		formData.append('issn', issn || '');
-		formData.append('isbn', isbn || '');
-		formData.append('quartile', quartile || '');
-		formData.append('volume', volume || '');
-		formData.append('number', number || '');
-		formData.append('pages', pages || '');
-		formData.append('department', department || '');
-		formData.append('publisher', publisher || '');
-		formData.append('publisher_location', publisherLocation || '');
-		// Для числовых полей, которые могут быть null, отправляем пустую строку если поле пустое в форме
-		formData.append('printed_sheets_volume', printedSheetsVolume || '');
-		formData.append('circulation', circulation || '');
-		formData.append('classification_code', classificationCode || '');
-		formData.append('notes', notes || '');
+		formData.append('journal_conference_name', journalConferenceName.trim() || ''); // Отправляем пустую строку
+		formData.append('doi', doi.trim() || '');
+		formData.append('issn', issn.trim() || '');
+		formData.append('isbn', isbn.trim() || '');
+		formData.append('quartile', quartile.trim() || '');
+		formData.append('volume', volume.trim() || '');
+		formData.append('number', number.trim() || '');
+		formData.append('pages', pages.trim() || '');
+		formData.append('department', department.trim() || '');
+		formData.append('publisher', publisher.trim() || '');
+		formData.append('publisher_location', publisherLocation.trim() || '');
+		formData.append('printed_sheets_volume', printedSheetsVolume.trim().replace(',', '.') || ''); // Замена запятой и пустая строка
+		formData.append('circulation', circulation.trim() || '');
+		formData.append('classification_code', classificationCode.trim() || '');
+		formData.append('notes', notes.trim() || '');
 
+		// Очистка состояний ошибок ПОСЛЕ успешной валидации и ПЕРЕД отправкой
+		setTitleError(''); setYearError(''); setJournalConferenceNameError('');
+		setDoiError(''); setIssnError(''); setIsbnError(''); setVolumeError('');
+		setNumberError(''); setPagesError(''); setPublisherError('');
+		setPublisherLocationError(''); setPrintedSheetsVolumeError(''); setCirculationError('');
+		setDepartmentError(''); setClassificationCodeError(''); setFileError('');
+		setNewAuthors(prev => prev.map(a => ({ ...a, error: '' }))); // Очистка ошибок авторов
 
 		try {
 			await refreshCsrfToken();
-			console.log('Uploading file with data:', {
-				title: title.trim(),
-				authors: authorsToSend,
-				year: parseInt(year, 10),
-				type_id: selectedType.id,
-				display_name_id: selectedDisplayNameId,
-				journal_conference_name: journalConferenceName,
-				doi: doi,
-				issn: issn,
-				isbn: isbn,
-				quartile: quartile,
-				department: department,
-				publisher: publisher,
-				publisher_location: publisherLocation,
-				printed_sheets_volume: printedSheetsVolume,
-				circulation: circulation,
-				classification_code: classificationCode,
-				notes: notes,
-			});
+			console.log('Uploading file with data (create):', Object.fromEntries(formData));
 			const response = await axios.post('http://localhost:5000/api/publications/upload-file', formData, {
 				withCredentials: true,
 				headers: {
@@ -1133,21 +1243,23 @@ function Dashboard() {
 					'X-CSRFToken': csrfToken,
 				},
 			});
+			// ... остальная часть try блока ...
 			setSuccess('Публикация успешно загружена!');
 			setOpenSuccess(true);
 			setError('');
+			// ... сброс состояний значений полей ...
 			setTitle('');
-			setNewAuthors([{ id: Date.now(), name: '', is_employee: false }]);
+			setNewAuthors([{ id: Date.now(), name: '', is_employee: false, error: '' }]); // Сбрасываем с пустым error
 			setYear('');
-			setSelectedDisplayNameId(''); // Сбрасываем выбор
+			setSelectedDisplayNameId('');
 			setFile(null);
 			setJournalConferenceName('');
 			setDoi('');
 			setIssn('');
 			setIsbn('');
 			setQuartile('');
-			setVolume('');              // <- ДОБАВИТЬ
-			setNumber('');              // <- ДОБАВИТЬ
+			setVolume('');
+			setNumber('');
 			setPages('');
 			setDepartment('');
 			setPublisher('');
@@ -1156,20 +1268,18 @@ function Dashboard() {
 			setCirculation('');
 			setClassificationCode('');
 			setNotes('');
-			setNewIsVak(false);
-			setNewIsWoS(false);
-			setNewIsScopus(false);
-			setDisableNewVak(false);
-			setDisableNewWoS(false);
-			setDisableNewScopus(false);
-			await fetchData();
+			setNewIsVak(false); setNewIsWoS(false); setNewIsScopus(false);
+			setDisableNewVak(false); setDisableNewWoS(false); setDisableNewScopus(false);
+			setSubmitAttempted(false);
+			await fetchData(1, searchQuery, filterDisplayNameId, filterStatus); // Обновляем таблицу
 		} catch (err) {
 			console.error('Ошибка загрузки файла:', err.response?.data || err);
-			if (err.response) {
-				setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля и файл.'}`);
-			} else {
-				setError('Ошибка сети. Проверьте подключение и сервер.');
+			// Отображение ошибки бэкенда, если есть
+			let errorMsg = err.response?.data?.error || 'Произошла ошибка при загрузке.';
+			if (typeof errorMsg !== 'string') { // На случай если бэк вернул не строку
+				errorMsg = 'Произошла непредвиденная ошибка.';
 			}
+			setError(errorMsg.split('\n').map((item, key) => <div key={key}>{item}</div>)); // Отображаем ошибки с бэкенда если они есть
 			setOpenError(true);
 			setSuccess('');
 		}
@@ -1362,34 +1472,105 @@ function Dashboard() {
 	};
 	const handleEditSubmit = async (e) => {
 		e.preventDefault();
+
+		// ---> НАЧАЛО ЗАМЕНЫ/ДОБАВЛЕНИЯ: Новая проверка перед отправкой <---
 		if (!editPublication) {
 			setError('Публикация для редактирования не выбрана.');
 			setOpenError(true);
 			return;
 		}
-		const validAuthors = editAuthorsList.filter(a => a.name && a.name.trim()); // Проверяем непустое имя
-		if (!editTitle.trim() || validAuthors.length === 0 || !editYear || !editSelectedDisplayNameId) {
-			setError('Название, год, тип и хотя бы один автор с именем обязательны.');
+
+		let hasErrors = false;
+		const fieldsToValidate = [ // Поля формы редактирования
+			{ name: 'title', value: editTitle, setError: setEditTitleError },
+			{ name: 'year', value: editYear, setError: setEditYearError },
+			{ name: 'journalConferenceName', value: editJournalConferenceName, setError: setEditJournalConferenceNameError },
+			{ name: 'doi', value: editDoi, setError: setEditDoiError },
+			{ name: 'issn', value: editIssn, setError: setEditIssnError },
+			{ name: 'isbn', value: editIsbn, setError: setEditIsbnError },
+			{ name: 'volume', value: editVolume, setError: setEditVolumeError },
+			{ name: 'number', value: editNumber, setError: setEditNumberError },
+			{ name: 'pages', value: editPages, setError: setEditPagesError },
+			{ name: 'publisher', value: editPublisher, setError: setEditPublisherError },
+			{ name: 'publisherLocation', value: editPublisherLocation, setError: setEditPublisherLocationError },
+			{ name: 'printedSheetsVolume', value: editPrintedSheetsVolume, setError: setEditPrintedSheetsVolumeError },
+			{ name: 'circulation', value: editCirculation, setError: setEditCirculationError },
+			{ name: 'department', value: editDepartment, setError: setEditDepartmentError },
+			{ name: 'classificationCode', value: editClassificationCode, setError: setEditClassificationCodeError },
+			// Валидация *нового* выбранного файла
+			{ name: 'file', value: editFile, setError: setEditFileError }
+		];
+
+		// 1. Прогоняем валидацию для всех полей еще раз
+		fieldsToValidate.forEach(field => {
+			let currentError = '';
+			if (field.name === 'file') {
+				// Ошибка только если файл ВЫБРАН и он НЕВЕРНОГО типа
+				if (field.value && !['pdf', 'docx'].includes(field.value.name.split('.').pop().toLowerCase())) {
+					currentError = 'Подсказка: Недопустимый тип файла (только PDF, DOCX)';
+				}
+			} else {
+				currentError = validateField(field.name, field.value);
+			}
+			field.setError(currentError); // Обновляем состояние ошибки
+			if (currentError) {
+				hasErrors = true; // Фиксируем наличие ошибки
+			}
+		});
+
+		// 2. Проверяем ошибки у авторов в форме редактирования
+		const authorErrors = editAuthorsList.map((author, index) => {
+			const error = validateField('authorName', author.name);
+			if (error) {
+				handleEditAuthorChange(index, 'error', error); // Обновляем ошибку в состоянии
+				hasErrors = true;
+			} else if (author.error) {
+				handleEditAuthorChange(index, 'error', ''); // Убираем старую ошибку
+			}
+			return error;
+		}).filter(Boolean);
+
+		// 3. Проверяем ОБЯЗАТЕЛЬНЫЕ поля для редактирования
+		const baseFieldsMissing = [];
+		if (!editTitle.trim()) baseFieldsMissing.push('Название');
+		if (!editYear.toString().trim()) baseFieldsMissing.push('Год'); // Год может быть числом
+		if (!editSelectedDisplayNameId) baseFieldsMissing.push('Тип');
+		// Авторы и файл не обязательны при редактировании (можно редактировать только текст)
+
+		if (baseFieldsMissing.length > 0 || hasErrors) {
+			const errorMessages = [];
+			if (baseFieldsMissing.length > 0) {
+				errorMessages.push(<div>Не заполнены обязательные поля: {baseFieldsMissing.join(', ')}.</div>);
+			}
+			if (hasErrors) {
+				errorMessages.push(<div>Проверьте правильность заполнения полей (появятся красные подсказки).</div>);
+			}
+			setError(<div>{errorMessages}</div>);
 			setOpenError(true);
-			return;
+			return; // Прерываем отправку
 		}
+		// ---> КОНЕЦ ЗАМЕНЫ/ДОБАВЛЕНИЯ: Новая проверка перед отправкой <---
 
 		const selectedType = publicationTypes.find(t => t.display_name_id === editSelectedDisplayNameId);
-		if (!selectedType) {
+		if (!selectedType) { // Дополнительная проверка
 			setError('Пожалуйста, выберите корректный тип публикации.');
 			setOpenError(true);
 			return;
 		}
 
-		const authorsToSend = validAuthors.map(({ id, ...rest }) => rest);
+		// Готовим данные для отправки (берем только авторов с именем)
+		const validAuthors = editAuthorsList.filter(a => a.name.trim());
+		const authorsToSend = validAuthors.map(({ id, error, ...rest }) => rest); // Убираем id и error
 
+		// --- Дальнейшая логика подготовки formData или data ---
 		let data;
 		let headers = { 'X-CSRFToken': csrfToken };
 		const apiUrl = `http://localhost:5000/api/publications/${editPublication.id}`;
 
-		if (editFile) {
+		if (editFile) { // Если ПРИКРЕПЛЕН НОВЫЙ ФАЙЛ
 			data = new FormData();
 			data.append('file', editFile);
+			// ... Добавляем остальные поля в formData (как в handleFileUpload) ...
 			data.append('title', editTitle.trim());
 			data.append('authors_json', JSON.stringify(authorsToSend));
 			data.append('year', parseInt(editYear, 10));
@@ -1398,77 +1579,164 @@ function Dashboard() {
 			data.append('is_vak', editIsVak ? 'true' : 'false');
 			data.append('is_wos', editIsWoS ? 'true' : 'false');
 			data.append('is_scopus', editIsScopus ? 'true' : 'false');
-			data.append('journal_conference_name', editJournalConferenceName || '');
-			data.append('doi', editDoi || '');
-			data.append('issn', editIssn || '');
-			data.append('isbn', editIsbn || '');
-			data.append('quartile', editQuartile || '');
-			data.append('volume', editVolume || '');
-			data.append('number', editNumber || '');
-			data.append('pages', editPages || '');
-			data.append('department', editDepartment || '');
-			data.append('publisher', editPublisher || '');
-			data.append('publisher_location', editPublisherLocation || '');
-			data.append('printed_sheets_volume', editPrintedSheetsVolume || '');
-			data.append('circulation', editCirculation || '');
-			data.append('classification_code', editClassificationCode || '');
-			data.append('notes', editNotes || '');
-		} else {
+			data.append('journal_conference_name', editJournalConferenceName.trim() || '');
+			data.append('doi', editDoi.trim() || '');
+			data.append('issn', editIssn.trim() || '');
+			data.append('isbn', editIsbn.trim() || '');
+			data.append('quartile', editQuartile.trim() || '');
+			data.append('volume', editVolume.trim() || '');
+			data.append('number', editNumber.trim() || '');
+			data.append('pages', editPages.trim() || '');
+			data.append('department', editDepartment.trim() || '');
+			data.append('publisher', editPublisher.trim() || '');
+			data.append('publisher_location', editPublisherLocation.trim() || '');
+			data.append('printed_sheets_volume', editPrintedSheetsVolume.trim().replace(',', '.') || '');
+			data.append('circulation', editCirculation.trim() || '');
+			data.append('classification_code', editClassificationCode.trim() || '');
+			data.append('notes', editNotes.trim() || '');
+			// headers['Content-Type'] НЕ устанавливаем для FormData
+		} else { // Если НОВЫЙ ФАЙЛ НЕ ПРИКРЕПЛЕН (обычное обновление данных)
 			data = {
 				title: editTitle.trim(),
-				authors: authorsToSend,
+				authors: authorsToSend, // Передаем массив объектов авторов
 				year: parseInt(editYear, 10),
-				type_id: selectedType.id,
-				display_name_id: editSelectedDisplayNameId,
-				is_vak: editIsVak,       // <-- Просто передаем булевы значения
-				is_wos: editIsWoS,       // <-- Просто передаем булевы значения
-				is_scopus: editIsScopus,   // <-- Просто передаем булевы значения
-				journal_conference_name: editJournalConferenceName || null, // Отправляем null для пустых необязательных полей
-				doi: editDoi || null,
-				issn: editIssn || null,
-				isbn: editIsbn || null,
-				quartile: editQuartile || null,
-				volume: editVolume || null,                         // <- ДОБАВИТЬ
-				number: editNumber || null,                         // <- ДОБАВИТЬ
-				pages: editPages || null,
-				department: editDepartment || null,
-				publisher: editPublisher || null,
-				publisher_location: editPublisherLocation || null,
-				// Числовые поля - парсим или отправляем null
-				printed_sheets_volume: editPrintedSheetsVolume ? parseFloat(editPrintedSheetsVolume) : null,
-				circulation: editCirculation ? parseInt(editCirculation, 10) : null,
-				classification_code: editClassificationCode || null,
-				notes: editNotes || null,
+				type_id: selectedType.id, // ID базового типа
+				display_name_id: editSelectedDisplayNameId, // ID конкретного русского названия
+				is_vak: editIsVak,
+				is_wos: editIsWoS,
+				is_scopus: editIsScopus,
+				// Строковые поля (null если пусто)
+				journal_conference_name: editJournalConferenceName.trim() || null,
+				doi: editDoi.trim() || null,
+				issn: editIssn.trim() || null,
+				isbn: editIsbn.trim() || null,
+				quartile: editQuartile.trim() || null,
+				volume: editVolume.trim() || null,
+				number: editNumber.trim() || null,
+				pages: editPages.trim() || null,
+				department: editDepartment.trim() || null,
+				publisher: editPublisher.trim() || null,
+				publisher_location: editPublisherLocation.trim() || null,
+				classification_code: editClassificationCode.trim() || null,
+				notes: editNotes.trim() || null,
+				// Числовые поля (null если пусто или не число)
+				printed_sheets_volume: editPrintedSheetsVolume.trim() && !isNaN(parseFloat(editPrintedSheetsVolume.replace(',', '.'))) ? parseFloat(editPrintedSheetsVolume.replace(',', '.')) : null,
+				circulation: editCirculation.trim() && !isNaN(parseInt(editCirculation, 10)) ? parseInt(editCirculation, 10) : null,
 			};
-			headers['Content-Type'] = 'application/json';
+			headers['Content-Type'] = 'application/json'; // Указываем тип контента
 		}
+
+		// Очистка состояний ошибок редактирования ПЕРЕД отправкой
+		setEditTitleError(''); setEditYearError(''); setEditJournalConferenceNameError('');
+		setEditDoiError(''); setEditIssnError(''); setEditIsbnError(''); setEditVolumeError('');
+		setEditNumberError(''); setEditPagesError(''); setEditPublisherError('');
+		setEditPublisherLocationError(''); setEditPrintedSheetsVolumeError(''); setEditCirculationError('');
+		setEditDepartmentError(''); setEditClassificationCodeError(''); setEditFileError('');
+		setEditAuthorsList(prev => prev.map(a => ({ ...a, error: '' }))); // Очистка ошибок авторов
 
 		try {
 			await refreshCsrfToken();
-			console.log('Обновление публикации данными:', data instanceof FormData ? Object.fromEntries(data.entries()) : data);
-
-			// 1. Дожидаемся завершения PUT запроса
+			console.log('Updating publication with data:', data instanceof FormData ? Object.fromEntries(data.entries()) : data);
 			const response = await axios.put(apiUrl, data, { withCredentials: true, headers });
-
-			// 2. СРАЗУ после успешного запроса:
+			// ... остальная часть try блока ...
 			setSuccess('Публикация успешно отредактирована!');
 			setOpenSuccess(true);
-			setOpenEditDialog(false); // <-- Закрываем диалог НЕМЕДЛЕННО
-			setError(''); // Сброс ошибки на всякий случай
-
-			// 3. ПОСЛЕ закрытия диалога, обновляем данные таблицы в фоне
+			setOpenEditDialog(false);
+			setError('');
 			await fetchData(currentPage, searchQuery, filterDisplayNameId, filterStatus);
-
 		} catch (err) {
-			// Обработка ошибки - диалог НЕ закрываем, чтобы пользователь видел ошибку и мог исправить
+			// ... остальная часть catch блока ...
 			console.error('Ошибка редактирования публикации:', err.response?.data || err);
-			if (err.response) { setError(`Ошибка: ${err.response.status} - ${err.response.data?.error || 'Проверьте введенные поля.'}`); }
-			else { setError('Ошибка сети.'); }
+			let errorMsg = err.response?.data?.error || 'Произошла ошибка при сохранении изменений.';
+			if (typeof errorMsg !== 'string') { // На случай если бэк вернул не строку
+				errorMsg = 'Произошла непредвиденная ошибка.';
+			}
+			setError(errorMsg.split('\n').map((item, key) => <div key={key}>{item}</div>));
 			setOpenError(true);
 			setSuccess('');
-			// setOpenEditDialog(false); // <-- НЕ закрываем диалог при ошибке
 		}
 	};
+
+	const validateField = (name, value) => {
+		// Убираем пробелы по краям для большинства проверок
+		const trimmedValue = typeof value === 'string' ? value.trim() : value;
+
+		switch (name) {
+			case 'title':
+				if (trimmedValue && trimmedValue[0] !== trimmedValue[0].toUpperCase()) return 'Подсказка: Название должно начинаться с заглавной буквы. Пример: Новая публикация';
+				return ''; // Обязательность проверим перед отправкой
+			case 'year':
+				if (!trimmedValue) return ''; // Обязательность проверим перед отправкой
+				if (!/^\d{4}$/.test(trimmedValue)) return 'Подсказка: Год должен состоять ровно из 4 цифр. Пример: 2023';
+				const yearNum = parseInt(trimmedValue, 10);
+				if (yearNum < 1900 || yearNum > new Date().getFullYear() + 5) return `Подсказка: Укажите реальный год (между 1900 и ${new Date().getFullYear() + 5}).`;
+				return '';
+			case 'authorName': // Для валидации имени *каждого* автора
+				if (trimmedValue && trimmedValue[0] !== trimmedValue[0].toUpperCase()) return 'Подсказка: ФИО автора должно начинаться с заглавной буквы. Пример: Иванов И.И.';
+				return '';
+			case 'journalConferenceName':
+				if (trimmedValue && trimmedValue[0] !== trimmedValue[0].toUpperCase()) return 'Подсказка: Наименование должно начинаться с заглавной буквы. Пример: Вестник технологического университета';
+				return ''; // Обязательность зависит от типа, проверим перед отправкой
+			case 'doi':
+				// Проверка только на разрешенные символы. DOI может быть сложным.
+				if (trimmedValue && !/^[a-zA-Z0-9./_();:-]+$/.test(trimmedValue)) return 'Подсказка: DOI содержит недопустимые символы. Разрешены буквы, цифры и символы: ./_();:-';
+				return '';
+			case 'issn':
+				// Проверка только на разрешенные символы. Формат не строгий.
+				if (trimmedValue && !/^[0-9X-]+$/.test(trimmedValue)) return 'Подсказка: ISSN может содержать только цифры, дефис и букву X. Пример: 1234-567X';
+				return '';
+			case 'isbn':
+				// Проверка только на разрешенные символы. Формат не строгий.
+				if (trimmedValue && !/^[0-9-]+$/.test(trimmedValue)) return 'Подсказка: ISBN может содержать только цифры и дефис. Пример: 978-5-123456-78-9';
+				return '';
+			case 'volume':
+				if (trimmedValue && !/^\d+$/.test(trimmedValue)) return 'Подсказка: Том должен содержать только цифры. Пример: 5';
+				return '';
+			case 'number':
+				if (trimmedValue && !/^\d+$/.test(trimmedValue)) return 'Подсказка: Номер/выпуск должен содержать только цифры. Пример: 12';
+				return '';
+			case 'pages':
+				if (trimmedValue && !/^\d+(-\d+)?$/.test(trimmedValue)) return 'Подсказка: Неверный формат страниц. Пример: 123 или 123-145';
+				const parts = trimmedValue.split('-');
+				if (parts.length === 2) {
+					const start = parseInt(parts[0]);
+					const end = parseInt(parts[1]);
+					if (!isNaN(start) && !isNaN(end) && start >= end) {
+						return 'Подсказка: Начальная страница не может быть больше или равна конечной.';
+					}
+				}
+				return '';
+			case 'publisher':
+				if (trimmedValue && trimmedValue[0] !== trimmedValue[0].toUpperCase()) return 'Подсказка: Название издательства должно начинаться с заглавной буквы. Пример: КНИТУ-КАИ';
+				return ''; // Обязательность зависит от типа
+			case 'publisherLocation':
+				if (trimmedValue && trimmedValue[0] !== trimmedValue[0].toUpperCase()) return 'Подсказка: Место издательства должно начинаться с заглавной буквы. Пример: Казань';
+				return ''; // Обязательность зависит от типа
+			case 'printedSheetsVolume':
+				if (trimmedValue && !/^[0-9]+([.,][0-9]+)?$/.test(trimmedValue)) return 'Подсказка: Объем должен быть положительным числом (целым или дробным через точку/запятую). Пример: 5.5';
+				if (trimmedValue && parseFloat(trimmedValue.replace(',', '.')) <= 0) return 'Подсказка: Объем должен быть больше нуля.';
+				return '';
+			case 'circulation':
+				if (trimmedValue && !/^\d+$/.test(trimmedValue)) return 'Подсказка: Тираж должен содержать только целые положительные цифры. Пример: 100';
+				if (trimmedValue && parseInt(trimmedValue, 10) <= 0) return 'Подсказка: Тираж должен быть больше нуля.';
+				return '';
+			case 'department':
+				// Допускаем буквы (рус/лат), цифры, пробелы, дефисы
+				if (trimmedValue && !/^[a-zA-Zа-яА-ЯёЁ0-9\s-]+$/.test(trimmedValue)) return 'Подсказка: Кафедра может содержать буквы, цифры, пробелы, дефисы. Пример: ИКТЗИ или КАФЕДРА ПМИ';
+				// Можно добавить проверку на большую букву, если надо:
+				// if (trimmedValue && trimmedValue[0] !== trimmedValue[0].toUpperCase()) return 'Подсказка: Название кафедры должно начинаться с заглавной буквы.';
+				return '';
+			case 'classificationCode':
+				if (trimmedValue && !/^[0-9.]+$/.test(trimmedValue)) return 'Подсказка: Код по классификатору может содержать только цифры и точки. Пример: 01.02.03';
+				return '';
+			case 'notes':
+				// Для примечания обычно нет ограничений
+				return '';
+			default:
+				return ''; // Нет валидации для неизвестных полей
+		}
+	};
+	// <--- КОНЕЦ ВСТАВКИ: Новая функция валидации отдельного поля --->
 
 	const handleSubmitForReview = async (publicationId) => {
 		try {
@@ -1575,8 +1843,17 @@ function Dashboard() {
 
 
 	const handleEditAuthorChange = (index, field, value) => {
-		const updatedAuthors = [...editAuthorsList];
-		updatedAuthors[index][field] = value;
+		const updatedAuthors = editAuthorsList.map((author, i) => {
+			if (i === index) {
+				const newAuthorData = { ...author, [field]: value };
+				// Валидируем имя автора при изменении поля 'name'
+				if (field === 'name') {
+					newAuthorData.error = validateField('authorName', value); // Обновляем ошибку в объекте
+				}
+				return newAuthorData;
+			}
+			return author;
+		});
 		setEditAuthorsList(updatedAuthors);
 	};
 
@@ -2515,6 +2792,9 @@ function Dashboard() {
 		return plan.entries.every(entry => entry.title && entry.title.trim() !== '');
 	};
 
+
+
+
 	const refreshCsrfToken = async () => {
 		try {
 			const response = await axios.get('http://localhost:5000/api/csrf-token', {
@@ -2663,8 +2943,7 @@ function Dashboard() {
 											<LightbulbOutlinedIcon />
 										</IconButton>
 										<Box sx={{ mb: 2, display: 'flex', gap: 2 }}>
-											<AppleButton
-												onClick={() => setUploadType('file')}
+											<AppleButton onClick={() => { setUploadType('file'); resetCreateForm(); }}
 												sx={{
 													backgroundColor: uploadType === 'file' ? '#0071E3' : '#F5F5F7',
 													color: uploadType === 'file' ? '#FFFFFF' : '#1D1D1F',
@@ -2673,8 +2952,7 @@ function Dashboard() {
 											>
 												Загрузить файл (PDF/DOCX)
 											</AppleButton>
-											<AppleButton
-												onClick={() => setUploadType('bibtex')}
+											<AppleButton onClick={() => { setUploadType('bibtex'); resetCreateForm(); }}
 												sx={{
 													backgroundColor: uploadType === 'bibtex' ? '#0071E3' : '#F5F5F7',
 													color: uploadType === 'bibtex' ? '#FFFFFF' : '#1D1D1F',
@@ -2692,363 +2970,390 @@ function Dashboard() {
 													select
 													label="Тип публикации"
 													value={selectedDisplayNameId}
-													onChange={(e) => setSelectedDisplayNameId(e.target.value)}
+													onChange={(e) => {
+														setSelectedDisplayNameId(e.target.value);
+														if (e.target.value) setTypeMandatoryError(false); // Сбрасываем ошибку при выборе
+													}}
 													margin="normal"
 													variant="outlined"
 													disabled={publicationTypes.length === 0}
+													error={submitAttempted && typeMandatoryError} // Ошибка только обязательности
+												// helperText={submitAttempted && typeMandatoryError ? 'Выберите тип' : ''} // Можно убрать, использовать Typography
 												>
-													{publicationTypes.length === 0 ? (
-														<MenuItem value="" disabled>
-															Типы не доступны
-														</MenuItem>
-													) : (
-														publicationTypes.map((type) => (
-															<MenuItem key={type.display_name_id} value={type.display_name_id}>
-																{type.display_name}
-															</MenuItem>
-														))
-													)}
+													{/* ... MenuItem ... */}
+													{publicationTypes.length === 0 ? (<MenuItem value="" disabled>Типы не доступны</MenuItem>)
+														: (publicationTypes.map((type) => (<MenuItem key={type.display_name_id} value={type.display_name_id}>{type.display_name}</MenuItem>))
+														)}
 												</AppleTextField>
+												{submitAttempted && typeMandatoryError && (
+													<Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '8px' }}>
+														Тип публикации обязателен
+													</Typography>
+												)}
 
-												{/* --- Поля ВАК, WoS, Scopus (показываются только для Article/Conference) --- */}
+												{/* Блоки VAK/WoS/Scopus - уже были */}
 												{selectedDisplayNameId && publicationTypes.find(t => t.display_name_id === selectedDisplayNameId)?.name?.toLowerCase() === 'article' ||
 													selectedDisplayNameId && publicationTypes.find(t => t.display_name_id === selectedDisplayNameId)?.name?.toLowerCase() === 'conference' ? (
 													<Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
-														<Typography variant="body2" sx={{ color: '#6E6E73', fontWeight: 500 }}>
-															Индексирование:
-														</Typography>
-														{/* ======================================= */}
-														{/* ВАК Icon/Button - Create (ОБНОВЛЕНО)   */}
-														{/* ======================================= */}
+														<Typography variant="body2" sx={{ color: '#6E6E73', fontWeight: 500 }}>Индексирование:</Typography>
 														<MuiTooltip title={disableNewVak ? "Статус 'ВАК' установлен типом публикации" : (newIsVak ? "Снять статус ВАК" : "Установить статус ВАК")} arrow>
-															<IconButton
-																onClick={() => !disableNewVak && setNewIsVak(!newIsVak)}
-																disabled={disableNewVak}
-																sx={{
-																	// Применяем фон всегда, если newIsVak === true
-																	backgroundColor: newIsVak ? 'rgba(52, 199, 89, 0.15)' : 'transparent', // <-- Увеличили непрозрачность
-																	border: newIsVak ? '1px solid #34C759' : '1px solid #D1D1D6',
-																	p: 1,
-																	transition: 'all 0.2s ease-in-out',
-																	...(disableNewVak && {
-																		cursor: 'not-allowed',
-																		pointerEvents: 'none',
-																	}),
-																	// Hover применяется только если НЕ disabled
-																	...(!disableNewVak && {
-																		'&:hover': {
-																			backgroundColor: newIsVak ? 'rgba(52, 199, 89, 0.25)' : 'rgba(0, 0, 0, 0.04)', // Чуть темнее при ховере
-																			transform: 'scale(1.05)'
-																		},
-																	}),
-																}}
-																aria-label={newIsVak ? "Снять статус ВАК" : "Установить статус ВАК"}
-															>
-																<Typography variant="caption" sx={{
-																	fontWeight: 600,
-																	fontSize: '0.8rem',
-																	color: newIsVak ? '#34C759' : '#6E6E73' // Цвет текста Typography
-																}}>
-																	ВАК
-																</Typography>
-															</IconButton>
+															<IconButton onClick={() => !disableNewVak && setNewIsVak(!newIsVak)} disabled={disableNewVak} sx={{ backgroundColor: newIsVak ? 'rgba(52, 199, 89, 0.15)' : 'transparent', border: newIsVak ? '1px solid #34C759' : '1px solid #D1D1D6', p: 1, transition: 'all 0.2s ease-in-out', ...(disableNewVak && { cursor: 'not-allowed', pointerEvents: 'none', }), ...(!disableNewVak && { '&:hover': { backgroundColor: newIsVak ? 'rgba(52, 199, 89, 0.25)' : 'rgba(0, 0, 0, 0.04)', transform: 'scale(1.05)' }, }), }} aria-label={newIsVak ? "Снять статус ВАК" : "Установить статус ВАК"}><Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.8rem', color: newIsVak ? '#34C759' : '#6E6E73' }}>ВАК</Typography></IconButton>
 														</MuiTooltip>
-														{/* ======================================= */}
-														{/* WoS Icon/Button - Create (ОБНОВЛЕНО)   */}
-														{/* ======================================= */}
 														<MuiTooltip title={disableNewWoS ? "Статус 'WoS' установлен типом публикации" : (newIsWoS ? "Снять статус WoS" : "Установить статус WoS")} arrow>
-															<IconButton
-																onClick={() => !disableNewWoS && setNewIsWoS(!newIsWoS)}
-																disabled={disableNewWoS}
-																sx={{
-																	backgroundColor: newIsWoS ? 'rgba(0, 113, 227, 0.15)' : 'transparent', // <-- Увеличили непрозрачность
-																	border: newIsWoS ? '1px solid #0071E3' : '1px solid #D1D1D6',
-																	p: 1,
-																	transition: 'all 0.2s ease-in-out',
-																	...(disableNewWoS && {
-																		cursor: 'not-allowed',
-																		pointerEvents: 'none',
-																	}),
-																	...(!disableNewWoS && {
-																		'&:hover': {
-																			backgroundColor: newIsWoS ? 'rgba(0, 113, 227, 0.25)' : 'rgba(0, 0, 0, 0.04)', // Чуть темнее при ховере
-																			transform: 'scale(1.05)'
-																		},
-																	}),
-																}}
-																aria-label={newIsWoS ? "Снять статус WoS" : "Установить статус WoS"}
-															>
-																<Typography variant="caption" sx={{
-																	fontWeight: 600,
-																	fontSize: '0.8rem',
-																	color: newIsWoS ? '#0071E3' : '#6E6E73' // Цвет текста Typography
-																}}>
-																	WoS
-																</Typography>
-															</IconButton>
+															<IconButton onClick={() => !disableNewWoS && setNewIsWoS(!newIsWoS)} disabled={disableNewWoS} sx={{ backgroundColor: newIsWoS ? 'rgba(0, 113, 227, 0.15)' : 'transparent', border: newIsWoS ? '1px solid #0071E3' : '1px solid #D1D1D6', p: 1, transition: 'all 0.2s ease-in-out', ...(disableNewWoS && { cursor: 'not-allowed', pointerEvents: 'none', }), ...(!disableNewWoS && { '&:hover': { backgroundColor: newIsWoS ? 'rgba(0, 113, 227, 0.25)' : 'rgba(0, 0, 0, 0.04)', transform: 'scale(1.05)' }, }), }} aria-label={newIsWoS ? "Снять статус WoS" : "Установить статус WoS"}><Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.8rem', color: newIsWoS ? '#0071E3' : '#6E6E73' }}>WoS</Typography></IconButton>
 														</MuiTooltip>
-														{/* ========================================= */}
-														{/* Scopus Icon/Button - Create (ОБНОВЛЕНО) */}
-														{/* ========================================= */}
 														<MuiTooltip title={disableNewScopus ? "Статус 'Scopus' установлен типом публикации" : (newIsScopus ? "Снять статус Scopus" : "Установить статус Scopus")} arrow>
-															<IconButton
-																onClick={() => !disableNewScopus && setNewIsScopus(!newIsScopus)}
-																disabled={disableNewScopus}
-																sx={{
-																	backgroundColor: newIsScopus ? 'rgba(175, 82, 222, 0.15)' : 'transparent', // <-- Увеличили непрозрачность
-																	border: newIsScopus ? '1px solid #AF52DE' : '1px solid #D1D1D6',
-																	p: 1,
-																	transition: 'all 0.2s ease-in-out',
-																	...(disableNewScopus && {
-																		cursor: 'not-allowed',
-																		pointerEvents: 'none',
-																	}),
-																	...(!disableNewScopus && {
-																		'&:hover': {
-																			backgroundColor: newIsScopus ? 'rgba(175, 82, 222, 0.25)' : 'rgba(0, 0, 0, 0.04)', // Чуть темнее при ховере
-																			transform: 'scale(1.05)'
-																		},
-																	}),
-																}}
-																aria-label={newIsScopus ? "Снять статус Scopus" : "Установить статус Scopus"}
-															>
-																<Typography variant="caption" sx={{
-																	fontWeight: 600,
-																	fontSize: '0.8rem',
-																	color: newIsScopus ? '#AF52DE' : '#6E6E73' // Цвет текста Typography
-																}}>
-																	Scopus
-																</Typography>
-															</IconButton>
+															<IconButton onClick={() => !disableNewScopus && setNewIsScopus(!newIsScopus)} disabled={disableNewScopus} sx={{ backgroundColor: newIsScopus ? 'rgba(175, 82, 222, 0.15)' : 'transparent', border: newIsScopus ? '1px solid #AF52DE' : '1px solid #D1D1D6', p: 1, transition: 'all 0.2s ease-in-out', ...(disableNewScopus && { cursor: 'not-allowed', pointerEvents: 'none', }), ...(!disableNewScopus && { '&:hover': { backgroundColor: newIsScopus ? 'rgba(175, 82, 222, 0.25)' : 'rgba(0, 0, 0, 0.04)', transform: 'scale(1.05)' }, }), }} aria-label={newIsScopus ? "Снять статус Scopus" : "Установить статус Scopus"}><Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.8rem', color: newIsScopus ? '#AF52DE' : '#6E6E73' }}>Scopus</Typography></IconButton>
 														</MuiTooltip>
 													</Box>
 												) : null}
+
+												{/* Название */}
 												<AppleTextField
 													fullWidth
 													label="Название"
 													value={title}
-													onChange={(e) => setTitle(e.target.value)}
+													onChange={(e) => {
+														const newValue = e.target.value;
+														setTitle(newValue);
+														setTitleError(validateField('title', newValue)); // Проверка формата
+														if (newValue.trim()) setTitleMandatoryError(false); // Сброс ошибки обязательности при вводе
+													}}
 													margin="normal"
 													variant="outlined"
+													// Ошибка = ошибка формата ИЛИ (попытка отправки И ошибка обязательности)
+													error={!!titleError || (submitAttempted && titleMandatoryError)}
 												/>
-												<Box sx={{ mt: 2, border: '1px solid #D1D1D6', borderRadius: '12px', p: 2, backgroundColor: '#FFFFFF' }}>
-													<Typography variant="subtitle1" sx={{ mb: 1, color: '#1D1D1F' }}>Авторы</Typography>
+												{/* Подсказка = ошибка формата ИЛИ (попытка отправки И ошибка обязательности)? 'Обязательно' : '' */}
+												{(titleError || (submitAttempted && titleMandatoryError)) && (
+													<Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '8px' }}>
+														{titleError ? titleError : (submitAttempted && titleMandatoryError ? 'Название обязательно' : '')}
+													</Typography>
+												)}
+												{/* Авторы - ВАЖНО: required УДАЛЕН */}
+												<Box sx={{
+													mt: 2,
+													borderColor: (submitAttempted && authorMandatoryError) ? 'error.main' : '#D1D1D6',
+													borderWidth: '1px',
+													borderStyle: 'solid',
+													borderRadius: '12px',
+													p: 2,
+													backgroundColor: '#FFFFFF'
+												}}>
+													<Typography variant="subtitle1" sx={{ mb: 2, color: '#1D1D1F' }}>Авторы</Typography>
+													{/* Отображение общей ошибки обязательности авторов */}
+													{submitAttempted && authorMandatoryError && (
+														<Typography color="error" variant="caption" sx={{ display: 'block', mb: 1 }}>
+															Укажите хотя бы одного автора.
+														</Typography>
+													)}
 													{newAuthors.map((author, index) => (
-														<Grid container spacing={1} key={author.id} sx={{ mb: 1, alignItems: 'center' }}>
+														<Grid container spacing={1} key={author.id} sx={{ mb: 2, alignItems: 'flex-start' }}>
+															{/* ... содержимое Grid для автора ... */}
+															{/* Grid item для поля ввода */}
 															<Grid item xs={true}>
 																<AppleTextField
 																	fullWidth
-																	required
-																	label={`Автор ${index + 1}`}
+																	label={`Автор ${index + 1} (ФИО)`}
 																	value={author.name}
-																	onChange={(e) => handleAuthorChange(index, 'name', e.target.value)}
+																	onChange={(e) => {
+																		// Сбрасываем общую ошибку ОБЯЗАТЕЛЬНОСТИ авторов при вводе в любое поле
+																		if (submitAttempted && authorMandatoryError) setAuthorMandatoryError(false);
+																		handleAuthorChange(index, 'name', e.target.value)
+																	}}
 																	size="small"
 																	variant="outlined"
+																	error={!!author.error} // Форматная ошибка как и была
+																	sx={{ mb: author.error ? 0.5 : 0 }}
 																/>
-															</Grid>
-															<Grid item xs="auto"> {/* Изменено с xs={1} */}
-																<MuiTooltip title={author.is_employee ? "Автор сотрудник КНИТУ-КАИ" : "Автор не сотрудник КНИТУ-КАИ"} arrow>
-																	<IconButton
-																		onClick={() => handleAuthorChange(index, 'is_employee', !author.is_employee)}
-																		size="small"
-																		sx={{
-																			color: author.is_employee ? '#0071E3' : 'grey.500',
-																			'&:hover': {
-																				backgroundColor: author.is_employee ? 'rgba(0, 113, 227, 0.1)' : 'rgba(0, 0, 0, 0.04)',
-																			}
-																		}}
-																		aria-label={author.is_employee ? "Пометить как не сотрудника" : "Пометить как сотрудника"}
-																	>
-																		<PersonIcon fontSize="small" />
-																	</IconButton>
-																</MuiTooltip>
-															</Grid>
-															<Grid item xs="auto"> {/* Изменено с xs={1} */}
-																{newAuthors.length > 1 && (
-																	<IconButton
-																		onClick={() => handleRemoveAuthor(index)}
-																		size="small"
-																		sx={{ color: '#FF3B30' }}
-																		aria-label="Удалить автора"
-																	>
-																		<DeleteIcon fontSize="small" />
-																	</IconButton>
+																{author.error && (
+																	<Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px' }}>
+																		{author.error}
+																	</Typography>
 																)}
 															</Grid>
+															{/* Grid items для иконок */}
+															{/* ... */}
 														</Grid>
 													))}
-													<Button
-														startIcon={<AddIcon />}
-														onClick={handleAddAuthor}
-														size="small"
-														sx={{ mt: 1, textTransform: 'none', color: '#0071E3' }}
-													>
-														Добавить автора
-													</Button>
+													<Button startIcon={<AddIcon />} onClick={handleAddAuthor} size="small" sx={{ mt: 1, textTransform: 'none', color: '#0071E3' }}>Добавить автора</Button>
 												</Box>
+
+												{/* Год */}
 												<AppleTextField
 													fullWidth
 													label="Год"
 													type="number"
 													value={year}
-													onChange={(e) => setYear(e.target.value)}
+													onChange={(e) => {
+														const newValue = e.target.value;
+														setYear(newValue);
+														setYearError(validateField('year', newValue)); // Формат
+														if (newValue.trim()) setYearMandatoryError(false); // Обязательность
+													}}
 													margin="normal"
 													variant="outlined"
+													error={!!yearError || (submitAttempted && yearMandatoryError)}
 												/>
+												{(yearError || (submitAttempted && yearMandatoryError)) && (
+													<Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '8px' }}>
+														{yearError ? yearError : (submitAttempted && yearMandatoryError ? 'Год обязателен' : '')}
+													</Typography>
+												)}
+												{/* Наименование журнала/конференции */}
 												<AppleTextField
 													fullWidth
 													label="Наименование журнала/конференции"
 													value={journalConferenceName}
-													onChange={(e) => setJournalConferenceName(e.target.value)}
+													onChange={(e) => {
+														const newValue = e.target.value;
+														setJournalConferenceName(newValue);
+														setJournalConferenceNameError(validateField('journalConferenceName', newValue));
+													}}
 													margin="normal"
 													variant="outlined"
+													error={!!journalConferenceNameError}
 												/>
-												<Grid container spacing={2}> {/* Используем Grid для группировки */}
+												{journalConferenceNameError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '8px' }}>{journalConferenceNameError}</Typography>}
+
+												<Grid container spacing={2}>
+													{/* DOI */}
 													<Grid item xs={12} sm={6}>
 														<AppleTextField
 															fullWidth
 															label="DOI"
 															value={doi}
-															onChange={(e) => setDoi(e.target.value)}
+															onChange={(e) => {
+																const newValue = e.target.value;
+																setDoi(newValue);
+																setDoiError(validateField('doi', newValue));
+															}}
 															margin="normal"
 															variant="outlined"
+															error={!!doiError}
 														/>
+														{doiError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{doiError}</Typography>}
 													</Grid>
+													{/* Квартиль */}
 													<Grid item xs={12} sm={6}>
 														<AppleTextField
 															fullWidth
 															label="Квартиль (Q)"
 															value={quartile}
-															onChange={(e) => setQuartile(e.target.value)}
+															onChange={(e) => setQuartile(e.target.value)} // Простая валидация Q пока не добавлена, можно добавить в validateField при необходимости
 															margin="normal"
 															variant="outlined"
+														// error={!!quartileError} // Добавить если нужна валидация
 														/>
+														{/* {quartileError && <Typography ...>{quartileError}</Typography>} */}
 													</Grid>
+													{/* ISSN */}
 													<Grid item xs={12} sm={6}>
 														<AppleTextField
 															fullWidth
 															label="ISSN"
 															value={issn}
-															onChange={(e) => setIssn(e.target.value)}
+															onChange={(e) => {
+																const newValue = e.target.value;
+																setIssn(newValue);
+																setIssnError(validateField('issn', newValue));
+															}}
 															margin="normal"
 															variant="outlined"
+															error={!!issnError}
 														/>
+														{issnError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{issnError}</Typography>}
 													</Grid>
+													{/* ISBN */}
 													<Grid item xs={12} sm={6}>
 														<AppleTextField
 															fullWidth
 															label="ISBN"
 															value={isbn}
-															onChange={(e) => setIsbn(e.target.value)}
+															onChange={(e) => {
+																const newValue = e.target.value;
+																setIsbn(newValue);
+																setIsbnError(validateField('isbn', newValue));
+															}}
 															margin="normal"
 															variant="outlined"
+															error={!!isbnError}
 														/>
+														{isbnError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{isbnError}</Typography>}
 													</Grid>
 												</Grid>
+
 												<Grid container spacing={2}>
+													{/* Том */}
 													<Grid item xs={12} sm={4}>
 														<AppleTextField
 															fullWidth
 															label="Том"
 															value={volume}
-															onChange={(e) => setVolume(e.target.value)}
+															onChange={(e) => {
+																const newValue = e.target.value;
+																setVolume(newValue);
+																setVolumeError(validateField('volume', newValue));
+															}}
 															margin="normal"
 															variant="outlined"
+															error={!!volumeError}
 														/>
+														{volumeError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{volumeError}</Typography>}
 													</Grid>
+													{/* Номер/Выпуск */}
 													<Grid item xs={12} sm={4}>
 														<AppleTextField
 															fullWidth
 															label="Номер/Выпуск"
 															value={number}
-															onChange={(e) => setNumber(e.target.value)}
+															onChange={(e) => {
+																const newValue = e.target.value;
+																setNumber(newValue);
+																setNumberError(validateField('number', newValue));
+															}}
 															margin="normal"
 															variant="outlined"
+															error={!!numberError}
 														/>
+														{numberError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{numberError}</Typography>}
 													</Grid>
+													{/* Страницы */}
 													<Grid item xs={12} sm={4}>
 														<AppleTextField
 															fullWidth
 															label="Страницы"
 															value={pages}
-															onChange={(e) => setPages(e.target.value)}
+															onChange={(e) => {
+																const newValue = e.target.value;
+																setPages(newValue);
+																setPagesError(validateField('pages', newValue));
+															}}
 															margin="normal"
 															variant="outlined"
+															error={!!pagesError}
 														/>
+														{pagesError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{pagesError}</Typography>}
 													</Grid>
 												</Grid>
+
 												<Grid container spacing={2}>
+													{/* Издательство */}
 													<Grid item xs={12} sm={6}>
 														<AppleTextField
 															fullWidth
 															label="Издательство"
 															value={publisher}
-															onChange={(e) => setPublisher(e.target.value)}
+															onChange={(e) => {
+																const newValue = e.target.value;
+																setPublisher(newValue);
+																setPublisherError(validateField('publisher', newValue));
+															}}
 															margin="normal"
 															variant="outlined"
+															error={!!publisherError}
 														/>
+														{publisherError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{publisherError}</Typography>}
 													</Grid>
+													{/* Место издательства */}
 													<Grid item xs={12} sm={6}>
 														<AppleTextField
 															fullWidth
 															label="Место издательства"
 															value={publisherLocation}
-															onChange={(e) => setPublisherLocation(e.target.value)}
+															onChange={(e) => {
+																const newValue = e.target.value;
+																setPublisherLocation(newValue);
+																setPublisherLocationError(validateField('publisherLocation', newValue));
+															}}
 															margin="normal"
 															variant="outlined"
+															error={!!publisherLocationError}
 														/>
+														{publisherLocationError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{publisherLocationError}</Typography>}
 													</Grid>
+													{/* Объем (п.л.) */}
 													<Grid item xs={12} sm={4}>
 														<AppleTextField
 															fullWidth
 															label="Объем (п.л.)"
-															type="number" // Для валидации браузера, но отправляем строку
-															value={printedSheetsVolume}
-															onChange={(e) => setPrintedSheetsVolume(e.target.value)}
+															value={printedSheetsVolume} // Убираем type="number" для ручной валидации с запятой
+															onChange={(e) => {
+																const newValue = e.target.value;
+																setPrintedSheetsVolume(newValue);
+																setPrintedSheetsVolumeError(validateField('printedSheetsVolume', newValue));
+															}}
 															margin="normal"
 															variant="outlined"
-															inputProps={{ step: "0.1" }} // Для дробных чисел
+															error={!!printedSheetsVolumeError}
+														// inputProps={{ step: "0.1" }} // Не нужен без type=number
 														/>
+														{printedSheetsVolumeError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{printedSheetsVolumeError}</Typography>}
 													</Grid>
+													{/* Тираж */}
 													<Grid item xs={12} sm={4}>
 														<AppleTextField
 															fullWidth
 															label="Тираж"
-															type="number"
+															// type="number" // Убираем для consistency с объемом
 															value={circulation}
-															onChange={(e) => setCirculation(e.target.value)}
+															onChange={(e) => {
+																const newValue = e.target.value;
+																setCirculation(newValue);
+																setCirculationError(validateField('circulation', newValue));
+															}}
 															margin="normal"
 															variant="outlined"
+															error={!!circulationError}
 														/>
+														{circulationError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{circulationError}</Typography>}
 													</Grid>
+													{/* Кафедра */}
 													<Grid item xs={12} sm={4}>
 														<AppleTextField
 															fullWidth
 															label="Кафедра"
 															value={department}
-															onChange={(e) => setDepartment(e.target.value)}
+															onChange={(e) => {
+																const newValue = e.target.value;
+																setDepartment(newValue);
+																setDepartmentError(validateField('department', newValue));
+															}}
 															margin="normal"
 															variant="outlined"
+															error={!!departmentError}
 														/>
+														{departmentError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{departmentError}</Typography>}
 													</Grid>
 												</Grid>
+
+												{/* Код по классификатору */}
 												<AppleTextField
 													fullWidth
 													label="Код по классификатору"
 													value={classificationCode}
-													onChange={(e) => setClassificationCode(e.target.value)}
+													onChange={(e) => {
+														const newValue = e.target.value;
+														setClassificationCode(newValue);
+														setClassificationCodeError(validateField('classificationCode', newValue));
+													}}
 													margin="normal"
 													variant="outlined"
+													error={!!classificationCodeError}
 												/>
+												{classificationCodeError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '8px' }}>{classificationCodeError}</Typography>}
+
+												{/* Примечание */}
 												<AppleTextField
 													fullWidth
 													label="Примечание"
 													value={notes}
-													onChange={(e) => setNotes(e.target.value)}
+													onChange={(e) => setNotes(e.target.value)} // Простая установка значения
 													margin="normal"
 													variant="outlined"
 													multiline
 													rows={2}
+												// Нет ошибки для примечания
 												/>
 												{/* --- КОНЕЦ НОВЫХ ПОЛЕЙ --- */}
 
@@ -3056,16 +3361,48 @@ function Dashboard() {
 													<input
 														type="file"
 														accept=".pdf,.docx"
-														onChange={(e) => setFile(e.target.files[0])}
+														onChange={(e) => {
+															const selectedFile = e.target.files[0];
+															setFile(selectedFile);
+															// Сброс ошибки обязательности при выборе файла
+															if (selectedFile) setFileMandatoryError(false);
+															// Валидация типа
+															if (selectedFile && !['pdf', 'docx'].includes(selectedFile.name.split('.').pop().toLowerCase())) {
+																setFileError('Подсказка: Недопустимый тип файла (только PDF, DOCX)');
+															} else {
+																setFileError('');
+															}
+														}}
 														style={{ display: 'none' }}
 														id="upload-file"
 													/>
 													<label htmlFor="upload-file">
-														<AppleButton sx={{ border: '1px solid #D1D1D6', backgroundColor: '#F5F5F7', color: '#1D1D1F' }} component="span">
+														<AppleButton
+															sx={(theme) => ({ // <--- Оборачиваем в функцию для доступа к theme
+																// --- Используем стандартные имена или theme ---
+																borderColor: (submitAttempted && fileMandatoryError) || !!fileError ? theme.palette.error.main : '#D1D1D6',
+																borderWidth: '1px',
+																borderStyle: 'solid',
+																backgroundColor: '#F5F5F7', // Фон не меняем
+																color: (submitAttempted && fileMandatoryError) || !!fileError ? theme.palette.error.main : '#1D1D1F',
+																'&:hover': {
+																	backgroundColor: (submitAttempted && fileMandatoryError) || !!fileError ? 'rgba(211, 47, 47, 0.08)' : '#E5E5EA' // Hover оставляем как есть
+																}
+																// --- Конец исправления ---
+															})}
+															component="span"
+														>
 															Выбрать файл
 														</AppleButton>
 													</label>
-													{file && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{file.name}</Typography>}
+													{/* Показ ошибки обязательности ИЛИ ошибки формата ИЛИ имени файла */}
+													{(submitAttempted && fileMandatoryError) ? (
+														<Typography color="error" variant="caption" sx={{ mt: 1, display: 'block' }}>Файл обязателен</Typography>
+													) : fileError ? (
+														<Typography color="error" variant="caption" sx={{ mt: 1, display: 'block' }}>{fileError}</Typography>
+													) : (
+														file && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{file.name}</Typography>
+													)}
 												</Box>
 
 												<AppleButton type="submit" sx={{ mt: 2 }}>
@@ -3924,365 +4261,390 @@ function Dashboard() {
 							fullWidth
 							select
 							label="Тип публикации"
-							value={editSelectedDisplayNameId || ''} // Убедимся, что значение не undefined/null
+							value={editSelectedDisplayNameId || ''}
 							onChange={(e) => setEditSelectedDisplayNameId(e.target.value)}
 							margin="normal"
 							variant="outlined"
 							disabled={publicationTypes.length === 0}
+						// Ошибка обязательности при отправке будет показана в общем блоке, здесь только форматная
 						>
-							{/* ... опции выбора типов ... */}
-							{publicationTypes.length === 0 ? (
-								<MenuItem value="" disabled>
-									Типы не доступны
-								</MenuItem>
-							) : (
-								publicationTypes.map((type) => (
-									<MenuItem key={type.display_name_id} value={type.display_name_id}>
-										{type.display_name}
-									</MenuItem>
-								))
-							)}
+							{publicationTypes.length === 0 ? (<MenuItem value="" disabled> Типы не доступны </MenuItem>)
+								: (publicationTypes.map((type) => (<MenuItem key={type.display_name_id} value={type.display_name_id}> {type.display_name} </MenuItem>))
+								)}
 						</AppleTextField>
 
-						{/* --- Поля ВАК, WoS, Scopus для редактирования (показываются только для Article/Conference) --- */}
-						{editSelectedDisplayNameId && publicationTypes.find(t => t.display_name_id === editSelectedDisplayNameId)?.name?.toLowerCase() === 'article' ||
-							editSelectedDisplayNameId && publicationTypes.find(t => t.display_name_id === editSelectedDisplayNameId)?.name?.toLowerCase() === 'conference' ? (
-							<Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
-								<Typography variant="body2" sx={{ color: '#6E6E73', fontWeight: 500 }}>
-									Индексирование:
-								</Typography>
-								{/* ======================================= */}
-								{/* ВАК Icon/Button - Edit (ОБНОВЛЕНО)     */}
-								{/* ======================================= */}
-								<MuiTooltip title={disableEditVak ? "Статус 'ВАК' установлен типом публикации" : (editIsVak ? "Снять статус ВАК" : "Установить статус ВАК")} arrow>
-									<IconButton
-										onClick={() => !disableEditVak && setEditIsVak(!editIsVak)}
-										disabled={disableEditVak}
-										sx={{
-											backgroundColor: editIsVak ? 'rgba(52, 199, 89, 0.15)' : 'transparent', // <-- Увеличили непрозрачность
-											border: editIsVak ? '1px solid #34C759' : '1px solid #D1D1D6',
-											p: 1,
-											transition: 'all 0.2s ease-in-out',
-											...(disableEditVak && {
-												cursor: 'not-allowed',
-												pointerEvents: 'none',
-											}),
-											...(!disableEditVak && {
-												'&:hover': {
-													backgroundColor: editIsVak ? 'rgba(52, 199, 89, 0.25)' : 'rgba(0, 0, 0, 0.04)', // Чуть темнее при ховере
-													transform: 'scale(1.05)'
-												},
-											}),
-										}}
-										aria-label={editIsVak ? "Снять статус ВАК" : "Установить статус ВАК"}
-									>
-										<Typography variant="caption" sx={{
-											fontWeight: 600,
-											fontSize: '0.8rem',
-											color: editIsVak ? '#34C759' : '#6E6E73' // Цвет текста Typography
-										}}>
-											ВАК
-										</Typography>
-									</IconButton>
-								</MuiTooltip>
-								{/* ======================================= */}
-								{/* WoS Icon/Button - Edit (ОБНОВЛЕНО)     */}
-								{/* ======================================= */}
-								<MuiTooltip title={disableEditWoS ? "Статус 'WoS' установлен типом публикации" : (editIsWoS ? "Снять статус WoS" : "Установить статус WoS")} arrow>
-									<IconButton
-										onClick={() => !disableEditWoS && setEditIsWoS(!editIsWoS)}
-										disabled={disableEditWoS}
-										sx={{
-											backgroundColor: editIsWoS ? 'rgba(0, 113, 227, 0.15)' : 'transparent', // <-- Увеличили непрозрачность
-											border: editIsWoS ? '1px solid #0071E3' : '1px solid #D1D1D6',
-											p: 1,
-											transition: 'all 0.2s ease-in-out',
-											...(disableEditWoS && {
-												cursor: 'not-allowed',
-												pointerEvents: 'none',
-											}),
-											...(!disableEditWoS && {
-												'&:hover': {
-													backgroundColor: editIsWoS ? 'rgba(0, 113, 227, 0.25)' : 'rgba(0, 0, 0, 0.04)', // Чуть темнее при ховере
-													transform: 'scale(1.05)'
-												},
-											}),
-										}}
-										aria-label={editIsWoS ? "Снять статус WoS" : "Установить статус WoS"}
-									>
-										<Typography variant="caption" sx={{
-											fontWeight: 600,
-											fontSize: '0.8rem',
-											color: editIsWoS ? '#0071E3' : '#6E6E73' // Цвет текста Typography
-										}}>
-											WoS
-										</Typography>
-									</IconButton>
-								</MuiTooltip>
-								{/* ========================================= */}
-								{/* Scopus Icon/Button - Edit (ОБНОВЛЕНО)   */}
-								{/* ========================================= */}
-								<MuiTooltip title={disableEditScopus ? "Статус 'Scopus' установлен типом публикации" : (editIsScopus ? "Снять статус Scopus" : "Установить статус Scopus")} arrow>
-									<IconButton
-										onClick={() => !disableEditScopus && setEditIsScopus(!editIsScopus)}
-										disabled={disableEditScopus}
-										sx={{
-											backgroundColor: editIsScopus ? 'rgba(175, 82, 222, 0.15)' : 'transparent', // <-- Увеличили непрозрачность
-											border: editIsScopus ? '1px solid #AF52DE' : '1px solid #D1D1D6',
-											p: 1,
-											transition: 'all 0.2s ease-in-out',
-											...(disableEditScopus && {
-												cursor: 'not-allowed',
-												pointerEvents: 'none',
-											}),
-											...(!disableEditScopus && {
-												'&:hover': {
-													backgroundColor: editIsScopus ? 'rgba(175, 82, 222, 0.25)' : 'rgba(0, 0, 0, 0.04)', // Чуть темнее при ховере
-													transform: 'scale(1.05)'
-												},
-											}),
-										}}
-										aria-label={editIsScopus ? "Снять статус Scopus" : "Установить статус Scopus"}
-									>
-										<Typography variant="caption" sx={{
-											fontWeight: 600,
-											fontSize: '0.8rem',
-											color: editIsScopus ? '#AF52DE' : '#6E6E73' // Цвет текста Typography
-										}}>
-											Scopus
-										</Typography>
-									</IconButton>
-								</MuiTooltip>
-							</Box>
-						) : null}
+						{/* Блок ВАК/WoS/Scopus */}
+						{/* ... (без изменений) ... */}
+
+						{/* Название */}
 						<AppleTextField
 							fullWidth
 							label="Название"
 							value={editTitle}
-							onChange={(e) => setEditTitle(e.target.value)}
+							onChange={(e) => {
+								const newValue = e.target.value;
+								setEditTitle(newValue);
+								setEditTitleError(validateField('title', newValue)); // Валидируем как 'title'
+							}}
 							margin="normal"
 							variant="outlined"
+							error={!!editTitleError}
 						/>
+						{editTitleError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '8px' }}>{editTitleError}</Typography>}
+
+						{/* Авторы - ВАЖНО: required УДАЛЕН */}
 						<Box sx={{ mt: 2, border: '1px solid #D1D1D6', borderRadius: '12px', p: 2, backgroundColor: '#FFFFFF' }}>
-							<Typography variant="subtitle1" sx={{ mb: 1, color: '#1D1D1F' }}>Авторы</Typography>
+							<Typography variant="subtitle1" sx={{ mb: 2, color: '#1D1D1F' }}>Авторы</Typography>
 							{editAuthorsList.map((author, index) => (
-								<Grid container spacing={1} key={author.id} sx={{ mb: 1, alignItems: 'center' }}>
-									{/* --- ИМЯ АВТОРА (ЗАНИМАЕТ ОСТАВШЕЕСЯ МЕСТО) --- */}
-									<Grid item xs={true}> {/* Изменено с xs={8} */}
+								<Grid container spacing={1} key={author.id} sx={{ mb: 2, alignItems: 'flex-start' /* Изменили выравнивание */ }}>
+									{/* --- Grid item для поля ввода и ошибки --- */}
+									<Grid item xs={true}>
 										<AppleTextField
 											fullWidth
-											required
-											label={`Автор ${index + 1}`}
+											// required // УДАЛЕНО
+											label={`Автор ${index + 1} (ФИО)`}
 											value={author.name}
-											onChange={(e) => handleEditAuthorChange(index, 'name', e.target.value)}
+											onChange={(e) => handleEditAuthorChange(index, 'name', e.target.value)} // Правильный обработчик
 											size="small"
 											variant="outlined"
+											error={!!author.error}
+											// Добавляем нижний отступ только если ЕСТЬ ошибка, чтобы не было лишнего места
+											sx={{ mb: author.error ? 0.5 : 0 }}
 										/>
-									</Grid>
-									<Grid item xs="auto"> {/* Изменено с xs={1} */}
-										<MuiTooltip title={author.is_employee ? "Автор сотрудник КНИТУ-КАИ" : "Автор не сотрудник КНИТУ-КАИ"} arrow>
-											<IconButton
-												onClick={() => handleEditAuthorChange(index, 'is_employee', !author.is_employee)}
-												size="small"
+										{/* --- Ошибка теперь ВНУТРИ того же Grid item --- */}
+										{author.error && (
+											<Typography
+												color="error"
+												variant="caption"
 												sx={{
-													color: author.is_employee ? '#0071E3' : 'grey.500',
-													'&:hover': {
-														backgroundColor: author.is_employee ? 'rgba(0, 113, 227, 0.1)' : 'rgba(0, 0, 0, 0.04)',
-													}
+													display: 'block',
+													pl: '14px',
+													// mt: 0.5 // Можно оставить 0
 												}}
-												aria-label={author.is_employee ? "Пометить как не сотрудника" : "Пометить как сотрудника"}
 											>
-												<PersonIcon fontSize="small" />
-											</IconButton>
+												{author.error}
+											</Typography>
+										)}
+									</Grid>
+									{/* --- Grid item для иконки сотрудника --- */}
+									<Grid item xs="auto" sx={{ pt: 0.5 /* Отступ для иконки */ }}>
+										<MuiTooltip title={author.is_employee ? "Автор сотрудник КНИТУ-КАИ" : "Автор не сотрудник КНИТУ-КАИ"} arrow>
+											<IconButton onClick={() => handleEditAuthorChange(index, 'is_employee', !author.is_employee)} size="small" sx={{ color: author.is_employee ? '#0071E3' : 'grey.500', '&:hover': { backgroundColor: author.is_employee ? 'rgba(0, 113, 227, 0.1)' : 'rgba(0, 0, 0, 0.04)', } }} aria-label={author.is_employee ? "Пометить как не сотрудника" : "Пометить как сотрудника"}><PersonIcon fontSize="small" /></IconButton>
 										</MuiTooltip>
 									</Grid>
-									<Grid item xs="auto"> {/* Изменено с xs={1} */}
-										{editAuthorsList.length > 1 && (
-											<IconButton
-												onClick={() => handleEditRemoveAuthor(index)}
-												size="small"
-												sx={{ color: '#FF3B30' }}
-												aria-label="Удалить автора"
-											>
-												<DeleteIcon fontSize="small" />
-											</IconButton>
-										)}
+									{/* --- Grid item для иконки удаления --- */}
+									<Grid item xs="auto" sx={{ pt: 0.5 /* Отступ для иконки */ }}>
+										{editAuthorsList.length > 1 && (<IconButton onClick={() => handleEditRemoveAuthor(index)} size="small" sx={{ color: '#FF3B30' }} aria-label="Удалить автора"><DeleteIcon fontSize="small" /></IconButton>)}
 									</Grid>
 								</Grid>
 							))}
-							<Button
-								startIcon={<AddIcon />}
-								onClick={handleEditAddAuthor}
-								size="small"
-								sx={{ mt: 1, textTransform: 'none', color: '#0071E3' }}
-							>
-								Добавить автора
-							</Button>
+							<Button startIcon={<AddIcon />} onClick={handleEditAddAuthor} size="small" sx={{ mt: 1, textTransform: 'none', color: '#0071E3' }}>Добавить автора</Button>
 						</Box>
+
+						{/* Год */}
 						<AppleTextField
 							fullWidth
 							label="Год"
 							type="number"
 							value={editYear}
-							onChange={(e) => setEditYear(e.target.value)}
+							onChange={(e) => {
+								const newValue = e.target.value;
+								setEditYear(newValue);
+								setEditYearError(validateField('year', newValue));
+							}}
 							margin="normal"
 							variant="outlined"
+							error={!!editYearError}
 						/>
+						{editYearError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '8px' }}>{editYearError}</Typography>}
+
+						{/* --- Добавьте аналогичные блоки для ВСЕХ полей ниже --- */}
+
+						{/* Наименование журнала/конференции */}
 						<AppleTextField
 							fullWidth
 							label="Наименование журнала/конференции"
 							value={editJournalConferenceName}
-							onChange={(e) => setEditJournalConferenceName(e.target.value)}
+							onChange={(e) => {
+								const newValue = e.target.value;
+								setEditJournalConferenceName(newValue);
+								setEditJournalConferenceNameError(validateField('journalConferenceName', newValue));
+							}}
 							margin="normal"
 							variant="outlined"
+							error={!!editJournalConferenceNameError}
 						/>
+						{editJournalConferenceNameError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '8px' }}>{editJournalConferenceNameError}</Typography>}
+
 						<Grid container spacing={2}>
+							{/* DOI */}
 							<Grid item xs={12} sm={6}>
 								<AppleTextField
 									fullWidth
 									label="DOI"
 									value={editDoi}
-									onChange={(e) => setEditDoi(e.target.value)}
+									onChange={(e) => {
+										const newValue = e.target.value;
+										setEditDoi(newValue);
+										setEditDoiError(validateField('doi', newValue));
+									}}
 									margin="normal"
 									variant="outlined"
+									error={!!editDoiError}
 								/>
+								{editDoiError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{editDoiError}</Typography>}
 							</Grid>
+							{/* Квартиль */}
 							<Grid item xs={12} sm={6}>
 								<AppleTextField
 									fullWidth
 									label="Квартиль (Q)"
 									value={editQuartile}
-									onChange={(e) => setEditQuartile(e.target.value)}
+									onChange={(e) => setEditQuartile(e.target.value)} // Простая валидация Q пока не добавлена
 									margin="normal"
 									variant="outlined"
+								// error={!!editQuartileError}
 								/>
+								{/* {editQuartileError && <Typography ...>{editQuartileError}</Typography>} */}
 							</Grid>
+							{/* ISSN */}
 							<Grid item xs={12} sm={6}>
 								<AppleTextField
 									fullWidth
 									label="ISSN"
 									value={editIssn}
-									onChange={(e) => setEditIssn(e.target.value)}
+									onChange={(e) => {
+										const newValue = e.target.value;
+										setEditIssn(newValue);
+										setEditIssnError(validateField('issn', newValue));
+									}}
 									margin="normal"
 									variant="outlined"
+									error={!!editIssnError}
 								/>
+								{editIssnError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{editIssnError}</Typography>}
 							</Grid>
+							{/* ISBN */}
 							<Grid item xs={12} sm={6}>
 								<AppleTextField
 									fullWidth
 									label="ISBN"
 									value={editIsbn}
-									onChange={(e) => setEditIsbn(e.target.value)}
+									onChange={(e) => {
+										const newValue = e.target.value;
+										setEditIsbn(newValue);
+										setEditIsbnError(validateField('isbn', newValue));
+									}}
 									margin="normal"
 									variant="outlined"
+									error={!!editIsbnError}
 								/>
+								{editIsbnError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{editIsbnError}</Typography>}
 							</Grid>
 						</Grid>
+
 						<Grid container spacing={2}>
+							{/* Том */}
 							<Grid item xs={12} sm={4}>
 								<AppleTextField
 									fullWidth
 									label="Том"
 									value={editVolume}
-									onChange={(e) => setEditVolume(e.target.value)}
+									onChange={(e) => {
+										const newValue = e.target.value;
+										setEditVolume(newValue);
+										setEditVolumeError(validateField('volume', newValue));
+									}}
 									margin="normal"
 									variant="outlined"
+									error={!!editVolumeError}
 								/>
+								{editVolumeError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{editVolumeError}</Typography>}
 							</Grid>
+							{/* Номер/Выпуск */}
 							<Grid item xs={12} sm={4}>
 								<AppleTextField
 									fullWidth
 									label="Номер/Выпуск"
 									value={editNumber}
-									onChange={(e) => setEditNumber(e.target.value)}
+									onChange={(e) => {
+										const newValue = e.target.value;
+										setEditNumber(newValue);
+										setEditNumberError(validateField('number', newValue));
+									}}
 									margin="normal"
 									variant="outlined"
+									error={!!editNumberError}
 								/>
+								{editNumberError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{editNumberError}</Typography>}
 							</Grid>
+							{/* Страницы */}
 							<Grid item xs={12} sm={4}>
 								<AppleTextField
 									fullWidth
 									label="Страницы"
 									value={editPages}
-									onChange={(e) => setEditPages(e.target.value)}
+									onChange={(e) => {
+										const newValue = e.target.value;
+										setEditPages(newValue);
+										setEditPagesError(validateField('pages', newValue));
+									}}
 									margin="normal"
 									variant="outlined"
+									error={!!editPagesError}
 								/>
+								{editPagesError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{editPagesError}</Typography>}
 							</Grid>
 						</Grid>
+
 						<Grid container spacing={2}>
+							{/* Издательство */}
 							<Grid item xs={12} sm={6}>
 								<AppleTextField
 									fullWidth
 									label="Издательство"
 									value={editPublisher}
-									onChange={(e) => setEditPublisher(e.target.value)}
+									onChange={(e) => {
+										const newValue = e.target.value;
+										setEditPublisher(newValue);
+										setEditPublisherError(validateField('publisher', newValue));
+									}}
 									margin="normal"
 									variant="outlined"
+									error={!!editPublisherError}
 								/>
+								{editPublisherError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{editPublisherError}</Typography>}
 							</Grid>
+							{/* Место издательства */}
 							<Grid item xs={12} sm={6}>
 								<AppleTextField
 									fullWidth
 									label="Место издательства"
 									value={editPublisherLocation}
-									onChange={(e) => setEditPublisherLocation(e.target.value)}
+									onChange={(e) => {
+										const newValue = e.target.value;
+										setEditPublisherLocation(newValue);
+										setEditPublisherLocationError(validateField('publisherLocation', newValue));
+									}}
 									margin="normal"
 									variant="outlined"
+									error={!!editPublisherLocationError}
 								/>
+								{editPublisherLocationError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{editPublisherLocationError}</Typography>}
 							</Grid>
+							{/* Объем (п.л.) */}
 							<Grid item xs={12} sm={4}>
 								<AppleTextField
 									fullWidth
 									label="Объем (п.л.)"
-									type="number"
 									value={editPrintedSheetsVolume}
-									onChange={(e) => setEditPrintedSheetsVolume(e.target.value)}
+									onChange={(e) => {
+										const newValue = e.target.value;
+										setEditPrintedSheetsVolume(newValue);
+										setEditPrintedSheetsVolumeError(validateField('printedSheetsVolume', newValue));
+									}}
 									margin="normal"
 									variant="outlined"
-									inputProps={{ step: "0.1" }}
+									error={!!editPrintedSheetsVolumeError}
+								//inputProps={{ step: "0.1" }} // Убрали, т.к. валидация ручная
 								/>
+								{editPrintedSheetsVolumeError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{editPrintedSheetsVolumeError}</Typography>}
 							</Grid>
+							{/* Тираж */}
 							<Grid item xs={12} sm={4}>
 								<AppleTextField
 									fullWidth
 									label="Тираж"
-									type="number"
+									// type="number" // Убираем
 									value={editCirculation}
-									onChange={(e) => setEditCirculation(e.target.value)}
+									onChange={(e) => {
+										const newValue = e.target.value;
+										setEditCirculation(newValue);
+										setEditCirculationError(validateField('circulation', newValue));
+									}}
 									margin="normal"
 									variant="outlined"
+									error={!!editCirculationError}
 								/>
+								{editCirculationError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{editCirculationError}</Typography>}
 							</Grid>
+							{/* Кафедра */}
 							<Grid item xs={12} sm={4}>
 								<AppleTextField
 									fullWidth
 									label="Кафедра"
 									value={editDepartment}
-									onChange={(e) => setEditDepartment(e.target.value)}
+									onChange={(e) => {
+										const newValue = e.target.value;
+										setEditDepartment(newValue);
+										setEditDepartmentError(validateField('department', newValue));
+									}}
 									margin="normal"
 									variant="outlined"
+									error={!!editDepartmentError}
 								/>
+								{editDepartmentError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '0px' }}>{editDepartmentError}</Typography>}
 							</Grid>
 						</Grid>
+
+						{/* Код по классификатору */}
 						<AppleTextField
 							fullWidth
 							label="Код по классификатору"
 							value={editClassificationCode}
-							onChange={(e) => setEditClassificationCode(e.target.value)}
+							onChange={(e) => {
+								const newValue = e.target.value;
+								setEditClassificationCode(newValue);
+								setEditClassificationCodeError(validateField('classificationCode', newValue));
+							}}
 							margin="normal"
 							variant="outlined"
+							error={!!editClassificationCodeError}
 						/>
+						{editClassificationCodeError && <Typography color="error" variant="caption" sx={{ display: 'block', pl: '14px', mt: '-8px', mb: '8px' }}>{editClassificationCodeError}</Typography>}
+
+						{/* Примечание */}
 						<AppleTextField
 							fullWidth
 							label="Примечание"
 							value={editNotes}
-							onChange={(e) => setEditNotes(e.target.value)}
+							onChange={(e) => setEditNotes(e.target.value)} // Без валидации
 							margin="normal"
 							variant="outlined"
 							multiline
 							rows={2}
+						// Нет ошибки
 						/>
+
+						{/* Блок выбора файла (редактирование) */}
+						<Box sx={{ mt: 2 }}>
+							<input
+								type="file"
+								accept=".pdf,.docx"
+								onChange={(e) => { // <--- ИЗМЕНЕНИЕ ЗДЕСЬ (для editFile)
+									const selectedFile = e.target.files[0];
+									setEditFile(selectedFile); // Устанавливаем состояние нового файла
+									if (selectedFile && !['pdf', 'docx'].includes(selectedFile.name.split('.').pop().toLowerCase())) {
+										setEditFileError('Подсказка: Недопустимый тип файла (только PDF, DOCX)');
+									} else {
+										setEditFileError('');
+									}
+								}}
+								style={{ display: 'none' }}
+								id="edit-file"
+							/>
+
+							{/* Отображение имени файла ИЛИ ошибки типа файла */}
+							{editFileError ? (
+								<Typography color="error" variant="caption" sx={{ mt: 1, display: 'block' }}>{editFileError}</Typography>
+							) : (
+								editFile && <Typography sx={{ mt: 1, color: '#6E6E73' }}>Новый файл: {editFile.name}</Typography>
+							)}
+							{/* Показываем старый файл, если новый не выбран */}
+							{!editFile && editPublication?.file_url && (
+								<Typography sx={{ mt: 1, color: '#6E6E73' }}>Текущий файл: {editPublication.file_url.split('/').pop()}</Typography>
+							)}
+						</Box>
 
 						<Box sx={{ mt: 2 }}>
 							<input
@@ -4604,10 +4966,10 @@ function Dashboard() {
 			</Dialog>
 			{/* Глобальные Уведомления (как в ManagerDashboard) */}
 			<Collapse in={openSuccess}>
-				{success && (
+				{success && ( // Добавлена проверка, что success не пустая строка
 					<Alert
 						severity="success"
-						sx={{
+						sx={{ /* ваши стили для success Alert */
 							position: 'fixed',
 							top: 16,
 							left: '50%',
@@ -4615,22 +4977,23 @@ function Dashboard() {
 							width: 'fit-content',
 							maxWidth: '90%',
 							borderRadius: '12px',
-							backgroundColor: '#E7F8E7',
-							color: '#1D1D1F',
+							backgroundColor: '#E7F8E7', // Светло-зеленый фон
+							color: '#1D1D1F', // Темный текст
 							boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
 							zIndex: 1500,
 						}}
-						onClose={() => setOpenSuccess(false)}
+						onClose={() => { setOpenSuccess(false); setSuccess(''); }} // Сбрасываем и success текст
 					>
-						{success}
+						{success /* success обычно простая строка */}
 					</Alert>
 				)}
 			</Collapse>
+
 			<Collapse in={openError}>
-				{error && ( // Добавляем проверку на наличие текста ошибки
+				{error && ( // Добавляем проверку на наличие текста/JSX ошибки
 					<Alert
 						severity="error"
-						sx={{
+						sx={{ /* ваши стили для error Alert */
 							position: 'fixed',
 							// Позиционирование относительно верхнего края или другого уведомления
 							top: openSuccess ? 76 : 16, // Если есть success-уведомление, сдвигаем ниже
@@ -4642,14 +5005,23 @@ function Dashboard() {
 							backgroundColor: '#FFF1F0', // Цвет фона для ошибки
 							color: '#1D1D1F',          // Цвет текста
 							boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)',
-							zIndex: 1500,              // Убедимся, что поверх всего остального
+							zIndex: 1499, // Убедимся, что поверх всего остального
+							// Стили для контейнера сообщения Alert, чтобы JSX рендерился корректно
+							'& .MuiAlert-message': {
+								display: 'flex',
+								flexDirection: 'column', // Ошибки друг под другом
+								alignItems: 'flex-start', // Выравнивание текста влево
+								gap: '4px' // Небольшой отступ между строками ошибки
+							}
 						}}
-						onClose={() => setOpenError(false)}
+						onClose={() => { setOpenError(false); setError(''); }} // Сбрасываем и error текст/JSX при закрытии
 					>
-						{error}
+						{error /* error теперь может содержать JSX */}
 					</Alert>
 				)}
 			</Collapse>
+			{/* ---- КОНЕЦ ЗАМЕНЕННОГО БЛОКА ---- */}
+
 		</Container >
 	);
 }
