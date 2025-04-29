@@ -3052,15 +3052,13 @@ function Dashboard() {
 													backgroundColor: '#FFFFFF'
 												}}>
 													<Typography variant="subtitle1" sx={{ mb: 2, color: '#1D1D1F' }}>Авторы</Typography>
-													{/* Отображение общей ошибки обязательности авторов */}
 													{submitAttempted && authorMandatoryError && (
 														<Typography color="error" variant="caption" sx={{ display: 'block', mb: 1 }}>
 															Укажите хотя бы одного автора.
 														</Typography>
 													)}
 													{newAuthors.map((author, index) => (
-														<Grid container spacing={1} key={author.id} sx={{ mb: 2, alignItems: 'flex-start' }}>
-															{/* ... содержимое Grid для автора ... */}
+														<Grid container spacing={1} key={author.id} sx={{ mb: 2, alignItems: 'flex-start' /* Выравнивание */ }}>
 															{/* Grid item для поля ввода */}
 															<Grid item xs={true}>
 																<AppleTextField
@@ -3068,13 +3066,12 @@ function Dashboard() {
 																	label={`Автор ${index + 1} (ФИО)`}
 																	value={author.name}
 																	onChange={(e) => {
-																		// Сбрасываем общую ошибку ОБЯЗАТЕЛЬНОСТИ авторов при вводе в любое поле
 																		if (submitAttempted && authorMandatoryError) setAuthorMandatoryError(false);
-																		handleAuthorChange(index, 'name', e.target.value)
+																		handleAuthorChange(index, 'name', e.target.value); // Используем handleAuthorChange
 																	}}
 																	size="small"
 																	variant="outlined"
-																	error={!!author.error} // Форматная ошибка как и была
+																	error={!!author.error}
 																	sx={{ mb: author.error ? 0.5 : 0 }}
 																/>
 																{author.error && (
@@ -3083,8 +3080,34 @@ function Dashboard() {
 																	</Typography>
 																)}
 															</Grid>
-															{/* Grid items для иконок */}
-															{/* ... */}
+															{/* === НАЧАЛО ВОССТАНОВЛЕННОГО БЛОКА === */}
+															<Grid item xs="auto" sx={{ pt: 0.5 /* Отступ для иконки */ }}>
+																<MuiTooltip title={author.is_employee ? "Автор сотрудник КНИТУ-КАИ" : "Автор не сотрудник КНИТУ-КАИ"} arrow>
+																	<IconButton
+																		// ВАЖНО: Используем handleAuthorChange, а не handleEditAuthorChange
+																		onClick={() => handleAuthorChange(index, 'is_employee', !author.is_employee)}
+																		size="small"
+																		sx={{
+																			color: author.is_employee ? '#0071E3' : 'grey.500', // Цвет иконки
+																			'&:hover': {
+																				backgroundColor: author.is_employee ? 'rgba(0, 113, 227, 0.1)' : 'rgba(0, 0, 0, 0.04)', // Фон при наведении
+																			}
+																		}}
+																		aria-label={author.is_employee ? "Пометить как не сотрудника" : "Пометить как сотрудника"}
+																	>
+																		<PersonIcon fontSize="small" />
+																	</IconButton>
+																</MuiTooltip>
+															</Grid>
+															{/* === КОНЕЦ ВОССТАНОВЛЕННОГО БЛОКА === */}
+															{/* Grid item для иконки удаления */}
+															<Grid item xs="auto" sx={{ pt: 0.5 /* Отступ для иконки */ }}>
+																{newAuthors.length > 1 && ( // Показываем кнопку только если авторов больше одного
+																	<IconButton onClick={() => handleRemoveAuthor(index)} size="small" sx={{ color: '#FF3B30' }} aria-label="Удалить автора">
+																		<DeleteIcon fontSize="small" />
+																	</IconButton>
+																)}
+															</Grid>
 														</Grid>
 													))}
 													<Button startIcon={<AddIcon />} onClick={handleAddAuthor} size="small" sx={{ mt: 1, textTransform: 'none', color: '#0071E3' }}>Добавить автора</Button>
@@ -4063,7 +4086,7 @@ function Dashboard() {
 									)}
 								</> // Закрываем основной фрагмент для value === 3
 							)}
-									{value === 4 && (
+							{value === 4 && (
 								<Box sx={{ mt: 4 }}>
 									<Typography
 										variant="h5"
@@ -4243,7 +4266,55 @@ function Dashboard() {
 								)}
 						</AppleTextField>
 
-						{/* Блок ВАК/WoS/Scopus */}
+						{/* Блоки VAK/WoS/Scopus (Редактирование) */}
+						{editSelectedDisplayNameId && publicationTypes.find(t => t.display_name_id === editSelectedDisplayNameId)?.name?.toLowerCase() === 'article' ||
+							editSelectedDisplayNameId && publicationTypes.find(t => t.display_name_id === editSelectedDisplayNameId)?.name?.toLowerCase() === 'conference' ? (
+							<Box sx={{ mt: 2, display: 'flex', alignItems: 'center', gap: 2 }}>
+								<Typography variant="body2" sx={{ color: '#6E6E73', fontWeight: 500 }}>Индексирование:</Typography>
+								{/* ВАК */}
+								<MuiTooltip title={disableEditVak ? "Статус 'ВАК' установлен типом публикации" : (editIsVak ? "Снять статус ВАК" : "Установить статус ВАК")} arrow>
+									<span> {/* Обертка для disabled */}
+										<IconButton
+											// Используем edit состояния и сеттеры
+											onClick={() => !disableEditVak && setEditIsVak(!editIsVak)}
+											disabled={disableEditVak}
+											sx={{ backgroundColor: editIsVak ? 'rgba(52, 199, 89, 0.15)' : 'transparent', border: editIsVak ? '1px solid #34C759' : '1px solid #D1D1D6', p: 1, transition: 'all 0.2s ease-in-out', ...(disableEditVak && { cursor: 'not-allowed', }), ...(!disableEditVak && { '&:hover': { backgroundColor: editIsVak ? 'rgba(52, 199, 89, 0.25)' : 'rgba(0, 0, 0, 0.04)', transform: 'scale(1.05)' }, }), }}
+											aria-label={editIsVak ? "Снять статус ВАК" : "Установить статус ВАК"}
+										>
+											<Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.8rem', color: editIsVak ? '#34C759' : '#6E6E73' }}>ВАК</Typography>
+										</IconButton>
+									</span>
+								</MuiTooltip>
+								{/* WoS */}
+								<MuiTooltip title={disableEditWoS ? "Статус 'WoS' установлен типом публикации" : (editIsWoS ? "Снять статус WoS" : "Установить статус WoS")} arrow>
+									<span> {/* Обертка для disabled */}
+										<IconButton
+											// Используем edit состояния и сеттеры
+											onClick={() => !disableEditWoS && setEditIsWoS(!editIsWoS)}
+											disabled={disableEditWoS}
+											sx={{ backgroundColor: editIsWoS ? 'rgba(0, 113, 227, 0.15)' : 'transparent', border: editIsWoS ? '1px solid #0071E3' : '1px solid #D1D1D6', p: 1, transition: 'all 0.2s ease-in-out', ...(disableEditWoS && { cursor: 'not-allowed', }), ...(!disableEditWoS && { '&:hover': { backgroundColor: editIsWoS ? 'rgba(0, 113, 227, 0.25)' : 'rgba(0, 0, 0, 0.04)', transform: 'scale(1.05)' }, }), }}
+											aria-label={editIsWoS ? "Снять статус WoS" : "Установить статус WoS"}
+										>
+											<Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.8rem', color: editIsWoS ? '#0071E3' : '#6E6E73' }}>WoS</Typography>
+										</IconButton>
+									</span>
+								</MuiTooltip>
+								{/* Scopus */}
+								<MuiTooltip title={disableEditScopus ? "Статус 'Scopus' установлен типом публикации" : (editIsScopus ? "Снять статус Scopus" : "Установить статус Scopus")} arrow>
+									<span> {/* Обертка для disabled */}
+										<IconButton
+											// Используем edit состояния и сеттеры
+											onClick={() => !disableEditScopus && setEditIsScopus(!editIsScopus)}
+											disabled={disableEditScopus}
+											sx={{ backgroundColor: editIsScopus ? 'rgba(175, 82, 222, 0.15)' : 'transparent', border: editIsScopus ? '1px solid #AF52DE' : '1px solid #D1D1D6', p: 1, transition: 'all 0.2s ease-in-out', ...(disableEditScopus && { cursor: 'not-allowed', }), ...(!disableEditScopus && { '&:hover': { backgroundColor: editIsScopus ? 'rgba(175, 82, 222, 0.25)' : 'rgba(0, 0, 0, 0.04)', transform: 'scale(1.05)' }, }), }}
+											aria-label={editIsScopus ? "Снять статус Scopus" : "Установить статус Scopus"}
+										>
+											<Typography variant="caption" sx={{ fontWeight: 600, fontSize: '0.8rem', color: editIsScopus ? '#AF52DE' : '#6E6E73' }}>Scopus</Typography>
+										</IconButton>
+									</span>
+								</MuiTooltip>
+							</Box>
+						) : null}
 						{/* ... (без изменений) ... */}
 
 						{/* Название */}
