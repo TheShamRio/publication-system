@@ -2,6 +2,11 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { Line } from 'react-chartjs-2';
 import { Snackbar, Slide, Tooltip as MuiTooltip } from '@mui/material';
 import { Chart as ChartJS, CategoryScale, LinearScale, PointElement, LineElement, BarElement, Title, Tooltip, Legend, Filler } from 'chart.js';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns'; // Или AdapterDayjs
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { format } from 'date-fns'; // Или из dayjs
+import ClearIcon from '@mui/icons-material/Clear'; // Для кнопки очистки дат
 import {
 	Container,
 	Typography,
@@ -377,7 +382,8 @@ function Dashboard() {
 	const [classificationCode, setClassificationCode] = useState('');
 	const [notes, setNotes] = useState('');
 	// --- КОНЕЦ НОВЫХ состояний для формы СОЗДАНИЯ ---
-
+	const [exportStartDate, setExportStartDate] = useState(null); // Дата начала экспорта
+	const [exportEndDate, setExportEndDate] = useState(null); // Дата конца экспорта
 	// --- НОВЫЕ состояния для формы РЕДАКТИРОВАНИЯ ---
 	const [editJournalConferenceName, setEditJournalConferenceName] = useState('');
 	const [editDoi, setEditDoi] = useState('');
@@ -484,19 +490,32 @@ function Dashboard() {
 	};
 
 	const handleExportExcel = async () => {
-		try {
-			// Обновляем CSRF токен на всякий случай, если он используется для GET запросов (обычно нет)
-			// await refreshCsrfToken(); // <-- Возможно, это не нужно для GET
+		// --- НОВОЕ: Формирование параметров ---
+		const params = {};
+		if (exportStartDate) {
+			try {
+				params.start_date = format(exportStartDate, 'yyyy-MM-dd');
+			} catch (e) { console.error("Invalid start date format", exportStartDate) }
+		}
+		if (exportEndDate) {
+			try {
+				// Добавляем день, чтобы включить весь конечный день, т.к. бэкэнд использует '<'
+				// Не нужно, бэкэнд теперь сам добавляет день
+				params.end_date = format(exportEndDate, 'yyyy-MM-dd');
+			} catch (e) { console.error("Invalid end date format", exportEndDate) }
+		}
+		console.log("Exporting Excel with params:", params); // Отладка
+		// --- КОНЕЦ НОВОГО ---
 
+		try {
 			const response = await axios.get('http://localhost:5000/api/publications/export-excel', {
 				withCredentials: true,
-				responseType: 'blob', // ВАЖНО: ожидаем бинарные данные (файл)
-				// headers: { 'X-CSRFToken': csrfToken } // <-- Добавьте, если CSRF нужен для GET
+				responseType: 'blob',
+				params: params, // <--- ПЕРЕДАЕМ ПАРАМЕТРЫ
 			});
 
-			// Получаем имя файла из заголовка Content-Disposition
 			const contentDisposition = response.headers['content-disposition'];
-			let filename = 'publications_report.xlsx'; // Имя по умолчанию
+			let filename = 'publications_report.xlsx';
 			if (contentDisposition) {
 				const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
 				if (filenameMatch && filenameMatch.length === 2) {
@@ -504,32 +523,27 @@ function Dashboard() {
 				}
 			}
 
-			// Создаем ссылку для скачивания
 			const url = window.URL.createObjectURL(new Blob([response.data]));
 			const link = document.createElement('a');
 			link.href = url;
-			link.setAttribute('download', filename); // Используем имя файла из заголовка
+			link.setAttribute('download', filename);
 			document.body.appendChild(link);
 			link.click();
 
-			// Очистка
 			link.parentNode.removeChild(link);
 			window.URL.revokeObjectURL(url);
 
-			setSuccess('Отчет Excel успешно скачан!'); // Опциональное уведомление
+			setSuccess('Отчет Excel успешно скачан!');
 			setOpenSuccess(true);
 
 		} catch (err) {
 			console.error('Ошибка скачивания Excel отчета:', err.response?.data || err.message);
 			let errorMsg = 'Не удалось скачать отчет Excel.';
-			// Попытка прочитать ошибку из blob, если сервер вернул JSON в ошибке
 			if (err.response && err.response.data instanceof Blob && err.response.data.type === "application/json") {
 				try {
 					const errorJson = JSON.parse(await err.response.data.text());
 					errorMsg = errorJson.error || errorMsg;
-				} catch (parseError) {
-					console.error("Ошибка парсинга JSON из Blob ошибки:", parseError);
-				}
+				} catch (parseError) { /*...*/ }
 			} else if (err.response?.data?.error) {
 				errorMsg = err.response.data.error;
 			}
@@ -537,7 +551,6 @@ function Dashboard() {
 			setOpenError(true);
 		}
 	};
-
 
 	useEffect(() => {
 		const loadInitialData = async () => {
@@ -2211,26 +2224,89 @@ function Dashboard() {
 
 
 	const handleExportBibTeX = async () => {
+		// --- НОВЫЙ БЛОК: Формирование параметров ---
+		const params = {};
+		if (exportStartDate) {
+			try {
+				params.start_date = format(exportStartDate, 'yyyy-MM-dd');
+			} catch (e) { console.error("Invalid start date format for BibTeX export", exportStartDate) }
+		}
+		if (exportEndDate) {
+			try {
+				// Как и для Excel, передаем просто выбранную дату. Бэкэнд обработает диапазон.
+				params.end_date = format(exportEndDate, 'yyyy-MM-dd');
+			} catch (e) { console.error("Invalid end date format for BibTeX export", exportEndDate) }
+		}
+		console.log("Exporting BibTeX with params:", params); // Отладка
+		// --- КОНЕЦ НОВОГО БЛОКА ---
+
 		try {
-			await refreshCsrfToken();
+			// Обновляем CSRF токен, на всякий случай
+			// await refreshCsrfToken(); // Если GET-запросы требуют CSRF (обычно нет)
+
 			const response = await axios.get('http://localhost:5000/api/publications/export-bibtex', {
 				withCredentials: true,
+				params: params, // <--- ПЕРЕДАЕМ ПАРАМЕТРЫ
+				// responseType 'blob' или 'text' может сработать, зависит от сервера
+				responseType: 'blob', // или 'text', BibTeX обычно текстовый
+				// headers: { 'X-CSRFToken': csrfToken } // Добавьте, если CSRF нужен для GET
 			});
-			const blob = new Blob([response.data], { type: 'application/x-bibtex' });
+
+			// Определяем тип данных для Blob
+			const blobType = response.headers['content-type'] || 'application/x-bibtex; charset=utf-8';
+			// Создаем Blob из данных ответа
+			// Если responseType='blob', response.data уже Blob
+			// Если responseType='text', то нужно new Blob([response.data], ...)
+			const blob = response.data instanceof Blob ? response.data : new Blob([response.data], { type: blobType });
 			const url = window.URL.createObjectURL(blob);
 			const link = document.createElement('a');
 			link.href = url;
-			link.download = 'publications.bib';
+
+			// Получаем имя файла из заголовка
+			const contentDisposition = response.headers['content-disposition'];
+			let filename = 'publications.bib'; // Имя по умолчанию
+			if (contentDisposition) {
+				const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
+				if (filenameMatch && filenameMatch.length === 2) {
+					filename = filenameMatch[1];
+				}
+			}
+			link.download = filename; // Используем имя из заголовка
 			document.body.appendChild(link);
 			link.click();
 			document.body.removeChild(link);
 			window.URL.revokeObjectURL(url);
+
+			// Сообщение об успехе
+			setSuccess('BibTeX файл успешно скачан!');
+			setOpenSuccess(true);
+
 		} catch (err) {
 			console.error('Ошибка выгрузки в BibTeX:', err.response?.data || err.message);
-			alert(`Не удалось экспортировать публикации в BibTeX: ${err.response?.data?.error || 'Внутренняя ошибка сервера'}`);
+			// Попытка извлечь текст ошибки, если это blob/json
+			let errorMsg = 'Не удалось экспортировать публикации в BibTeX.';
+			if (err.response && err.response.data instanceof Blob && (err.response.data.type === "application/json" || err.response.data.type.includes("text"))) {
+				try {
+					const errorText = await err.response.data.text();
+					// Если это JSON ошибка
+					if (err.response.data.type === "application/json") {
+						const errorJson = JSON.parse(errorText);
+						errorMsg = errorJson.error || errorMsg;
+					} else { // Если это просто текст ошибки (например, из make_response)
+						errorMsg = errorText || errorMsg;
+					}
+				} catch (parseError) {
+					console.error("Ошибка парсинга JSON/Text из Blob ошибки:", parseError);
+				}
+			} else if (err.response?.data?.error) { // Обычная JSON ошибка
+				errorMsg = err.response.data.error;
+			} else if (err.response?.data && typeof err.response.data === 'string') { // Строка ошибки
+				errorMsg = err.response.data;
+			}
+			setError(errorMsg); // Используем глобальный обработчик ошибок
+			setOpenError(true);
 		}
 	};
-
 	const chartData = {
 		labels: analytics.map((item) => item.year),
 		datasets: [
@@ -4105,6 +4181,47 @@ function Dashboard() {
 											<Typography variant="body1" sx={{ color: '#6E6E73', mb: 2 }}>
 												Вы можете экспортировать свои публикации в формате BibTeX или Excel.
 											</Typography>
+											{/* --- НОВЫЙ БЛОК С ВЫБОРОМ ДАТ --- */}
+											<Typography variant="body2" sx={{ color: '#1D1D1F', fontWeight: 500, mb: 1 }}>
+												Диапазон дат для Excel отчета (по дате публикации):
+											</Typography>
+											<LocalizationProvider dateAdapter={AdapterDateFns}> {/* Обертка для DatePicker */}
+												<Box sx={{ display: 'flex', gap: 2, mb: 3, alignItems: 'center' }}>
+													<DatePicker
+														label="Дата начала"
+														value={exportStartDate}
+														onChange={(newValue) => setExportStartDate(newValue)}
+														slots={{ textField: AppleTextField }} // Используем кастомный TextField
+														slotProps={{
+															textField: { // Пропсы для TextField внутри DatePicker
+																variant: 'outlined',
+																size: 'small'
+															}
+														}}
+														maxDate={exportEndDate || undefined} // Нельзя выбрать позже конечной
+														format="dd.MM.yyyy" // Формат отображения
+													/>
+													<DatePicker
+														label="Дата конца"
+														value={exportEndDate}
+														onChange={(newValue) => setExportEndDate(newValue)}
+														slots={{ textField: AppleTextField }}
+														slotProps={{ textField: { variant: 'outlined', size: 'small' } }}
+														minDate={exportStartDate || undefined} // Нельзя выбрать раньше начальной
+														format="dd.MM.yyyy"
+													/>
+													<IconButton
+														onClick={() => { setExportStartDate(null); setExportEndDate(null); }}
+														size="small"
+														title="Очистить даты"
+														disabled={!exportStartDate && !exportEndDate}
+														sx={{ color: '#0071E3' }}
+													>
+														<ClearIcon />
+													</IconButton>
+												</Box>
+											</LocalizationProvider>
+											{/* --- КОНЕЦ НОВОГО БЛОКА С ВЫБОРОМ ДАТ --- */}
 											<Box sx={{ display: 'flex', gap: 2 }}> {/* Оборачиваем кнопки */}
 												<AppleButton onClick={handleExportBibTeX}>
 													Экспортировать в BibTeX

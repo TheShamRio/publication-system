@@ -16,7 +16,7 @@ from bibtexparser.bibdatabase import BibDatabase
 from bibtexparser.bwriter import BibTexWriter
 from bibtexparser.customization import homogenize_latex_encoding, splitname # Для парсинга авторов
 import logging
-from datetime import datetime, UTC
+from datetime import datetime, timedelta, UTC
 import json
 from werkzeug.security import generate_password_hash, check_password_hash
 
@@ -83,17 +83,55 @@ def get_publication(pub_id):
 def export_excel_report():
     """
     Генерирует и отдает Excel отчет по публикациям текущего пользователя.
+    Принимает опциональные параметры start_date и end_date для фильтрации.
     """
     user_id = current_user.id
     logger.debug(f"Запрос на генерацию Excel отчета для пользователя {user_id}")
 
+    # --- ПОЛУЧЕНИЕ И ПАРСИНГ ДАТ ---
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+
+    start_date = None
+    end_date = None
+
+    if start_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            logger.debug(f"Парсинг start_date: {start_date_str} -> {start_date}")
+        except ValueError:
+            logger.warning(f"Неверный формат start_date: {start_date_str}")
+            return jsonify({'error': 'Неверный формат начальной даты. Используйте YYYY-MM-DD.'}), 400
+
+    if end_date_str:
+        try:
+            # Парсим как дату, время будет 00:00:00
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+            logger.debug(f"Парсинг end_date: {end_date_str} -> {end_date}")
+        except ValueError:
+            logger.warning(f"Неверный формат end_date: {end_date_str}")
+            return jsonify({'error': 'Неверный формат конечной даты. Используйте YYYY-MM-DD.'}), 400
+
+    # Проверка: начальная дата не должна быть позже конечной
+    if start_date and end_date and start_date > end_date:
+        logger.warning("Начальная дата позже конечной.")
+        return jsonify({'error': 'Начальная дата не может быть позже конечной даты.'}), 400
+    # --- КОНЕЦ ПОЛУЧЕНИЯ И ПАРСИНГА ДАТ ---
+
     try:
-        # Вызываем функцию генерации отчета
-        excel_data_bytes = generate_excel_report(user_id)
+        # --- ПЕРЕДАЧА ДАТ В ФУНКЦИЮ ГЕНЕРАЦИИ ---
+        excel_data_bytes = generate_excel_report(user_id, start_date, end_date)
+        # --- КОНЕЦ ПЕРЕДАЧИ ДАТ ---
 
         # Формируем имя файла
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"publications_report_{current_user.username}_{timestamp}.xlsx"
+        date_range_suffix = ""
+        if start_date or end_date:
+            date_range_suffix += "_"
+            if start_date: date_range_suffix += f"from_{start_date.strftime('%Y%m%d')}"
+            if end_date: date_range_suffix += f"_to_{end_date.strftime('%Y%m%d')}"
+
+        filename = f"publications_report_{current_user.username}{date_range_suffix}_{timestamp}.xlsx"
 
         logger.debug(f"Excel отчет сгенерирован. Отправка файла: {filename}")
 
@@ -102,12 +140,11 @@ def export_excel_report():
             BytesIO(excel_data_bytes),
             mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
             as_attachment=True,
-            download_name=filename # Используем новое имя файла
+            download_name=filename
         )
 
     except Exception as e:
-        logger.error(f"Ошибка при генерации Excel отчета для пользователя {user_id}: {str(e)}", exc_info=True)
-        # Возвращаем ошибку пользователю
+        logger.error(f"Ошибка при генерации Excel отчета для пользователя {user_id} ({start_date_str}-{end_date_str}): {str(e)}", exc_info=True)
         return jsonify({'error': f'Не удалось сгенерировать отчет: {str(e)}'}), 500
 
 @bp.route('/publications/<int:pub_id>/comments', methods=['POST'])
@@ -1317,137 +1354,158 @@ def attach_file(pub_id):
 @bp.route('/publications/export-bibtex', methods=['GET'])
 @login_required
 def export_bibtex():
-    logger.debug(f"Получен GET запрос для /publications/export-bibtex от пользователя {current_user.id}")
+    user_id = current_user.id
+    logger.debug(f"Получен GET запрос для /publications/export-bibtex от пользователя {user_id}")
+
+    # --- НОВЫЙ БЛОК: ПОЛУЧЕНИЕ И ПАРСИНГ ДАТ ---
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+
+    start_date = None
+    end_date = None
+
+    if start_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            logger.debug(f"BibTeX экспорт: Парсинг start_date: {start_date_str} -> {start_date}")
+        except ValueError:
+            logger.warning(f"BibTeX экспорт: Неверный формат start_date: {start_date_str}")
+            # Возвращаем ошибку, а не пустой файл
+            return make_response("Ошибка: Неверный формат начальной даты. Используйте YYYY-MM-DD.", 400)
+
+    if end_date_str:
+        try:
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+            logger.debug(f"BibTeX экспорт: Парсинг end_date: {end_date_str} -> {end_date}")
+        except ValueError:
+            logger.warning(f"BibTeX экспорт: Неверный формат end_date: {end_date_str}")
+            return make_response("Ошибка: Неверный формат конечной даты. Используйте YYYY-MM-DD.", 400)
+
+    if start_date and end_date and start_date > end_date:
+        logger.warning("BibTeX экспорт: Начальная дата позже конечной.")
+        return make_response("Ошибка: Начальная дата не может быть позже конечной даты.", 400)
+    # --- КОНЕЦ НОВОГО БЛОКА ---
+
     try:
-        logger.debug(f"Запрос публикаций для экспорта пользователем {current_user.id}")
-        publications = Publication.query.filter_by(user_id=current_user.id)\
+        # --- ОБНОВЛЕННЫЙ ЗАПРОС К БД ---
+        query = Publication.query.filter_by(user_id=user_id)\
             .options(
                 db.joinedload(Publication.authors),
-                db.joinedload(Publication.type) # Убедимся что тип загружен
-             )\
-            .order_by(Publication.year.desc(), Publication.title)\
-            .all()
-        logger.debug(f"Найдено публикаций для экспорта: {len(publications)}")
+                db.joinedload(Publication.type)
+            )
+
+        # Применяем фильтры по датам, если они заданы
+        if start_date:
+            query = query.filter(Publication.published_at != None, Publication.published_at >= start_date)
+            logger.debug(f"BibTeX фильтр: >= {start_date}")
+
+        if end_date:
+            # Как и для Excel, фильтруем по началу следующего дня
+            end_of_day_inclusive = end_date + timedelta(days=1)
+            query = query.filter(Publication.published_at != None, Publication.published_at < end_of_day_inclusive)
+            logger.debug(f"BibTeX фильтр: < {end_of_day_inclusive}")
+
+        # Сортировка и выполнение запроса
+        publications = query.order_by(Publication.year.desc(), Publication.title).all()
+        # --- КОНЕЦ ОБНОВЛЕННОГО ЗАПРОСА К БД ---
+
+        logger.debug(f"Найдено публикаций для BibTeX экспорта ({start_date_str}-{end_date_str}): {len(publications)}")
 
         if not publications:
-             logger.info(f"Нет публикаций для экспорта для пользователя {current_user.id}")
-             # Возвращаем пустой файл или сообщение? Вернем пустой файл.
+             logger.info(f"Нет публикаций для BibTeX экспорта для пользователя {user_id} за указанный период.")
              bib_db_empty = BibDatabase()
              bibtex_str_empty = BibTexWriter().write(bib_db_empty)
+             # --- ОБНОВЛЕНО ИМЯ ФАЙЛА ДЛЯ ПУСТОГО РЕЗУЛЬТАТА ---
+             timestamp_empty = datetime.now().strftime("%Y%m%d_%H%M%S")
+             date_range_suffix_empty = ""
+             if start_date or end_date: date_range_suffix_empty += "_"
+             if start_date: date_range_suffix_empty += f"from_{start_date.strftime('%Y%m%d')}"
+             if end_date: date_range_suffix_empty += f"_to_{end_date.strftime('%Y%m%d')}"
+             filename_empty = f"publications{date_range_suffix_empty}_empty_{timestamp_empty}.bib"
              response_empty = make_response(bibtex_str_empty)
-             response_empty.headers['Content-Disposition'] = 'attachment; filename="publications_empty.bib"'
+             response_empty.headers['Content-Disposition'] = f'attachment; filename="{filename_empty}"' # Добавлены кавычки на всякий случай
              response_empty.headers['Content-Type'] = 'application/x-bibtex; charset=utf-8'
              return response_empty
+             # --- КОНЕЦ ОБНОВЛЕНИЯ ---
 
-
+        # --- Остальная логика BibTeX генерации без изменений ---
         bib_db = BibDatabase()
         entries_list = []
         for i, pub in enumerate(publications):
             entry = {}
-            # --- Тип записи ---
-            # Берем имя из связанной таблицы PublicationType
-            # Убираем '@', если вдруг он там есть (не должен по вашим данным)
-            # Если тип не задан, используем 'misc' по умолчанию
+            # Тип записи
             entry['ENTRYTYPE'] = pub.type.name.lower().lstrip('@') if pub.type and pub.type.name else 'misc'
-            bibtex_type = entry['ENTRYTYPE'] # Сохраним для удобства
-
-            # --- ID ---
-            # Делаем ID уникальным в рамках экспорта (пользователь + ID публикации)
-            entry['ID'] = f'user{current_user.id}_pub{pub.id}' # Можно добавить индекс i если нужно
-
-            # --- Основные поля ---
+            bibtex_type = entry['ENTRYTYPE']
+            # ID
+            entry['ID'] = f'user{user_id}_pub{pub.id}_{i}' # Добавлен индекс для большей уникальности
+            # Основные поля
             if pub.title: entry['title'] = pub.title
-            author_names = [author.name for author in pub.authors if author.name] # Исключаем пустые имена
+            author_names = [author.name for author in pub.authors if author.name]
             if author_names: entry['author'] = ' and '.join(author_names)
             if pub.year: entry['year'] = str(pub.year)
 
-            # --- Экспорт полей в соответствующие поля BibTeX ---
-            # Наименование журнала/конференции
+            # Конкретные поля
             if pub.journal_conference_name:
-                if bibtex_type == 'article':
-                    entry['journal'] = pub.journal_conference_name
-                elif bibtex_type in ['inproceedings', 'conference', 'incollection', 'proceedings', 'book']:
-                    entry['booktitle'] = pub.journal_conference_name # booktitle используется чаще всего
-                # Если нужно другое поле для 'book', можно добавить условие
-                # elif bibtex_type == 'book':
-                #     entry['series'] = pub.journal_conference_name # Например, в series
-                # else: # В остальных случаях - в note
-                #     entry.setdefault('note', []).append(f"Место публикации: {pub.journal_conference_name}")
-                else: # В не самых очевидных случаях (misc, thesis...) добавим в notes
-                    entry.setdefault('note', []).append(f"Источник: {pub.journal_conference_name}")
+                 if bibtex_type == 'article': entry['journal'] = pub.journal_conference_name
+                 elif bibtex_type in ['inproceedings', 'conference', 'incollection', 'proceedings', 'book']: entry['booktitle'] = pub.journal_conference_name
+                 else: entry.setdefault('note', []).append(f"Источник: {pub.journal_conference_name}")
 
-
-            # DOI, ISSN, ISBN
             if pub.doi: entry['doi'] = pub.doi
             if pub.issn: entry['issn'] = pub.issn
             if pub.isbn: entry['isbn'] = pub.isbn
+            if pub.volume: entry['volume'] = str(pub.volume)
+            if pub.number: entry['number'] = str(pub.number)
+            if pub.pages: entry['pages'] = str(pub.pages).replace('-', '--')
 
-            # Том, номер, страницы - прямой экспорт
-            if pub.volume: entry['volume'] = str(pub.volume) # Убедимся, что строка
-            if pub.number: entry['number'] = str(pub.number) # Убедимся, что строка
-            if pub.pages: entry['pages'] = str(pub.pages).replace('-', '--') # В BibTeX часто используют -- для диапазона
-
-            # Издательство, Место издательства
             if pub.publisher:
-                 if bibtex_type in ['book', 'inbook', 'proceedings', 'booklet', 'manual']:
-                      entry['publisher'] = pub.publisher
-                 elif bibtex_type in ['phdthesis', 'mastersthesis', 'techreport']:
-                      entry['institution'] = pub.publisher # 'institution' или 'school'
-                 else: # Для article, inproceedings - менее стандартно, в note
-                     entry.setdefault('note', []).append(f"Издатель/Организация: {pub.publisher}")
+                 if bibtex_type in ['book', 'inbook', 'proceedings', 'booklet', 'manual']: entry['publisher'] = pub.publisher
+                 elif bibtex_type in ['phdthesis', 'mastersthesis', 'techreport']: entry['institution'] = pub.publisher
+                 else: entry.setdefault('note', []).append(f"Издатель/Организация: {pub.publisher}")
 
             if pub.publisher_location: entry['address'] = pub.publisher_location
 
-            # Собираем все дополнительные и нестандартные поля в 'note'
-            # Используем setdefault для создания списка notes, если его еще нет
-            note_list = entry.setdefault('note', []) # Теперь это список строк
-
+            # Дополнительные поля в note
+            note_list = entry.setdefault('note', [])
             if pub.quartile: note_list.append(f"Квартиль: {pub.quartile}")
             if pub.department: note_list.append(f"Кафедра: {pub.department}")
-            # Обработка Float и Int перед добавлением в note
-            if pub.printed_sheets_volume is not None:
-                note_list.append(f"Объем (п.л.): {float(pub.printed_sheets_volume):g}") # Используем :g для компактного float
-            if pub.circulation is not None:
-                note_list.append(f"Тираж: {int(pub.circulation)}")
+            if pub.printed_sheets_volume is not None: note_list.append(f"Объем (п.л.): {float(pub.printed_sheets_volume):g}")
+            if pub.circulation is not None: note_list.append(f"Тираж: {int(pub.circulation)}")
             if pub.classification_code: note_list.append(f"Классификатор: {pub.classification_code}")
+            if pub.notes: note_list.append(f"{pub.notes.strip()}")
 
-            # Добавляем существующее поле 'notes' в общий список примечаний
-            if pub.notes: note_list.append(f"{pub.notes.strip()}") # Добавляем как есть
-
-            # --- Конец экспорта ---
-
-            # Объединяем заметки в одну строку, если они есть
+            # Объединение note
             if note_list:
-                entry['note'] = '; '.join(note_list) # Соединяем через точку с запятой
-            elif 'note' in entry: # Если note был создан, но список пуст
-                 del entry['note'] # Удаляем пустое поле note
-
-            # Опционально: Удаляем поля, значение которых None или пустая строка
-            # entry = {k: v for k, v in entry.items() if v is not None and v != ''}
+                entry['note'] = '; '.join(note_list)
+            elif 'note' in entry:
+                 del entry['note']
 
             entries_list.append(entry)
-            logger.debug(f"Подготовлена запись для экспорта: ID={entry['ID']}, Type={entry['ENTRYTYPE']}, Title='{entry.get('title', '')[:30]}...'")
+        # --- Конец логики BibTeX генерации ---
 
         bib_db.entries = entries_list
 
-        # Настройка записи
         writer = BibTexWriter()
-        writer.indent = '  '       # Отступ
-        writer.comma_first = False # Запятая в конце
+        writer.indent = '  '
+        writer.comma_first = False
         bibtex_str = writer.write(bib_db)
 
-        # Формирование ответа
-        response = make_response(bibtex_str)
-        # Добавляем дату к имени файла
+        # --- ОБНОВЛЕНО ИМЯ ФАЙЛА ---
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        response.headers['Content-Disposition'] = f'attachment; filename="publications_{timestamp}.bib"'
-        response.headers['Content-Type'] = 'application/x-bibtex; charset=utf-8' # Указание кодировки
-        logger.debug("BibTeX файл успешно сгенерирован и будет отправлен")
+        date_range_suffix = ""
+        if start_date or end_date: date_range_suffix += "_"
+        if start_date: date_range_suffix += f"from_{start_date.strftime('%Y%m%d')}"
+        if end_date: date_range_suffix += f"_to_{end_date.strftime('%Y%m%d')}"
+        filename = f"publications{date_range_suffix}_{timestamp}.bib"
+        # --- КОНЕЦ ОБНОВЛЕНИЯ ИМЕНИ ФАЙЛА ---
+
+        response = make_response(bibtex_str)
+        response.headers['Content-Disposition'] = f'attachment; filename="{filename}"' # Добавлены кавычки
+        response.headers['Content-Type'] = 'application/x-bibtex; charset=utf-8'
+        logger.debug(f"BibTeX файл ({filename}) успешно сгенерирован и будет отправлен")
         return response
 
     except Exception as e:
-        logger.error(f"Критическая ошибка при экспорте BibTeX: {str(e)}", exc_info=True)
-        # Вместо JSON можно вернуть HTML страницу с ошибкой или простой текст
+        logger.error(f"Критическая ошибка при экспорте BibTeX ({start_date_str}-{end_date_str}): {str(e)}", exc_info=True)
         return make_response(f"Ошибка сервера при генерации BibTeX файла: {str(e)}", 500)
 
 @bp.route('/analytics/yearly', methods=['GET'])

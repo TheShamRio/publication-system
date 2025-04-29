@@ -4,31 +4,59 @@ from openpyxl.utils import get_column_letter
 from io import BytesIO
 from .models import db, Publication, PublicationAuthor, PublicationTypeDisplayName, User
 from sqlalchemy.orm import joinedload, selectinload # Импортируем для "жадной" загрузки
-
-def generate_excel_report(user_id: int) -> bytes:
+from datetime import datetime, timedelta # Добавлено timedelta
+from typing import Optional     
+# --- ОБНОВЛЕННАЯ СИГНАТУРА ФУНКЦИИ ---
+def generate_excel_report(user_id: int, start_date: Optional[datetime] = None, end_date: Optional[datetime] = None) -> bytes:
+# --- КОНЕЦ ОБНОВЛЕННОЙ СИГНАТУРЫ ---
     """
     Генерирует Excel отчет по публикациям пользователя с измененным заголовком.
+    Фильтрует по диапазону дат публикации, если они указаны.
     Жирные границы для строк 1 и 3, тонкие для остальных.
 
     Args:
         user_id: ID пользователя, для которого генерируется отчет.
+        start_date: Начальная дата (включительно) для фильтрации по published_at.
+        end_date: Конечная дата (включительно) для фильтрации по published_at.
 
     Returns:
         Содержимое Excel файла в виде байтов.
     """
     # 1. Загрузка данных пользователя и его публикаций из БД
-    publications = Publication.query.filter(
-            Publication.user_id == user_id,
-            # Publication.status == 'published' # <-- Раскомментируйте, если нужен отчет только по опубликованным
-        ).options(
-            selectinload(Publication.authors),
-            joinedload(Publication.type),
-            joinedload(Publication.display_name)
-        ).order_by(
-            Publication.year.desc(), Publication.title
-        ).all()
+    # --- ОБНОВЛЕННЫЙ ЗАПРОС К БД ---
+    query = Publication.query.filter(
+        Publication.user_id == user_id,
+        # Раскомментируйте следующую строку, если все еще хотите фильтровать только опубликованные
+        # Publication.status == 'published'
+    ).options(
+        selectinload(Publication.authors),
+        joinedload(Publication.type),
+        joinedload(Publication.display_name)
+    )
+
+    # Применяем фильтры по датам, если они заданы
+    if start_date:
+        # Убедимся, что published_at существует и больше или равно начальной дате
+        query = query.filter(Publication.published_at != None, Publication.published_at >= start_date)
+        print(f"Фильтр: >= {start_date}") # Отладка
+
+    if end_date:
+        # Для включения публикаций за *весь* конечный день,
+        # нужно фильтровать по началу *следующего* дня
+        end_of_day_inclusive = end_date + timedelta(days=1)
+        query = query.filter(Publication.published_at != None, Publication.published_at < end_of_day_inclusive)
+        print(f"Фильтр: < {end_of_day_inclusive}") # Отладка
+
+    # Сортировка остается прежней
+    publications = query.order_by(
+        Publication.year.desc(), Publication.title
+    ).all()
+    # --- КОНЕЦ ОБНОВЛЕННОГО ЗАПРОСА К БД ---
+
+    print(f"Найдено публикаций для отчета ({user_id}, {start_date}-{end_date}): {len(publications)}") # Отладка
 
     # 2. Создание Excel Workbook и Worksheet
+    # ... (остальной код функции без изменений) ...
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "Публикации"
@@ -122,7 +150,15 @@ def generate_excel_report(user_id: int) -> bytes:
         # Сообщение "Публикации не найдены"
         ws.merge_cells(start_row=current_data_row_index, start_column=1, end_row=current_data_row_index, end_column=num_columns)
         merged_cell = ws.cell(row=current_data_row_index, column=1)
-        merged_cell.value = "Публикации не найдены"
+        # --- ОБНОВЛЕНО СООБЩЕНИЕ ---
+        message = "Публикации не найдены"
+        if start_date or end_date:
+            message += f" за период"
+            if start_date: message += f" с {start_date.strftime('%d.%m.%Y')}"
+            if end_date: message += f" по {end_date.strftime('%d.%m.%Y')}"
+        merged_cell.value = message + "."
+        # --- КОНЕЦ ОБНОВЛЕНИЯ СООБЩЕНИЯ ---
+
         merged_cell.alignment = Alignment(horizontal='center', vertical='center')
         merged_cell.font = italic_font
         merged_cell.border = thin_border # <--- Тонкие границы
@@ -138,72 +174,31 @@ def generate_excel_report(user_id: int) -> bytes:
                 num_vol_pages_parts.append(f"С. {pages_formatted}")
             num_vol_pages_str = ", ".join(num_vol_pages_parts)
             status_parts = []
-            # Порядок важен для итоговой строки, если это имеет значение
-            if pub.is_wos:
-                 # status_part = "WoS" # Старый вариант
-                 # if pub.quartile:
-                 #     status_part += f" (Q{pub.quartile})" # Убираем квартиль отсюда
-                 # status_parts.append(status_part)
-                 status_parts.append("1(WoS)") # <--- Новый формат
-
-            if pub.is_scopus:
-                 # status_part = "Scopus" # Старый вариант
-                 # # Добавляем Q для Scopus, только если нет WoS (логика остается)
-                 # if pub.quartile and not pub.is_wos:
-                 #    status_part += f" (Q{pub.quartile})" # Убираем квартиль отсюда
-                 # status_parts.append(status_part)
-                 status_parts.append("1(Scop)") # <--- Новый формат (с сокращением)
-
-            if pub.is_vak:
-                # status_parts.append("ВАК") # Старый вариант
-                status_parts.append("2(BAK)") # <--- Новый формат (с BAK)
-
-            # Соединяем части ПРОБЕЛАМИ
-            status_str = " ".join(status_parts) # <--- Используем пробел как разделитель
-
-            # --- Остальная логика подготовки данных --- (без изменений)
+            if pub.is_wos: status_parts.append("1(WoS)")
+            if pub.is_scopus: status_parts.append("1(Scop)")
+            if pub.is_vak: status_parts.append("2(BAK)")
+            status_str = " ".join(status_parts)
             total_authors = len(pub.authors)
             employee_authors = sum(1 for author in pub.authors if author.is_employee)
             coauthors = ", ".join(author.name for author in pub.authors[1:]) if total_authors > 1 else ""
-            # --- КОРРЕКТНАЯ логика определения work_type ---
-            work_type = ""  # Значение по умолчанию
 
+            work_type = ""
             if pub.display_name and pub.display_name.display_name == "Конференция РИНЦ":
-                # 1. Специальный случай: Если display_name ТОЧНО "Конференция РИНЦ"
                 work_type = "Конференция РИНЦ"
             elif pub.type and pub.type.name:
-                # 2. Если НЕ "Конференция РИНЦ", применяем СТАРУЮ/ОБОБЩЕННУЮ логику
                 type_name_lower = pub.type.name.lower()
-                if type_name_lower == 'article':
-                    # Обобщенное название для статей
-                    work_type = "Статья"
-                elif type_name_lower == 'conference':
-                    # Обобщенное название для конференций (кроме "Конференция РИНЦ", обработанной выше)
-                    work_type = "Конференция"
-                else:
-                    # 3. Для всех остальных типов (монографии, книги и т.д.)
-                    # используем их специфическое русское имя (display_name) если есть,
-                    # иначе базовое имя типа (type.name)
-                    work_type = pub.display_name.display_name if pub.display_name else pub.type.name
+                if type_name_lower == 'article': work_type = "Статья"
+                elif type_name_lower == 'conference': work_type = "Конференция"
+                else: work_type = pub.display_name.display_name if pub.display_name else pub.type.name
             elif pub.display_name and pub.display_name.display_name:
-                # 4. Запасной вариант: если базовый тип (pub.type.name) не определен,
-                # но русское название (display_name) есть (маловероятно, но на всякий случай)
                 work_type = pub.display_name.display_name
 
-            # Если ничего не подошло, work_type останется пустой строкой ""
-            # --- Конец КОРРЕКТНОЙ логики work_type ---
-
-            # --- Формирование строки данных для Excel ---
             data_row_values = [
                 i, first_author_name, pub.title or "",
                 pub.journal_conference_name or "", pub.doi or "", pub.issn or "",
-                pub.isbn or "",
-                pub.quartile or "", # Квартиль остается в своей колонке (H)
-                num_vol_pages_str,
-                status_str,        # <--- Используем новую строку статусов
-                total_authors, employee_authors, pub.department or "",
-                coauthors, work_type, pub.publisher or "", pub.publisher_location or "",
-                pub.year or "",
+                pub.isbn or "", pub.quartile or "", num_vol_pages_str, status_str,
+                total_authors, employee_authors, pub.department or "", coauthors,
+                work_type, pub.publisher or "", pub.publisher_location or "", pub.year or "",
                 pub.printed_sheets_volume if pub.printed_sheets_volume is not None else "",
                 pub.circulation if pub.circulation is not None else "",
                 pub.classification_code or "", pub.notes or ""
@@ -213,10 +208,9 @@ def generate_excel_report(user_id: int) -> bytes:
             for col_idx, value in enumerate(data_row_values, 1):
                 cell = ws.cell(row=current_data_row_index, column=col_idx)
                 cell.value = value
-                cell.font = data_font # Шрифт 9
+                cell.font = data_font
                 cell.alignment = data_alignment
-                cell.border = thin_border # <--- Тонкие границы
-
+                cell.border = thin_border
             current_data_row_index += 1
 
     # 9. Настройка ширины колонок (без изменений)
@@ -231,7 +225,6 @@ def generate_excel_report(user_id: int) -> bytes:
         initial_width = initial_widths.get(col_letter, 10)
         adjusted_width = initial_width + width_increment
         ws.column_dimensions[col_letter].width = adjusted_width
-
 
     # 10. Сохранение в байтовый поток
     buffer = BytesIO()
