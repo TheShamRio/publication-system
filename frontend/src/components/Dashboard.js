@@ -552,6 +552,75 @@ function Dashboard() {
 		}
 	};
 
+	const handleExportDocx = async () => {
+		// Формирование параметров (такое же, как для Excel)
+		const params = {};
+		if (exportStartDate) {
+			try {
+				params.start_date = format(exportStartDate, 'yyyy-MM-dd');
+			} catch (e) { console.error("Invalid start date format for DOCX", exportStartDate) }
+		}
+		if (exportEndDate) {
+			try {
+				params.end_date = format(exportEndDate, 'yyyy-MM-dd');
+			} catch (e) { console.error("Invalid end date format for DOCX", exportEndDate) }
+		}
+		console.log("Exporting DOCX with params:", params);
+
+		try {
+			// Обновляем CSRF на всякий случай
+			// await refreshCsrfToken(); // Если GET требует CSRF
+
+			// Вызов НОВОГО эндпоинта
+			const response = await axios.get('http://localhost:5000/api/publications/export-docx', {
+				withCredentials: true,
+				responseType: 'blob', // Ожидаем файл
+				params: params,       // Передаем даты
+				// headers: { 'X-CSRFToken': csrfToken } // Если нужен CSRF
+			});
+
+			// Обработка ответа и скачивание файла (аналогично Excel)
+			const contentDisposition = response.headers['content-disposition'];
+			let filename = 'publications_report.docx'; // Имя по умолчанию
+			if (contentDisposition) {
+				const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
+				if (filenameMatch && filenameMatch.length === 2) {
+					filename = filenameMatch[1];
+				}
+			}
+
+			const url = window.URL.createObjectURL(new Blob([response.data]));
+			const link = document.createElement('a');
+			link.href = url;
+			link.setAttribute('download', filename);
+			document.body.appendChild(link);
+			link.click();
+
+			link.parentNode.removeChild(link);
+			window.URL.revokeObjectURL(url);
+
+			setSuccess('Отчет DOCX успешно скачан!');
+			setOpenSuccess(true);
+
+		} catch (err) {
+			console.error('Ошибка скачивания DOCX отчета:', err.response?.data || err.message);
+			let errorMsg = 'Не удалось скачать отчет DOCX.';
+			// Обработка ошибок (аналогично Excel)
+			if (err.response && err.response.data instanceof Blob && err.response.data.type === "application/json") {
+				try {
+					const errorJson = JSON.parse(await err.response.data.text());
+					errorMsg = errorJson.error || errorMsg;
+				} catch (parseError) { /*...*/ }
+			} else if (err.response?.data?.error) {
+				errorMsg = err.response.data.error;
+			} else if (err.response?.data && typeof err.response.data === 'string') { // Строка ошибки
+				errorMsg = err.response.data;
+			}
+			setError(errorMsg);
+			setOpenError(true);
+		}
+	};
+
 	useEffect(() => {
 		const loadInitialData = async () => {
 			setInitializing(true);
@@ -2930,15 +2999,27 @@ function Dashboard() {
 					<Tabs
 						value={value}
 						onChange={handleTabChange}
+						centered
 						sx={{
 							mb: 4,
+							borderBottom: 1,        // Опционально: линия под вкладками
+							borderColor: 'divider', // Опционально: линия под вкладками
+
 							'& .MuiTab-root': {
 								color: '#6E6E73',
-								fontSize: '1.1rem',
-								textTransform: 'none',
-								borderRadius: '12px',
-								'&:hover': { color: '#0071E3', backgroundColor: '#F5F5F7' },
-								'&.Mui-selected': { color: '#1D1D1F', backgroundColor: '#F5F5F7' },
+								fontWeight: 600, // Можно чуть уменьшить жирность, если нужно
+								fontSize: '1rem', // <-- УМЕНЬШАЕМ РАЗМЕР ШРИФТА (подберите значение)
+								textTransform: 'none', // Если еще не было - убирает КАПС
+								minWidth: 'auto',     // <-- ПОЗВОЛЯЕМ СЖИМАТЬСЯ СИЛЬНЕЕ
+								paddingLeft: 1.5,       // <-- УМЕНЬШАЕМ ОТСТУП СЛЕВА (подберите значение, 1.5 = 12px)
+								paddingRight: 1.5,      // <-- УМЕНЬШАЕМ ОТСТУП СПРАВА (подберите значение, 1.5 = 12px)
+								// Можно еще немного уменьшить вертикальные отступы, если высота мешает
+								// paddingTop: '6px',
+								// paddingBottom: '6px',
+							},
+							'& .MuiTab-root.Mui-selected': {
+								color: '#0071E3',
+								fontWeight: 600, // Можно вернуть жирность для активной вкладки
 							},
 							'& .MuiTabs-indicator': { backgroundColor: '#0071E3' },
 						}}
@@ -4183,7 +4264,7 @@ function Dashboard() {
 											</Typography>
 											{/* --- НОВЫЙ БЛОК С ВЫБОРОМ ДАТ --- */}
 											<Typography variant="body2" sx={{ color: '#1D1D1F', fontWeight: 500, mb: 1 }}>
-												Диапазон дат для Excel отчета (по дате публикации):
+												Диапазон дат для Excel отчета и экспорта в BibTeX (по дате публикации):
 											</Typography>
 											<LocalizationProvider dateAdapter={AdapterDateFns}> {/* Обертка для DatePicker */}
 												<Box sx={{ display: 'flex', gap: 2, mb: 3, alignItems: 'center' }}>
@@ -4226,6 +4307,14 @@ function Dashboard() {
 												<AppleButton onClick={handleExportBibTeX}>
 													Экспортировать в BibTeX
 												</AppleButton>
+												{/* --- НОВАЯ КНОПКА --- */}
+												<AppleButton
+													onClick={handleExportDocx}
+													startIcon={<DownloadIcon />} // Используем ту же иконку
+												>
+													Экспортировать в Word
+												</AppleButton>
+												{/* --- КОНЕЦ НОВОЙ КНОПКИ --- */}
 												{/* Новая кнопка */}
 												<AppleButton
 													onClick={handleExportExcel}

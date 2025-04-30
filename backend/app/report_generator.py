@@ -27,7 +27,7 @@ def generate_excel_report(user_id: int, start_date: Optional[datetime] = None, e
     query = Publication.query.filter(
         Publication.user_id == user_id,
         # Раскомментируйте следующую строку, если все еще хотите фильтровать только опубликованные
-        # Publication.status == 'published'
+        Publication.status == 'published'
     ).options(
         selectinload(Publication.authors),
         joinedload(Publication.type),

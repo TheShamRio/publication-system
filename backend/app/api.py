@@ -7,6 +7,8 @@ from app.extensions import db
 from app.models import Publication, User, Plan, PlanEntry, PlanActionHistory, PublicationActionHistory, PublicationType, PublicationTypeDisplayName, PublicationFieldHint, PublicationAuthor
 import os
 import logging
+from .report_generator import generate_excel_report # Импортируйте вашу новую функцию
+from .report_generator_docx import generate_docx_report # <--- ИМПОРТ НОВОЙ ФУНКЦИИ
 from io import BytesIO
 import bibtexparser
 from datetime import datetime
@@ -38,7 +40,7 @@ def admin_required(f):
     return wrapper
 
 @bp.route('/admin/users', methods=['GET'])
-@admin_required
+@admin_or_manager_required
 def get_users():
     page = request.args.get('page', 1, type=int)
     per_page = request.args.get('per_page', 10, type=int)
@@ -298,6 +300,110 @@ def check_user_dependencies(user_id):
     except Exception as e:
         logger.error(f"Ошибка при проверке зависимостей пользователя {user_id}: {str(e)}")
         return jsonify({"error": "Ошибка сервера при проверке зависимостей пользователя."}), 500
+    
+
+@bp.route('/admin/users/<int:user_id>/export-excel', methods=['GET'])
+@admin_or_manager_required # <- Важно! Проверка прав
+def export_excel_for_user(user_id):
+    # 1. Проверить, существует ли пользователь с user_id (можно добавить)
+    user_to_report = User.query.get(user_id)
+    if not user_to_report:
+        return jsonify({"error": f"Пользователь с ID {user_id} не найден."}), 404
+
+    # 2. Получить даты из query параметров (request.args)
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    start_date, end_date = None, None # Распарсить даты как в /api/publications/export-excel
+     # ---> НАЧАЛО ВСТАВКИ: Добавьте этот блок парсинга <---
+    if start_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            logger.debug(f"Парсинг start_date (Excel): {start_date_str} -> {start_date}")
+        except ValueError:
+            logger.warning(f"Неверный формат start_date (Excel): {start_date_str}")
+            return jsonify({'error': 'Неверный формат начальной даты. Используйте YYYY-MM-DD.'}), 400
+
+    if end_date_str:
+        try:
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+            logger.debug(f"Парсинг end_date (Excel): {end_date_str} -> {end_date}")
+        except ValueError:
+            logger.warning(f"Неверный формат end_date (Excel): {end_date_str}")
+            return jsonify({'error': 'Неверный формат конечной даты. Используйте YYYY-MM-DD.'}), 400
+
+    if start_date and end_date and start_date > end_date:
+        logger.warning("Начальная дата позже конечной (Excel).")
+        return jsonify({'error': 'Начальная дата не может быть позже конечной даты.'}), 400
+    # ---> КОНЕЦ ВСТАВКИ <---
+
+
+    # 3. Вызвать ту же самую функцию генерации отчета, но передать user_id
+    try:
+        # Передаем user_id нужного пользователя
+        excel_data_bytes = generate_excel_report(user_id, start_date, end_date)
+        # Формирование имени файла (можно включить имя пользователя)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"report_{user_to_report.username}_{timestamp}.xlsx"
+        # Отправка файла
+        return send_file(
+            BytesIO(excel_data_bytes),
+            mimetype='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+            as_attachment=True,
+            download_name=filename
+        )
+    except Exception as e:
+        # Обработка ошибок
+        logger.error(f"Ошибка генерации Excel для user {user_id}: {e}")
+        return jsonify({"error": "Ошибка генерации отчета Excel."}), 500
+
+@bp.route('/admin/users/<int:user_id>/export-docx', methods=['GET'])
+@admin_or_manager_required # <- Важно! Проверка прав
+def export_docx_for_user(user_id):
+    # Логика аналогична export_excel_for_user, но вызывает generate_docx_report
+    user_to_report = User.query.get(user_id)
+    if not user_to_report:
+         return jsonify({"error": f"Пользователь с ID {user_id} не найден."}), 404
+
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    start_date, end_date = None, None
+     # ---> НАЧАЛО ВСТАВКИ: Добавьте этот блок парсинга <---
+    if start_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+            logger.debug(f"Парсинг start_date (DOCX): {start_date_str} -> {start_date}")
+        except ValueError:
+            logger.warning(f"Неверный формат start_date (DOCX): {start_date_str}")
+            return jsonify({'error': 'Неверный формат начальной даты. Используйте YYYY-MM-DD.'}), 400
+
+    if end_date_str:
+        try:
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+            logger.debug(f"Парсинг end_date (DOCX): {end_date_str} -> {end_date}")
+        except ValueError:
+            logger.warning(f"Неверный формат end_date (DOCX): {end_date_str}")
+            return jsonify({'error': 'Неверный формат конечной даты. Используйте YYYY-MM-DD.'}), 400
+
+    if start_date and end_date and start_date > end_date:
+        logger.warning("Начальная дата позже конечной (DOCX).")
+        return jsonify({'error': 'Начальная дата не может быть позже конечной даты.'}), 400
+    # ---> КОНЕЦ ВСТАВКИ <---
+
+    try:
+        # Вызываем функцию генерации DOCX
+        docx_data_bytes = generate_docx_report(user_id, start_date, end_date)
+        timestamp = datetime.now().strftime("%Y%m%d_%HM%S")
+        filename = f"report_{user_to_report.username}_{timestamp}.docx"
+        # Отправка файла
+        return send_file(
+            BytesIO(docx_data_bytes),
+            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            as_attachment=True,
+            download_name=filename
+        )
+    except Exception as e:
+        logger.error(f"Ошибка генерации DOCX для user {user_id}: {e}")
+        return jsonify({"error": "Ошибка генерации отчета Word."}), 500		
 
 @bp.route('/admin/publications', methods=['GET'])
 @admin_or_manager_required

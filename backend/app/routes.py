@@ -7,6 +7,7 @@ from werkzeug.utils import secure_filename
 from flask_wtf.csrf import generate_csrf
 import os
 from .report_generator import generate_excel_report # Импортируйте вашу новую функцию
+from .report_generator_docx import generate_docx_report # <--- ИМПОРТ НОВОЙ ФУНКЦИИ
 from io import BytesIO
 from .analytics import get_publications_by_year
 import bibtexparser
@@ -49,6 +50,66 @@ def download_file(filename):
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
     return response
+
+@bp.route('/publications/export-docx', methods=['GET'])
+@login_required
+def export_docx_report():
+    """
+    Генерирует и отдает DOCX отчет по публикациям текущего пользователя.
+    Принимает опциональные параметры start_date и end_date для фильтрации.
+    """
+    user_id = current_user.id
+    logger.debug(f"Запрос на генерацию DOCX отчета для пользователя {user_id}")
+
+    # --- Получение и парсинг дат (копируем из export_excel_report) ---
+    start_date_str = request.args.get('start_date')
+    end_date_str = request.args.get('end_date')
+    start_date = None
+    end_date = None
+    if start_date_str:
+        try:
+            start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'error': 'Неверный формат начальной даты. Используйте YYYY-MM-DD.'}), 400
+    if end_date_str:
+        try:
+            end_date = datetime.strptime(end_date_str, '%Y-%m-%d')
+        except ValueError:
+            return jsonify({'error': 'Неверный формат конечной даты. Используйте YYYY-MM-DD.'}), 400
+    if start_date and end_date and start_date > end_date:
+        return jsonify({'error': 'Начальная дата не может быть позже конечной даты.'}), 400
+    # --- Конец получения и парсинга дат ---
+
+    try:
+        # --- Вызов новой функции генерации ---
+        docx_data_bytes = generate_docx_report(user_id, start_date, end_date)
+        # --- Конец вызова ---
+
+        # Формируем имя файла (аналогично Excel, но с .docx)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        date_range_suffix = ""
+        if start_date or end_date:
+            date_range_suffix += "_"
+            if start_date: date_range_suffix += f"from_{start_date.strftime('%Y%m%d')}"
+            if end_date: date_range_suffix += f"_to_{end_date.strftime('%Y%m%d')}"
+
+        filename = f"publications_report_{current_user.username}{date_range_suffix}_{timestamp}.docx" # <-- изменено расширение
+
+        logger.debug(f"DOCX отчет сгенерирован. Отправка файла: {filename}")
+
+        # Отправляем файл пользователю
+        return send_file(
+            BytesIO(docx_data_bytes),
+            # --- MIME тип для DOCX ---
+            mimetype='application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            # --- ---
+            as_attachment=True,
+            download_name=filename
+        )
+
+    except Exception as e:
+        logger.error(f"Ошибка при генерации DOCX отчета для пользователя {user_id} ({start_date_str}-{end_date_str}): {str(e)}", exc_info=True)
+        return jsonify({'error': f'Не удалось сгенерировать DOCX отчет: {str(e)}'}), 500
 
 @bp.route('/publications/<int:pub_id>', methods=['GET'])
 @login_required

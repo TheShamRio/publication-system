@@ -30,7 +30,13 @@ import {
 	Accordion,
 	AccordionSummary,
 	AccordionDetails,
+	Autocomplete,
 } from '@mui/material';
+import { LocalizationProvider } from '@mui/x-date-pickers/LocalizationProvider';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFns';
+import { DatePicker } from '@mui/x-date-pickers/DatePicker';
+import { format } from 'date-fns';
+import ClearIcon from '@mui/icons-material/Clear';
 import { styled, GlobalStyles } from '@mui/system';
 import EditIcon from '@mui/icons-material/Edit';
 import DeleteIcon from '@mui/icons-material/Delete';
@@ -171,6 +177,11 @@ function ManagerDashboard() {
 	const [editStatus, setEditStatus] = useState('needs_review');
 	const [editFile, setEditFile] = useState(null);
 	const [error, setError] = useState('');
+	const [allUsers, setAllUsers] = useState([]); // Список всех пользователей для выбора
+	const [loadingUsers, setLoadingUsers] = useState(false); // Загрузка списка пользователей
+	const [selectedUserForReport, setSelectedUserForReport] = useState(null); // Выбранный пользователь {id, label}
+	const [reportStartDate, setReportStartDate] = useState(null); // Дата начала для отчета
+	const [reportEndDate, setReportEndDate] = useState(null); // Дата конца для отчета
 	const [success, setSuccess] = useState('');
 	const [openError, setOpenError] = useState(false);
 	const [openSuccess, setOpenSuccess] = useState(false);
@@ -218,6 +229,7 @@ function ManagerDashboard() {
 	const [openHintsDialog, setOpenHintsDialog] = useState(false);
 	const [editedHints, setEditedHints] = useState({});
 	const [loadingHints, setLoadingHints] = useState(false);
+	const [isPublicationsLoading, setIsPublicationsLoading] = useState(false); // Состояние загрузки ТАБЛИЦЫ публикаций
 
 	// Функция сортировки и фильтрации статистики
 	const sortAndFilterStatistics = (stats, query) => {
@@ -318,6 +330,49 @@ function ManagerDashboard() {
 		return '';
 	};
 
+	const fetchAllUsers = async () => {
+		setLoadingUsers(true);
+		setError(''); // Сбрасываем прошлые ошибки
+		try {
+			// Используем существующий эндпоинт, получаем много пользователей
+			const response = await axios.get('http://localhost:5000/admin_api/admin/users', {
+				withCredentials: true,
+				params: { page: 1, per_page: 1000 }, // Загружаем достаточно большой список
+				headers: { 'X-CSRFToken': csrfToken }, // Добавляем токен, если он нужен для GET
+			});
+
+			// Преобразуем пользователей для Autocomplete
+			const usersWithLabel = response.data.users.map(user => ({
+				id: user.id,
+				// Формируем читаемую метку: ФИО или логин как fallback
+				label: `${user.last_name || ''} ${user.first_name || ''} ${user.middle_name || ''}`.trim() || user.username
+			}));
+			setAllUsers(usersWithLabel);
+
+		} catch (err) {
+			console.error("Ошибка загрузки списка пользователей:", err);
+			setError("Не удалось загрузить список пользователей.");
+			setOpenError(true); // Показываем общую ошибку
+			setAllUsers([]); // Очищаем список в случае ошибки
+		} finally {
+			setLoadingUsers(false);
+		}
+	};
+
+	useEffect(() => {
+		if (!isAuthenticated || (user && user.role !== 'manager' && user.role !== 'admin')) {
+			navigate('/login');
+			return;
+		}
+		setLoadingInitial(true);
+		Promise.all([
+			fetchPlans(currentPagePlans),
+			fetchPublicationTypes(),
+			fetchPublicationHints(),
+			fetchAllUsers()
+		]).finally(() => setLoadingInitial(false));
+	}, [isAuthenticated, user, navigate, currentPagePlans, pubHistoryPage, planHistoryPage, csrfToken]);
+
 	const validateFullName = (lastName, firstName, middleName) => {
 		const fullName = `${lastName} ${firstName} ${middleName}`;
 		if (!fullNameRegex.test(fullName))
@@ -396,27 +451,52 @@ function ManagerDashboard() {
 	};
 
 	const fetchPublications = async (page) => {
+		setIsPublicationsLoading(true); // <--- Установить начало загрузки ТАБЛИЦЫ
+		setError(''); // Сбрасываем ошибки перед новым запросом
 		try {
 			const response = await axios.get(`http://localhost:5000/admin_api/admin/publications`, {
 				withCredentials: true,
 				headers: { 'X-CSRFToken': csrfToken },
 				params: {
 					page,
-					per_page: 10,
+					per_page: 10, // Или ваша переменная
 					search: searchQuery,
+					// Убедитесь, что статусы передаются правильно для менеджера
 					status: ['needs_review', 'returned_for_revision', 'published'].join(','),
 					sort_status: statusFilter,
 				},
 			});
-			setPublications(response.data.publications);
-			setTotalPagesPublications(response.data.pages);
-			setPublicationsTransitionKey((prev) => prev + 1);
+			setPublications(response.data.publications || []); // Устанавливаем новые данные
+			setTotalPagesPublications(response.data.pages || 1); // Устанавливаем страницы
+			setCurrentPagePublications(page); // Устанавливаем текущую страницу
+
+			// Ключ анимации инкрементируем ПОСЛЕ установки данных
+			setPublicationsTransitionKey(prev => prev + 1);
+
 		} catch (err) {
 			console.error('Ошибка загрузки публикаций:', err);
 			setError('Не удалось загрузить публикации. Попробуйте позже.');
 			setOpenError(true);
+			setPublications([]); // Очищаем в случае ошибки
+			setTotalPagesPublications(1);
+		} finally {
+			setIsPublicationsLoading(false); // <--- Установить окончание загрузки ТАБЛИЦЫ
 		}
 	};
+
+	// useEffect для ИСТОРИИ ПУБЛИКАЦИЙ
+	useEffect(() => {
+		if (openHistoryDrawer) {
+			fetchPubActionHistory(pubHistoryPage, dateFilterRange.start, dateFilterRange.end); // Передаем даты
+		}
+	}, [openHistoryDrawer, pubHistoryPage, dateFilterRange]); // <-- dateFilterRange ДОБАВЛЕН
+
+	// useEffect для ИСТОРИИ ПЛАНОВ
+	useEffect(() => {
+		if (openPlanHistoryDrawer) {
+			fetchPlanActionHistory(planHistoryPage, dateFilterRange.start, dateFilterRange.end); // Передаем даты
+		}
+	}, [openPlanHistoryDrawer, planHistoryPage, dateFilterRange]); // <-- dateFilterRange ДОБАВЛЕН
 
 	const handleSaveHints = async () => {
 		setLoadingHints(true); // Можно использовать тот же лоадер
@@ -587,6 +667,144 @@ function ManagerDashboard() {
 		}
 	};
 
+	const handleExportExcelForUser = async () => {
+		if (!selectedUserForReport) {
+			setError("Пожалуйста, выберите пользователя для генерации отчета.");
+			setOpenError(true);
+			return;
+		}
+		const userId = selectedUserForReport.id; // Получаем ID выбранного пользователя
+		const params = {};
+		if (reportStartDate) {
+			try { params.start_date = format(reportStartDate, 'yyyy-MM-dd'); }
+			catch (e) { console.error("Invalid start date format for Excel", reportStartDate); }
+		}
+		if (reportEndDate) {
+			try { params.end_date = format(reportEndDate, 'yyyy-MM-dd'); }
+			catch (e) { console.error("Invalid end date format for Excel", reportEndDate); }
+		}
+		console.log(`Exporting Excel for user ${userId} with params:`, params); // Отладка
+
+		try {
+			// Используем НОВЫЙ ЭНДПОИНТ МЕНЕДЖЕРА
+			const response = await axios.get(`http://localhost:5000/admin_api/admin/users/${userId}/export-excel`, {
+				withCredentials: true,
+				responseType: 'blob',
+				params: params, // Даты передаем как query параметры
+				headers: { 'X-CSRFToken': csrfToken } // Добавляем CSRF, если нужен
+			});
+
+			// Обработка и скачивание файла (аналогично Dashboard.js)
+			const contentDisposition = response.headers['content-disposition'];
+			let filename = `report_user_${userId}.xlsx`; // Имя по умолчанию
+			if (contentDisposition) {
+				const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
+				if (filenameMatch && filenameMatch.length === 2) {
+					filename = filenameMatch[1];
+				}
+			}
+
+			const url = window.URL.createObjectURL(new Blob([response.data]));
+			const link = document.createElement('a');
+			link.href = url;
+			link.setAttribute('download', filename);
+			document.body.appendChild(link);
+			link.click();
+			link.parentNode.removeChild(link);
+			window.URL.revokeObjectURL(url);
+
+			setSuccess(`Отчет Excel для пользователя ${selectedUserForReport.label} успешно скачан!`);
+			setOpenSuccess(true);
+			setError(''); // Сбрасываем ошибку
+
+		} catch (err) {
+			console.error(`Ошибка скачивания Excel отчета для пользователя ${userId}:`, err.response?.data || err.message);
+			let errorMsg = `Не удалось скачать Excel отчет для пользователя ${selectedUserForReport.label}.`;
+			// Обработка ошибки (аналогично Dashboard.js)
+			if (err.response && err.response.data instanceof Blob && err.response.data.type === "application/json") {
+				try {
+					const errorJson = JSON.parse(await err.response.data.text());
+					errorMsg = errorJson.error || errorMsg;
+				} catch (parseError) { /* ... */ }
+			} else if (err.response?.data?.error) {
+				errorMsg = err.response.data.error;
+			}
+			setError(errorMsg);
+			setOpenError(true);
+			setSuccess(''); // Сбрасываем успех
+		}
+	};
+
+	const handleExportDocxForUser = async () => {
+		if (!selectedUserForReport) {
+			setError("Пожалуйста, выберите пользователя для генерации отчета.");
+			setOpenError(true);
+			return;
+		}
+		const userId = selectedUserForReport.id;
+		const params = {};
+		if (reportStartDate) {
+			try { params.start_date = format(reportStartDate, 'yyyy-MM-dd'); }
+			catch (e) { console.error("Invalid start date format for Word", reportStartDate); }
+		}
+		if (reportEndDate) {
+			try { params.end_date = format(reportEndDate, 'yyyy-MM-dd'); }
+			catch (e) { console.error("Invalid end date format for Word", reportEndDate); }
+		}
+		console.log(`Exporting Word for user ${userId} with params:`, params); // Отладка
+
+		try {
+			// Используем НОВЫЙ ЭНДПОИНТ МЕНЕДЖЕРА
+			const response = await axios.get(`http://localhost:5000/admin_api/admin/users/${userId}/export-docx`, {
+				withCredentials: true,
+				responseType: 'blob',
+				params: params, // Даты как query параметры
+				headers: { 'X-CSRFToken': csrfToken } // Добавляем CSRF, если нужен
+			});
+
+			// Обработка и скачивание файла (аналогично Dashboard.js)
+			const contentDisposition = response.headers['content-disposition'];
+			let filename = `report_user_${userId}.docx`; // Имя по умолчанию
+			if (contentDisposition) {
+				const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
+				if (filenameMatch && filenameMatch.length === 2) {
+					filename = filenameMatch[1];
+				}
+			}
+
+			const url = window.URL.createObjectURL(new Blob([response.data]));
+			const link = document.createElement('a');
+			link.href = url;
+			link.setAttribute('download', filename);
+			document.body.appendChild(link);
+			link.click();
+			link.parentNode.removeChild(link);
+			window.URL.revokeObjectURL(url);
+
+			setSuccess(`Отчет Word для пользователя ${selectedUserForReport.label} успешно скачан!`);
+			setOpenSuccess(true);
+			setError(''); // Сбрасываем ошибку
+
+		} catch (err) {
+			console.error(`Ошибка скачивания Word отчета для пользователя ${userId}:`, err.response?.data || err.message);
+			let errorMsg = `Не удалось скачать Word отчет для пользователя ${selectedUserForReport.label}.`;
+			// Обработка ошибки (аналогично Dashboard.js)
+			if (err.response && err.response.data instanceof Blob && err.response.data.type === "application/json") {
+				try {
+					const errorJson = JSON.parse(await err.response.data.text());
+					errorMsg = errorJson.error || errorMsg;
+				} catch (parseError) { /* ... */ }
+			} else if (err.response?.data?.error) {
+				errorMsg = err.response.data.error;
+			} else if (err.response?.data && typeof err.response.data === 'string') { // Добавим обработку строки ошибки
+				errorMsg = err.response.data;
+			}
+			setError(errorMsg);
+			setOpenError(true);
+			setSuccess(''); // Сбрасываем успех
+		}
+	};
+
 
 	const handleConfirmDeleteType = async () => {
 		// Проверка, что есть тип для удаления
@@ -702,8 +920,13 @@ function ManagerDashboard() {
 	// Обновление истории публикаций
 	// Обновление публикаций
 	useEffect(() => {
-		fetchPublications(currentPagePublications);
-	}, [currentPagePublications, searchQuery, statusFilter]);
+		// Вызываем только если роль подтверждена и токен есть
+		if (isAuthenticated && (user?.role === 'manager' || user?.role === 'admin') && csrfToken) {
+			fetchPublications(currentPagePublications);
+		}
+		// Зависимости: страница, поиск, фильтр статуса, токен (если нужен для запроса)
+		// Не добавляйте publications, totalPagesPublications
+	}, [currentPagePublications, searchQuery, statusFilter, isAuthenticated, user, csrfToken]);
 
 	// Обновление планов
 	useEffect(() => {
@@ -1059,19 +1282,38 @@ function ManagerDashboard() {
 					<Tabs
 						value={value}
 						onChange={handleTabChange}
-						centered
+						centered // Оставляем centered
+						aria-label="Manager dashboard tabs" // Добавляем для доступности
 						sx={{
 							mb: 4,
-							'& .MuiTab-root': { color: '#6E6E73', fontWeight: 600 },
-							'& .MuiTab-root.Mui-selected': { color: '#0071E3' },
+							borderBottom: 1,        // Опционально: линия под вкладками
+							borderColor: 'divider', // Опционально: линия под вкладками
+
+							'& .MuiTab-root': {
+								color: '#6E6E73',
+								fontWeight: 600, // Можно чуть уменьшить жирность, если нужно
+								fontSize: '1rem', // <-- УМЕНЬШАЕМ РАЗМЕР ШРИФТА (подберите значение)
+								textTransform: 'none', // Если еще не было - убирает КАПС
+								minWidth: 'auto',     // <-- ПОЗВОЛЯЕМ СЖИМАТЬСЯ СИЛЬНЕЕ
+								paddingLeft: 1.5,       // <-- УМЕНЬШАЕМ ОТСТУП СЛЕВА (подберите значение, 1.5 = 12px)
+								paddingRight: 1.5,      // <-- УМЕНЬШАЕМ ОТСТУП СПРАВА (подберите значение, 1.5 = 12px)
+								// Можно еще немного уменьшить вертикальные отступы, если высота мешает
+								// paddingTop: '6px',
+								// paddingBottom: '6px',
+							},
+							'& .MuiTab-root.Mui-selected': {
+								color: '#0071E3',
+								fontWeight: 600, // Можно вернуть жирность для активной вкладки
+							},
 							'& .MuiTabs-indicator': { backgroundColor: '#0071E3' },
 						}}
 					>
 						<Tab label="Работы на проверке" />
 						<Tab label="Статистика по кафедре" />
-						<Tab label="Регистрация пользователей" />
+						<Tab label="Регистрация" /> {/* <-- Пример УКОРОЧЕННОЙ надписи */}
 						<Tab label="Работа с планами" />
 						<Tab label="Управление типами" />
+						<Tab label="Отчеты" />          {/* <-- Пример УКОРОЧЕННОЙ надписи */}
 					</Tabs>
 
 					{loadingInitial ? (
@@ -1153,14 +1395,17 @@ function ManagerDashboard() {
 												</TableCell>
 											</TableRow>
 										</TableHead>
-										<Fade in={true} timeout={500} key={publicationsTransitionKey}>
+										<Fade in={!isPublicationsLoading} timeout={300} key={publicationsTransitionKey}>
 											<TableBody>
-												{publications.length > 0 ? (
+												{/* Показываем строки, только если НЕ идет загрузка И есть данные */}
+												{!isPublicationsLoading && publications.length > 0 ? (
 													publications.map((pub) => (
+														// ... Ваша <TableRow key={pub.id}> ... </TableRow>
 														<TableRow
 															key={pub.id}
 															sx={{ '&:hover': { backgroundColor: '#F5F5F7', transition: 'background-color 0.3s ease' } }}
 														>
+															{/* ... Ваши TableCell для данных ... */}
 															<TableCell sx={{ color: '#1D1D1F' }}>{pub.id}</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>
 																<Typography
@@ -1176,8 +1421,8 @@ function ManagerDashboard() {
 																</Typography>
 															</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>{Array.isArray(pub.authors) && pub.authors.length > 0
-																? pub.authors.map(author => author.name).join(', ') // Извлекаем имена и соединяем через запятую
-																: 'Авторы не указаны' // Запасной текст, если авторов нет
+																? pub.authors.map(author => author.name).join(', ')
+																: 'Авторы не указаны'
 															}</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>{pub.year}</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>
@@ -1188,50 +1433,69 @@ function ManagerDashboard() {
 															</TableCell>
 															<TableCell sx={{ color: '#1D1D1F' }}>{pub.user?.full_name || 'Не указан'}</TableCell>
 															<TableCell sx={{ textAlign: 'center' }}>
+																{/* ... Ваши иконки действий (DownloadIcon и т.д.) ... */}
 																<Box sx={{ display: 'flex', justifyContent: 'center', gap: 1 }}>
 																	{pub.file_url && pub.file_url.trim() !== '' && (
 																		<IconButton
 																			aria-label="download"
 																			onClick={() => handleDownload(pub.file_url, pub.file_url.split('/').pop())}
-																			sx={{
-																				color: '#0071E3',
-																				borderRadius: '8px',
-																				'&:hover': { color: '#FFFFFF', backgroundColor: '#0071E3', boxShadow: '0 2px 4px rgba(0, 0, 0, 0.1)' },
-																			}}
+																			sx={{ /* ваши стили */ }}
 																		>
 																			<DownloadIcon />
 																		</IconButton>
 																	)}
+																	{/* Другие кнопки/иконки, если есть (approve, return) */}
 																</Box>
 															</TableCell>
 														</TableRow>
 													))
 												) : (
-													<TableRow>
-														<TableCell colSpan={8} sx={{ textAlign: 'center', color: '#6E6E73' }}>
-															Нет публикаций с указанными статусами.
-														</TableCell>
-													</TableRow>
+													// Показываем "Нет публикаций" только если НЕ идет загрузка И список пуст
+													!isPublicationsLoading && (
+														<TableRow>
+															<TableCell colSpan={8} sx={{ textAlign: 'center', color: '#6E6E73' }}>
+																Нет публикаций{searchQuery || statusFilter !== 'needs_review' ? ' по заданным фильтрам/статусам' : ' для проверки'}.
+															</TableCell>
+														</TableRow>
+													)
 												)}
+												{/* Индикатор загрузки ВНУТРИ таблицы (альтернатива) */}
+												{/* {isPublicationsLoading && (
+                 <TableRow>
+                     <TableCell colSpan={8} sx={{ textAlign: 'center', border: 0 }}>
+                        <CircularProgress size={24} sx={{ color: '#0071E3' }} />
+                     </TableCell>
+                </TableRow>
+             )} */}
 											</TableBody>
 										</Fade>
 									</AppleTable>
-									<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
-										<Pagination
-											count={totalPagesPublications}
-											page={currentPagePublications}
-											onChange={handlePageChangePublications}
-											color="primary"
-											sx={{
-												'& .MuiPaginationItem-root': {
-													borderRadius: 20,
-													transition: 'all 0.3s ease',
-													'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
-													'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
-												},
-											}}
-										/>
-									</Box>
+									{/* Индикатор загрузки ПОД таблицей (предпочтительнее с Fade) */}
+									{isPublicationsLoading && (
+										<Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60px', pt: 2 }}>
+											<CircularProgress sx={{ color: '#0071E3' }} />
+										</Box>
+									)}
+									{/* Пагинация показывается только если НЕ идет загрузка и есть больше 1 страницы */}
+									{!isPublicationsLoading && totalPagesPublications > 1 && (
+										<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
+											<Pagination
+												count={totalPagesPublications}
+												page={currentPagePublications}
+												onChange={handlePageChangePublications}
+												color="primary"
+												sx={{
+													'& .MuiPaginationItem-root': {
+														borderRadius: 20,
+														transition: 'all 0.3s ease',
+														'&:hover': { backgroundColor: 'grey.100', boxShadow: '0 4px 12px rgba(0, 0, 0, 0.1)' },
+														'&.Mui-selected': { backgroundColor: '#1976D2', color: 'white', boxShadow: '0 6px 16px rgba(0, 0, 0, 0.2)' },
+													},
+												}}
+											/>
+										</Box>
+									)}
+									
 									<Drawer
 										anchor="right"
 										open={openHistoryDrawer}
@@ -2119,6 +2383,100 @@ function ManagerDashboard() {
 											<AppleButton onClick={handleUpdateType}>Сохранить</AppleButton>
 										</DialogActions>
 									</Dialog>
+								</Box>
+							)}
+							{value === 5 && (
+								<Box sx={{ mt: 4 }}>
+									<Typography
+										variant="h5"
+										gutterBottom
+										sx={{ color: '#1D1D1F', fontWeight: 600, textAlign: 'center' }}
+									>
+										Генерация отчетов по пользователям
+									</Typography>
+
+									<AppleCard sx={{ p: 3, mt: 2, borderRadius: '16px' }}>
+										<Autocomplete
+											options={allUsers}
+											loading={loadingUsers}
+											getOptionLabel={(option) => option.label || ''} // Отображаем ФИО/логин
+											isOptionEqualToValue={(option, value) => option.id === value.id} // Сравниваем по ID
+											onChange={(event, newValue) => {
+												setSelectedUserForReport(newValue); // Сохраняем ВЕСЬ объект пользователя
+											}}
+											value={selectedUserForReport} // Управляемый компонент
+											renderInput={(params) => (
+												<AppleTextField
+													{...params}
+													label="Выберите пользователя"
+													variant="outlined"
+													InputProps={{
+														...params.InputProps,
+														endAdornment: (
+															<>
+																{loadingUsers ? <CircularProgress color="inherit" size={20} /> : null}
+																{params.InputProps.endAdornment}
+															</>
+														),
+													}}
+												/>
+											)}
+											sx={{ mb: 3 }}
+										/>
+
+										<Typography variant="body2" sx={{ color: '#1D1D1F', fontWeight: 500, mb: 1 }}>
+											Диапазон дат для отчета (по дате публикации):
+										</Typography>
+										<LocalizationProvider dateAdapter={AdapterDateFns}>
+											<Box sx={{ display: 'flex', gap: 2, mb: 3, alignItems: 'center' }}>
+												<DatePicker
+													label="Дата начала"
+													value={reportStartDate}
+													onChange={(newValue) => setReportStartDate(newValue)}
+													slots={{ textField: AppleTextField }}
+													slotProps={{ textField: { variant: 'outlined', size: 'small' } }}
+													maxDate={reportEndDate || undefined}
+													format="dd.MM.yyyy"
+												/>
+												<DatePicker
+													label="Дата конца"
+													value={reportEndDate}
+													onChange={(newValue) => setReportEndDate(newValue)}
+													slots={{ textField: AppleTextField }}
+													slotProps={{ textField: { variant: 'outlined', size: 'small' } }}
+													minDate={reportStartDate || undefined}
+													format="dd.MM.yyyy"
+												/>
+												<IconButton
+													onClick={() => { setReportStartDate(null); setReportEndDate(null); }}
+													size="small"
+													title="Очистить даты"
+													disabled={!reportStartDate && !reportEndDate}
+													sx={{ color: '#0071E3' }}
+												>
+													<ClearIcon />
+												</IconButton>
+											</Box>
+										</LocalizationProvider>
+
+										<Box sx={{ display: 'flex', gap: 2 }}>
+											<AppleButton
+												onClick={handleExportExcelForUser} // НОВАЯ функция-обработчик
+												disabled={!selectedUserForReport} // Кнопка неактивна без пользователя
+												startIcon={<DownloadIcon />}
+											>
+												Экспорт в Excel
+											</AppleButton>
+											<AppleButton
+												onClick={handleExportDocxForUser} // НОВАЯ функция-обработчик
+												disabled={!selectedUserForReport} // Кнопка неактивна без пользователя
+												startIcon={<DownloadIcon />}
+											>
+												Экспорт в Word
+											</AppleButton>
+										</Box>
+
+									</AppleCard>
 								</Box>
 							)}
 						</>
