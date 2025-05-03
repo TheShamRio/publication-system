@@ -345,6 +345,7 @@ function Dashboard() {
 	const [initializing, setInitializing] = useState(true);
 	const validStatuses = ['all', 'draft', 'needs_review', 'published'];
 	const [isTableLoading, setIsTableLoading] = useState(false);
+	const [attachFileError, setAttachFileError] = useState(''); // Новое состояние для ошибки прикрепления
 	// Добавляем состояния для управления диалогом удаления типа
 	const [openDeleteTypeDialog, setOpenDeleteTypeDialog] = useState(false);
 	const [typeToDelete, setTypeToDelete] = useState(null);
@@ -750,6 +751,14 @@ function Dashboard() {
 			setOpenError(true);
 			return [];
 		}
+	};
+
+	const isValidFilename = (filename) => {
+		if (!filename) return false;
+		// Разрешаем латинские буквы (a-z, A-Z), цифры (0-9),
+		// точки (.), дефисы (-) и знаки подчеркивания (_)
+		const validFilenameRegex = /^[a-zA-Z0-9_.-]+$/;
+		return validFilenameRegex.test(filename);
 	};
 
 	const fetchData = async (page = 1, search = '', displayNameId = '', status = 'all') => {
@@ -1187,6 +1196,7 @@ function Dashboard() {
 		setQuartileError('');
 		setTitleMandatoryError(false); setYearMandatoryError(false);
 		setAuthorMandatoryError(false); setTypeMandatoryError(false); setFileMandatoryError(false);
+		setFileError(''); // <-- ДОБАВИТЬ
 		setSubmitAttempted(false); // <--- Важно
 	};
 
@@ -2080,6 +2090,7 @@ function Dashboard() {
 		setEditQuartile('');
 		setEditVolume('');      // <-- ДОБАВИТЬ
 		setEditNumber('');      // <-- ДОБАВИТЬ
+		setEditFileError(''); // <-- ДОБАВИТЬ
 		setEditPages('');
 		setEditDepartment('');
 		setEditPublisher('');
@@ -2260,6 +2271,7 @@ function Dashboard() {
 		setOpenError(false);
 		setSuccess('');
 		setOpenSuccess(false);
+		setAttachFileError(''); // <-- ДОБАВИТЬ
 	};
 
 	const handleDownloadClick = (publication) => {
@@ -3562,6 +3574,12 @@ function Dashboard() {
 														accept=".pdf,.docx"
 														onChange={(e) => {
 															const selectedFile = e.target.files[0];
+															if (selectedFile && !isValidFilename(selectedFile.name)) {
+																setFileError("Недопустимое имя файла. Используйте только латиницу, цифры, точки, дефисы и подчеркивания.");
+																setFile(null); // Сбрасываем файл
+																e.target.value = null; // Очищаем input, чтобы можно было выбрать тот же файл после переименования
+																return; // Прерываем дальнейшую обработку
+															}
 															setFile(selectedFile);
 															// Сброс ошибки обязательности при выборе файла
 															if (selectedFile) setFileMandatoryError(false);
@@ -4879,6 +4897,12 @@ function Dashboard() {
 								accept=".pdf,.docx"
 								onChange={(e) => { // <--- ИЗМЕНЕНИЕ ЗДЕСЬ (для editFile)
 									const selectedFile = e.target.files[0];
+									if (selectedFile && !isValidFilename(selectedFile.name)) {
+										setEditFileError("Недопустимое имя файла. Используйте только латиницу, цифры, точки, дефисы и подчеркивания.");
+										setEditFile(null); // Сбрасываем файл
+										e.target.value = null; // Очищаем input
+										return; // Прерываем
+									}
 									setEditFile(selectedFile); // Устанавливаем состояние нового файла
 									if (selectedFile && !['pdf', 'docx'].includes(selectedFile.name.split('.').pop().toLowerCase())) {
 										setEditFileError('Подсказка: Недопустимый тип файла (только PDF, DOCX)');
@@ -4891,13 +4915,17 @@ function Dashboard() {
 							/>
 
 							{/* Отображение имени файла ИЛИ ошибки типа файла */}
-							{editFileError ? (
-								<Typography color="error" variant="caption" sx={{ mt: 1, display: 'block' }}>{editFileError}</Typography>
-							) : (
-								editFile && <Typography sx={{ mt: 1, color: '#6E6E73' }}>Новый файл: {editFile.name}</Typography>
+							{editFileError && (
+								<Typography color="error" variant="caption" sx={{ mt: 1, display: 'block' }}>
+									{editFileError}
+								</Typography>
 							)}
-							{/* Показываем старый файл, если новый не выбран */}
-							{!editFile && editPublication?.file_url && (
+							{/* Показываем имя нового файла, если НЕТ ошибки */}
+							{!editFileError && editFile && (
+								<Typography sx={{ mt: 1, color: '#6E6E73' }}>Новый файл: {editFile.name}</Typography>
+							)}
+							{/* Показываем старый файл, если новый не выбран и ошибки нет */}
+							{!editFile && !editFileError && editPublication?.file_url && (
 								<Typography sx={{ mt: 1, color: '#6E6E73' }}>Текущий файл: {editPublication.file_url.split('/').pop()}</Typography>
 							)}
 						</Box>
@@ -4949,7 +4977,24 @@ function Dashboard() {
 							<input
 								type="file"
 								accept=".pdf,.docx"
-								onChange={(e) => setAttachFile(e.target.files[0])}
+								onChange={(e) => {
+									const selectedFile = e.target.files[0];
+									// --- НАЧАЛО ВСТАВКИ ВАЛИДАЦИИ ИМЕНИ ---
+									if (selectedFile && !isValidFilename(selectedFile.name)) {
+										setAttachFileError("Недопустимое имя файла. Используйте только латиницу, цифры, точки, дефисы и подчеркивания."); // Используем новую переменную состояния
+										setAttachFile(null); // Сбрасываем файл
+										e.target.value = null; // Очищаем input
+										return; // Прерываем
+									}
+									// --- КОНЕЦ ВСТАВКИ ВАЛИДАЦИИ ИМЕНИ ---
+									setAttachFile(selectedFile);
+									// Валидация типа (после проверки имени)
+									if (selectedFile && !['pdf', 'docx'].includes(selectedFile.name.split('.').pop().toLowerCase())) {
+										setAttachFileError('Недопустимый тип файла (только PDF, DOCX)');
+									} else {
+										setAttachFileError(''); // Сбрасываем ошибки (включая ошибку имени)
+									}
+								}}
 								style={{ display: 'none' }}
 								id="attach-file"
 							/>
@@ -4958,7 +5003,16 @@ function Dashboard() {
 									Выбрать файл
 								</AppleButton>
 							</label>
-							{attachFile && <Typography sx={{ mt: 1, color: '#6E6E73' }}>{attachFile.name}</Typography>}
+							{/* Отображение ошибки имени/типа */}
+							{attachFileError && (
+								<Typography color="error" variant="caption" sx={{ mt: 1, display: 'block' }}>
+									{attachFileError}
+								</Typography>
+							)}
+							{/* Отображение имени файла, если нет ошибки */}
+							{!attachFileError && attachFile && (
+								<Typography sx={{ mt: 1, color: '#6E6E73' }}>{attachFile.name}</Typography>
+							)}
 						</Box>
 
 					</form>

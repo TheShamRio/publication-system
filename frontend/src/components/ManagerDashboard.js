@@ -165,7 +165,6 @@ function ManagerDashboard() {
 	const [searchQuery, setSearchQuery] = useState('');
 	const [statusFilter, setStatusFilter] = useState('needs_review');
 	const [loadingInitial, setLoadingInitial] = useState(true);
-	const [loadingStatistics, setLoadingStatistics] = useState(false);
 	const [openEditDialog, setOpenEditDialog] = useState(false);
 	const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
 	const [publicationToDelete, setPublicationToDelete] = useState(null);
@@ -371,7 +370,7 @@ function ManagerDashboard() {
 			fetchPublicationHints(),
 			fetchAllUsers()
 		]).finally(() => setLoadingInitial(false));
-	}, [isAuthenticated, user, navigate, currentPagePlans, pubHistoryPage, planHistoryPage, csrfToken]);
+	}, [isAuthenticated, user, navigate, currentPagePlans, csrfToken]);
 
 	const validateFullName = (lastName, firstName, middleName) => {
 		const fullName = `${lastName} ${firstName} ${middleName}`;
@@ -400,7 +399,6 @@ function ManagerDashboard() {
 	};
 
 	const fetchStatistics = async (year) => {
-		setLoadingStatistics(true);
 		try {
 			const response = await axios.get('http://localhost:5000/admin_api/admin/statistics', {
 				withCredentials: true,
@@ -413,7 +411,6 @@ function ManagerDashboard() {
 			setError('Не удалось загрузить статистику. Попробуйте позже.');
 			setOpenError(true);
 		} finally {
-			setLoadingStatistics(false);
 		}
 	};
 
@@ -957,14 +954,12 @@ function ManagerDashboard() {
 
 	const handleOpenPlanHistoryDrawer = () => {
 		setOpenPlanHistoryDrawer(true);
-		fetchPlanActionHistory(planHistoryPage);
 	};
 
 	const handleClosePlanHistoryDrawer = () => setOpenPlanHistoryDrawer(false);
 
 	const handlePlanHistoryPageChange = (event, value) => {
 		setPlanHistoryPage(value);
-		fetchPlanActionHistory(value, dateFilterRange.start, dateFilterRange.end);
 	};
 
 	const handleStatusFilterChange = (e) => {
@@ -978,7 +973,6 @@ function ManagerDashboard() {
 
 	const handleHistoryPageChange = (event, value) => {
 		setPubHistoryPage(value);
-		fetchPubActionHistory(value, dateFilterRange.start, dateFilterRange.end);
 	};
 
 	const handleDownload = async (fileUrl, fileName) => {
@@ -1172,7 +1166,6 @@ function ManagerDashboard() {
 
 	const handleOpenHistoryDrawer = () => {
 		setOpenHistoryDrawer(true);
-		fetchPubActionHistory(pubHistoryPage);
 	};
 
 	const handleCloseHistoryDrawer = () => setOpenHistoryDrawer(false);
@@ -1395,10 +1388,10 @@ function ManagerDashboard() {
 												</TableCell>
 											</TableRow>
 										</TableHead>
-										<Fade in={!isPublicationsLoading} timeout={300} key={publicationsTransitionKey}>
+										<Fade in={true} timeout={300} key={publicationsTransitionKey}>
 											<TableBody>
 												{/* Показываем строки, только если НЕ идет загрузка И есть данные */}
-												{!isPublicationsLoading && publications.length > 0 ? (
+												{publications.length > 0 ? ( // Теперь зависит ТОЛЬКО от наличия данных
 													publications.map((pub) => (
 														// ... Ваша <TableRow key={pub.id}> ... </TableRow>
 														<TableRow
@@ -1439,7 +1432,12 @@ function ManagerDashboard() {
 																		<IconButton
 																			aria-label="download"
 																			onClick={() => handleDownload(pub.file_url, pub.file_url.split('/').pop())}
-																			sx={{ /* ваши стили */ }}
+																			sx={{
+																				color: '#0071E3', // <-- Задаем синий цвет
+																				'&:hover': { // <-- Добавляем эффект при наведении для консистентности
+																					backgroundColor: 'rgba(0, 113, 227, 0.1)', // Легкий синий фон
+																				},
+																			}}
 																		>
 																			<DownloadIcon />
 																		</IconButton>
@@ -1471,11 +1469,7 @@ function ManagerDashboard() {
 										</Fade>
 									</AppleTable>
 									{/* Индикатор загрузки ПОД таблицей (предпочтительнее с Fade) */}
-									{isPublicationsLoading && (
-										<Box sx={{ display: 'flex', justifyContent: 'center', alignItems: 'center', minHeight: '60px', pt: 2 }}>
-											<CircularProgress sx={{ color: '#0071E3' }} />
-										</Box>
-									)}
+
 									{/* Пагинация показывается только если НЕ идет загрузка и есть больше 1 страницы */}
 									{!isPublicationsLoading && totalPagesPublications > 1 && (
 										<Box sx={{ mt: 2, display: 'flex', justifyContent: 'center', alignItems: 'center' }}>
@@ -1495,7 +1489,7 @@ function ManagerDashboard() {
 											/>
 										</Box>
 									)}
-									
+
 									<Drawer
 										anchor="right"
 										open={openHistoryDrawer}
@@ -1562,7 +1556,7 @@ function ManagerDashboard() {
 																</TableCell>
 															</TableRow>
 														</TableHead>
-														<Fade in={true} timeout={500} key={pubHistoryTransitionKey}>
+														<Fade in={true} timeout={300} key={publicationsTransitionKey}>
 															<TableBody>
 																{pubActionHistory.map((action) => (
 																	<TableRow key={`${action.history_id}-${action.timestamp}`}>
@@ -1722,22 +1716,12 @@ function ManagerDashboard() {
 												Общая статистика по кафедре за {parseInt(selectedYear, 10) >= 1900 ? selectedYear : new Date().getFullYear()} год
 											</Typography>
 										</AccordionSummary>
-										<AccordionDetails sx={{ backgroundColor: '#FFFFFF', borderRadius: '0 0 16px 16px', p: 3 }}> {/* Паддинг переносим сюда */}
-											{/* Содержимое (лоадер или график) теперь внутри AccordionDetails */}
-											{loadingOverallStatistics ? (
-												<Box sx={{ display: 'flex', justifyContent: 'center', p: 2 }}>
-													<CircularProgress sx={{ color: '#0071E3' }} />
-												</Box>
-											) : (
-												<UserStatisticsChart user={overallStatistics} />
-											)}
+										<AccordionDetails sx={{ backgroundColor: '#FFFFFF', borderRadius: '0 0 16px 16px', p: 3 }}>
+											{/* Просто рендерим график, старые данные будут отображаться до загрузки новых */}
+											<UserStatisticsChart user={overallStatistics} />
 										</AccordionDetails>
 									</Accordion>
-									{loadingStatistics ? (
-										<Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
-											<CircularProgress sx={{ color: '#0071E3' }} />
-										</Box>
-									) : statistics.length > 0 ? (
+									{statistics.length > 0 ? (
 										<TransitionGroup>
 											{sortAndFilterStatistics(statistics, nameSearchQuery).map((user) => (
 												<CSSTransition key={user.user_id} timeout={300} classNames="accordion">
