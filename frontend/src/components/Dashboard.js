@@ -3282,7 +3282,8 @@ function Dashboard() {
 																			color: author.is_employee ? '#0071E3' : 'grey.500', // Цвет иконки
 																			'&:hover': {
 																				backgroundColor: author.is_employee ? 'rgba(0, 113, 227, 0.1)' : 'rgba(0, 0, 0, 0.04)', // Фон при наведении
-																			}
+																			},
+																			transform: 'translateY(3px)' // <<< ДОБАВЛЕНО СМЕЩЕНИЕ ВНИЗ (3px)
 																		}}
 																		aria-label={author.is_employee ? "Пометить как не сотрудника" : "Пометить как сотрудника"}
 																	>
@@ -4633,7 +4634,11 @@ function Dashboard() {
 									{/* --- Grid item для иконки сотрудника --- */}
 									<Grid item xs="auto" sx={{ pt: 0.5 /* Отступ для иконки */ }}>
 										<MuiTooltip title={author.is_employee ? "Автор сотрудник КНИТУ-КАИ" : "Автор не сотрудник КНИТУ-КАИ"} arrow>
-											<IconButton onClick={() => handleEditAuthorChange(index, 'is_employee', !author.is_employee)} size="small" sx={{ color: author.is_employee ? '#0071E3' : 'grey.500', '&:hover': { backgroundColor: author.is_employee ? 'rgba(0, 113, 227, 0.1)' : 'rgba(0, 0, 0, 0.04)', } }} aria-label={author.is_employee ? "Пометить как не сотрудника" : "Пометить как сотрудника"}><PersonIcon fontSize="small" /></IconButton>
+											<IconButton onClick={() => handleEditAuthorChange(index, 'is_employee', !author.is_employee)} size="small" sx={{
+												color: author.is_employee ? '#0071E3' : 'grey.500',
+												'&:hover': { backgroundColor: author.is_employee ? 'rgba(0, 113, 227, 0.1)' : 'rgba(0, 0, 0, 0.04)', },
+												transform: 'translateY(3px)' // <<< ДОБАВЛЕНО ТАКОЕ ЖЕ СМЕЩЕНИЕ
+											}} aria-label={author.is_employee ? "Пометить как не сотрудника" : "Пометить как сотрудника"}><PersonIcon fontSize="small" /></IconButton>
 										</MuiTooltip>
 									</Grid>
 									{/* --- Grid item для иконки удаления --- */}

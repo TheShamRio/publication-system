@@ -22,7 +22,7 @@ import { useAuth } from '../contexts/AuthContext';
 import CommentSection from './CommentSection'; // Предполагаем, что компонент CommentSection существует
 
 // Настройка worker для react-pdf
-pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
+pdfjs.GlobalWorkerOptions.workerSrc = `/pdf.worker.min.js`;
 
 // Стилизованная кнопка в стиле Apple
 const AppleButton = styled(Button)({
