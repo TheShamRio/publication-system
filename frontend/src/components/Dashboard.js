@@ -220,7 +220,8 @@ const AppleSelect = styled(Select)(({ theme }) => ({
 		fontWeight: 400,
 		display: 'flex',
 		alignItems: 'center', // Центрирование содержимого по вертикали
-		height: '40px !important', // Фиксируем высоту поля
+		minHeight: '40px !important', // Минимальная высота как была
+		height: 'auto !important',
 		boxSizing: 'border-box', // Учитываем padding в высоте
 	},
 	'& .MuiOutlinedInput-root': {
@@ -274,7 +275,8 @@ function Dashboard() {
 	const [editIsVak, setEditIsVak] = useState(false);
 	const [editIsWoS, setEditIsWoS] = useState(false);
 	const [editIsScopus, setEditIsScopus] = useState(false);
-
+	const [workForm, setWorkForm] = useState('Печатная');
+	const [editWorkForm, setEditWorkForm] = useState('Печатная');
 	// Добавляем состояния для управления блокировкой флагов в UI (создание)
 	const [disableNewVak, setDisableNewVak] = useState(false);
 	const [disableNewWoS, setDisableNewWoS] = useState(false);
@@ -1198,6 +1200,7 @@ function Dashboard() {
 		setAuthorMandatoryError(false); setTypeMandatoryError(false); setFileMandatoryError(false);
 		setFileError(''); // <-- ДОБАВИТЬ
 		setSubmitAttempted(false); // <--- Важно
+		setWorkForm('Печатная');
 	};
 
 
@@ -1309,6 +1312,7 @@ function Dashboard() {
 		formData.append('doi', doi.trim() || '');
 		formData.append('issn', issn.trim() || '');
 		formData.append('isbn', isbn.trim() || '');
+		formData.append('work_form', workForm);
 		formData.append('quartile', quartile.trim() || '');
 		formData.append('volume', volume.trim() || '');
 		formData.append('number', number.trim() || '');
@@ -1495,6 +1499,7 @@ function Dashboard() {
 		setEditPublication(publication); // Сохраняем оригинальный объект
 		setEditTitle(publication.title || '');
 		setEditYear(publication.year || '');
+		setEditWorkForm(publication.work_form || 'Печатная');
 
 		// Authors
 		if (publication.authors && publication.authors.length > 0) {
@@ -1691,6 +1696,7 @@ function Dashboard() {
 			data.append('circulation', editCirculation.trim() || '');
 			data.append('classification_code', editClassificationCode.trim() || '');
 			data.append('notes', editNotes.trim() || '');
+			data.append('work_form', editWorkForm);
 			// headers['Content-Type'] НЕ устанавливаем для FormData
 		} else { // Если НОВЫЙ ФАЙЛ НЕ ПРИКРЕПЛЕН (обычное обновление данных)
 			data = {
@@ -1718,6 +1724,7 @@ function Dashboard() {
 				notes: editNotes.trim() || null,
 				// Числовые поля (null если пусто или не число)
 				printed_sheets_volume: editPrintedSheetsVolume.trim() && !isNaN(parseFloat(editPrintedSheetsVolume.replace(',', '.'))) ? parseFloat(editPrintedSheetsVolume.replace(',', '.')) : null,
+				work_form: editWorkForm,
 				circulation: editCirculation.trim() && !isNaN(parseInt(editCirculation, 10)) ? parseInt(editCirculation, 10) : null,
 			};
 			headers['Content-Type'] = 'application/json'; // Указываем тип контента
@@ -2099,6 +2106,7 @@ function Dashboard() {
 		setEditCirculation('');
 		setEditClassificationCode('');
 		setEditNotes('');
+		setEditWorkForm('Печатная');
 		setEditIsVak(false);
 		setEditIsWoS(false);
 		setEditIsScopus(false);
@@ -3171,6 +3179,20 @@ function Dashboard() {
 													</Typography>
 												)}
 
+												{/* --- НОВОЕ ПОЛЕ "ФОРМА РАБОТЫ" --- */}
+												<AppleTextField
+													fullWidth
+													select
+													label="Форма работы"
+													value={workForm}
+													onChange={(e) => setWorkForm(e.target.value)}
+													margin="normal"
+													variant="outlined"
+												>
+													<MenuItem value="Печатная">Печатная</MenuItem>
+													<MenuItem value="Электронная">Электронная</MenuItem>
+												</AppleTextField>
+
 												{/* Блоки VAK/WoS/Scopus - уже были */}
 												{selectedDisplayNameId && publicationTypes.find(t => t.display_name_id === selectedDisplayNameId)?.name?.toLowerCase() === 'article' ||
 													selectedDisplayNameId && publicationTypes.find(t => t.display_name_id === selectedDisplayNameId)?.name?.toLowerCase() === 'conference' ? (
@@ -4134,8 +4156,8 @@ function Dashboard() {
 																			</TableBody>
 																		</PlanTable>
 																	)}
-																	<Box sx={{ display: 'flex', gap: 2, mt: 2 }}>
-																		<FormControl sx={{ minWidth: 200 }}>
+																	<Box sx={{ display: 'flex', gap: 2, mt: 2, alignItems: 'flex-start' }}>
+																		<FormControl sx={{ minWidth: 200, maxWidth: 550 }}>
 																			<InputLabel>Типы публикаций</InputLabel>
 																			<AppleSelect
 																				multiple
@@ -4168,34 +4190,36 @@ function Dashboard() {
 																				))}
 																			</AppleSelect>
 																		</FormControl>
-																		<AppleButton
-																			startIcon={<AddIcon />}
-																			onClick={() => handleAddPlanEntry(plan.id)}
-																			disabled={selectedNewEntryType.length === 0}
-																		>
-																			Добавить тип
-																		</AppleButton>
-																		<RedCancelButton
-																			onClick={() => {
-																				setEditingPlanId(null);
-																				setTempPlan(null);
-																				setExpandedPlanId(null);
-																			}}
-																		>
-																			Отмена
-																		</RedCancelButton>
-																		<GreenButton
-																			startIcon={<SaveIcon />}
-																			onClick={() => handleSavePlan(plan)}
-																			disabled={
-																				!areAllTitlesFilled({
-																					...plan,
-																					entries: tempPlan.groupedEntries.flatMap((group) => (group.isDeleted ? [] : group.entries)),
-																				})
-																			}
-																		>
-																			Сохранить
-																		</GreenButton>
+																		<Box sx={{ display: 'flex', gap: 2, marginLeft: 'auto', alignItems: 'center' /* Выравниваем кнопки по центру между собой, если нужно */ }}>
+																			<AppleButton
+																				startIcon={<AddIcon />}
+																				onClick={() => handleAddPlanEntry(plan.id)}
+																				disabled={selectedNewEntryType.length === 0}
+																			>
+																				Добавить тип
+																			</AppleButton>
+																			<RedCancelButton
+																				onClick={() => {
+																					setEditingPlanId(null);
+																					setTempPlan(null);
+																					setExpandedPlanId(null);
+																				}}
+																			>
+																				Отмена
+																			</RedCancelButton>
+																			<GreenButton
+																				startIcon={<SaveIcon />}
+																				onClick={() => handleSavePlan(plan)}
+																				disabled={
+																					!areAllTitlesFilled({
+																						...plan,
+																						entries: tempPlan.groupedEntries.flatMap((group) => (group.isDeleted ? [] : group.entries)),
+																					})
+																				}
+																			>
+																				Сохранить
+																			</GreenButton>
+																		</Box>
 																	</Box>
 																</>
 															) : (
@@ -4489,6 +4513,21 @@ function Dashboard() {
 								: (publicationTypes.map((type) => (<MenuItem key={type.display_name_id} value={type.display_name_id}> {type.display_name} </MenuItem>))
 								)}
 						</AppleTextField>
+
+						{/* --- НОВОЕ ПОЛЕ "ФОРМА РАБОТЫ" (РЕДАКТИРОВАНИЕ) --- */}
+						<AppleTextField
+							fullWidth
+							select
+							label="Форма работы"
+							value={editWorkForm}
+							onChange={(e) => setEditWorkForm(e.target.value)}
+							margin="normal"
+							variant="outlined"
+						>
+							<MenuItem value="Печатная">Печатная</MenuItem>
+							<MenuItem value="Электронная">Электронная</MenuItem>
+						</AppleTextField>
+						{/* --- КОНЕЦ НОВОГО ПОЛЯ --- */}
 
 						{/* Блоки VAK/WoS/Scopus (Редактирование) */}
 						{editSelectedDisplayNameId && publicationTypes.find(t => t.display_name_id === editSelectedDisplayNameId)?.name?.toLowerCase() === 'article' ||

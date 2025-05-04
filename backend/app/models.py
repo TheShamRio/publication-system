@@ -141,7 +141,8 @@ class Publication(db.Model):
     notes = db.Column(db.Text, nullable=True)  
     is_vak = db.Column(db.Boolean, default=False, nullable=False)
     is_wos = db.Column(db.Boolean, default=False, nullable=False)
-    is_scopus = db.Column(db.Boolean, default=False, nullable=False)   
+    is_scopus = db.Column(db.Boolean, default=False, nullable=False)  
+    work_form = db.Column(db.String(50), nullable=True, default='Печатная') # Поле "Форма работы" 
     # --- КОНЕЦ НОВЫХ ПОЛЕЙ ---
 
     @property
@@ -195,6 +196,7 @@ class Publication(db.Model):
             'circulation': self.circulation,
             'classification_code': self.classification_code,
             'notes': self.notes,
+            'work_form': self.work_form,
         }
 
 

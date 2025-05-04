@@ -652,13 +652,20 @@ def manage_publication(pub_id):
         data = None
         authors_data_received = None
         form_data = None # Для обработки данных из multipart
+        
 
         # Определяем тип контента и парсим данные
         if request.content_type.startswith('application/json'):
             data = request.get_json()
             authors_data_received = data.get('authors')
             if authors_data_received is not None and not isinstance(authors_data_received, list):
-                 return jsonify({'error': 'Поле authors должно быть массивом'}), 400
+                return jsonify({'error': 'Поле authors должно быть массивом'}), 400
+            if 'work_form' in data:
+                new_work_form = data.get('work_form')
+                if new_work_form is not None and new_work_form not in ['Печатная', 'Электронная']:
+                    logger.warning(f"Попытка обновить work_form на недопустимое значение: {new_work_form}")
+                    return jsonify({'error': 'Недопустимое значение для поля "Форма работы".'}), 400
+                publication.work_form = new_work_form if new_work_form is not None else 'Печатная'
         elif request.content_type.startswith('multipart/form-data'):
             form_data = request.form.to_dict() # Получаем все поля формы как словарь
             data = form_data # Используем form_data для дальнейшей обработки
@@ -670,8 +677,14 @@ def manage_publication(pub_id):
             except (json.JSONDecodeError, ValueError) as e:
                 logger.error(f"Invalid authors_json format during update: {authors_json}. Error: {e}")
                 return jsonify({'error': f'Некорректный формат JSON для authors_json: {e}'}), 400
-        else:
-            return jsonify({"error": "Неподдерживаемый формат данных."}), 415
+            if 'work_form' in data:
+                new_work_form = data.get('work_form')
+                if new_work_form is not None and new_work_form not in ['Печатная', 'Электронная']:
+                    logger.warning(f"Попытка обновить work_form на недопустимое значение: {new_work_form}")
+                    return jsonify({'error': 'Недопустимое значение для поля "Форма работы".'}), 400
+                publication.work_form = new_work_form if new_work_form is not None else 'Печатная'
+            else:
+                return jsonify({"error": "Неподдерживаемый формат данных."}), 415
 
         # --- Валидация авторов (если переданы) ---
         if authors_data_received is not None:
@@ -884,6 +897,7 @@ def upload_file():
     year = request.form.get('year')
     type_id = request.form.get('type_id')
     display_name_id = request.form.get('display_name_id')
+    work_form = request.form.get('work_form', 'Печатная')
 
     # --- Получаем НОВЫЕ поля ---
     journal_conference_name = request.form.get('journal_conference_name')
@@ -911,6 +925,10 @@ def upload_file():
     is_wos = is_wos_str.lower() == 'true'
     is_scopus = is_scopus_str.lower() == 'true'
     # --- Конец получения новых полей ---
+    
+    if work_form not in ['Печатная', 'Электронная']:
+      logger.warning(f"Недопустимое значение для work_form: {work_form}")
+      return jsonify({'error': 'Недопустимое значение для поля "Форма работы". Выберите "Печатная" или "Электронная".'}), 400
 
     # --- Валидация обязательных полей ---
     if not title or not year or not type_id or not authors_json:
@@ -957,6 +975,7 @@ def upload_file():
     else:
          display_name_id_int = None # Убедимся, что ID это None, если не передано
 
+		
 
     # --- Загрузка файла (без изменений, но проверим путь сохранения) ---
     filename = secure_filename(file.filename)
@@ -988,6 +1007,7 @@ def upload_file():
         file_url=f"/uploads/{filename}",
         user_id=current_user.id,
         returned_for_revision=False,
+        work_form=work_form,
         # --- Передаем новые поля ---
         is_vak=is_vak,         # <-- НОВОЕ
         is_wos=is_wos,         # <-- НОВОЕ
@@ -1245,6 +1265,7 @@ def upload_bibtex():
                      display_name_id=first_display_name_obj.id, # Используем ID первого отображаемого имени
                      status='draft', user_id=current_user.id, returned_for_revision=False,
                      # --- Передача полей ---
+                     work_form='Печатная',
                      journal_conference_name=journal_conf if journal_conf else None,
                      doi=doi if doi else None,
                      issn=issn if issn else None,
