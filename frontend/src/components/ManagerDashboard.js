@@ -1580,7 +1580,7 @@ function ManagerDashboard() {
 																			{action.action_type === 'approved' ? 'Утверждено' : 'Возвращено на доработку'}
 																		</TableCell>
 																		<TableCell sx={{ minWidth: '140px' }}>
-																			{new Date(action.timestamp).toLocaleString('ru-RU')}
+																			{new Date(action.timestamp + 'Z').toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}
 																		</TableCell>
 																	</TableRow>
 																))}
@@ -2198,7 +2198,7 @@ function ManagerDashboard() {
 																			{action.action_type === 'approved' ? 'Утверждён' : 'Возвращён на доработку'}
 																		</TableCell>
 																		<TableCell sx={{ minWidth: '140px' }}>
-																			{new Date(action.timestamp).toLocaleString('ru-RU')}
+																			{new Date(action.timestamp + 'Z').toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}
 																		</TableCell>
 																	</TableRow>
 																))}

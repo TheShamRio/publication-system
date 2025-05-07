@@ -10,7 +10,7 @@ import {
 } from '@mui/material';
 import { styled } from '@mui/system';
 import SendIcon from '@mui/icons-material/Send';
-import ReplyIcon from '@mui/icons-material/Reply';
+// import ReplyIcon from '@mui/icons-material/Reply'; // УДАЛЕНО
 import axios from 'axios';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -34,20 +34,33 @@ const AppleButton = styled(IconButton)({
 	},
 });
 
+const translateRole = (role) => {
+	switch (role) {
+		case 'manager':
+			return 'Управляющий';
+		case 'user':
+			return 'Пользователь';
+		case 'admin':
+			return 'Администратор';
+		default:
+			return role; // Если роль неизвестна, отображаем как есть
+	}
+};
+
 const CommentSection = ({ comments, publicationId, onCommentAdded }) => {
 	const [newComment, setNewComment] = useState('');
-	const [replyComment, setReplyComment] = useState('');
-	const [replyingTo, setReplyingTo] = useState(null);
+	// const [replyComment, setReplyComment] = useState(''); // УДАЛЕНО
+	// const [replyingTo, setReplyingTo] = useState(null); // УДАЛЕНО
 	const { csrfToken } = useAuth();
 
-	const handleAddComment = async (parentId = null) => {
-		const content = parentId ? replyComment : newComment;
+	const handleAddComment = async () => { // Убран parentId, так как отвечаем только на верхний уровень
+		const content = newComment; // Всегда используется newComment
 		if (!content.trim()) return;
 
 		try {
 			const response = await axios.post(
 				`http://localhost:5000/api/publications/${publicationId}/comments`,
-				{ content, parent_id: parentId },
+				{ content, parent_id: null }, // parent_id всегда null
 				{
 					withCredentials: true,
 					headers: { 'X-CSRFToken': csrfToken },
@@ -57,73 +70,42 @@ const CommentSection = ({ comments, publicationId, onCommentAdded }) => {
 				onCommentAdded(response.data.comment);
 			}
 			setNewComment('');
-			setReplyComment('');
-			setReplyingTo(null);
+			// setReplyComment(''); // УДАЛЕНО
+			// setReplyingTo(null); // УДАЛЕНО
 		} catch (err) {
 			console.error('Error adding comment:', err);
 		}
 	};
 
+	// Функция renderComment теперь не будет отображать кнопку "Ответить" и поле для ответа
 	const renderComment = (comment, depth = 0) => (
 		<React.Fragment key={comment.id}>
 			<ListItem sx={{ pl: depth * 4 }}>
 				<Box sx={{ width: '100%' }}>
 					<Typography variant="body2" sx={{ color: '#6E6E73' }}>
-						{comment.user.full_name} ({comment.user.role}) • {new Date(comment.created_at).toLocaleString()}
+						{comment.user.full_name} ({comment.user && comment.user.role ? translateRole(comment.user.role) : 'Неизвестная роль'}) • {new Date(comment.created_at).toLocaleString()}
 					</Typography>
-					<Typography variant="body1" sx={{ color: '#1D1D1F', mt: 1 }}>
+					<Typography variant="body1" sx={{ color: '#1D1D1F', mt: 1, mb: 1 }}> {/* Добавлен mb для небольшого отступа снизу */}
 						{comment.content}
 					</Typography>
-					<Box sx={{ mt: 1 }}>
-						<AppleButton
-							onClick={() => setReplyingTo(comment.id)}
-							sx={{ fontSize: '0.875rem' }}
-						>
-							<ReplyIcon fontSize="small" />
-							<Typography variant="body2" sx={{ ml: 0.5 }}>
-								Ответить
-							</Typography>
-						</AppleButton>
-					</Box>
-					{replyingTo === comment.id && (
-						<Box sx={{ mt: 2, mb: 2 }}>
-							<AppleTextField
-								fullWidth
-								value={replyComment}
-								onChange={(e) => setReplyComment(e.target.value)}
-								placeholder="Введите ваш ответ..."
-								variant="outlined"
-								multiline
-								rows={2}
-								sx={{ mb: 1 }}
-							/>
-							<AppleButton onClick={() => handleAddComment(comment.id)}>
-								<SendIcon />
-							</AppleButton>
-							<AppleButton
-								onClick={() => {
-									setReplyingTo(null);
-									setReplyComment('');
-								}}
-							>
-								<Typography variant="body2">Отмена</Typography>
-							</AppleButton>
-						</Box>
-					)}
+					{/* Блок кнопки "Ответить" и поля для ответа полностью УДАЛЕН */}
 				</Box>
 			</ListItem>
-			{comment.replies.length > 0 && (
-				<List sx={{ pl: 4 }}>
+			{comment.replies && comment.replies.length > 0 && ( // Проверяем наличие replies перед маппингом
+				<List sx={{ pl: 4, pt: 0, pb: 0 /* убрали лишние паддинги у вложенного списка */ }}> {/* Добавлено pt, pb = 0 */}
 					{comment.replies.map((reply) => renderComment(reply, depth + 1))}
 				</List>
 			)}
-			<Divider sx={{ my: 1 }} />
+			{depth === 0 && <Divider sx={{ my: 1 }} />} {/* Разделитель только для комментариев верхнего уровня, если есть ответы */}
 		</React.Fragment>
 	);
 
 	return (
 		<Box>
-			<List>{comments.map((comment) => renderComment(comment))}</List>
+			<List>
+				{/* Убедимся, что comments это массив перед map */}
+				{Array.isArray(comments) && comments.map((comment) => renderComment(comment))}
+			</List>
 			<AppleTextField
 				fullWidth
 				value={newComment}

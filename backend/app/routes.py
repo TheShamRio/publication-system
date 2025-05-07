@@ -938,7 +938,7 @@ def upload_file():
     try:
         authors_data = json.loads(authors_json)
         if not isinstance(authors_data, list) or not authors_data:
-             raise ValueError("Authors data must be a non-empty list.")
+            raise ValueError("Authors data must be a non-empty list.")
         # ... (остальная валидация авторов как раньше) ...
         for author_item in authors_data:
             if not isinstance(author_item, dict) or 'name' not in author_item or 'is_employee' not in author_item:
@@ -973,7 +973,7 @@ def upload_file():
         if not display_name or display_name.publication_type_id != type_id_int:
             return jsonify({'error': 'Недопустимое русское название для выбранного типа'}), 400
     else:
-         display_name_id_int = None # Убедимся, что ID это None, если не передано
+        display_name_id_int = None # Убедимся, что ID это None, если не передано
 
 		
 
@@ -1008,19 +1008,17 @@ def upload_file():
         user_id=current_user.id,
         returned_for_revision=False,
         work_form=work_form,
-        # --- Передаем новые поля ---
-        is_vak=is_vak,         # <-- НОВОЕ
-        is_wos=is_wos,         # <-- НОВОЕ
-        is_scopus=is_scopus,		 # <-- НОВОЕ
+        is_vak=is_vak,         
+        is_wos=is_wos,         
+        is_scopus=is_scopus,		 
         journal_conference_name=journal_conference_name,
         doi=doi,
         issn=issn,
         isbn=isbn,
         quartile=quartile,
-        # number_volume_pages=number_volume_pages, # <- УДАЛИТЬ
-        volume=volume, # <- ДОБАВИТЬ
-        number=number, # <- ДОБАВИТЬ
-        pages=pages,   # <- ДОБАВИТЬ
+        volume=volume, 
+        number=number, 
+        pages=pages,   
         department=department,
         publisher=publisher,
         publisher_location=publisher_location,
@@ -1030,18 +1028,18 @@ def upload_file():
         notes=notes
     )
 
-    # Создание авторов (без изменений)
+
     for author_data in authors_data:
         pub_author = PublicationAuthor(
             name=author_data['name'].strip(),
             is_employee=author_data['is_employee'],
-            publication=publication # Устанавливаем связь
+            publication=publication 
         )
-        # SQLAlchemy добавит в сессию через relationship/cascade
+        
 
-    db.session.add(publication) # Добавляем саму публикацию
+    db.session.add(publication) 
 
-    # --- Сохранение в БД (с удалением файла при ошибке) ---
+    
     try:
         db.session.commit()
         logger.debug(f"Publication {publication.id} created with {len(authors_data)} authors and new fields.")

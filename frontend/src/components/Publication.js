@@ -129,18 +129,21 @@ function Publication() {
 
 	// Функция загрузки данных публикации
 	const fetchPublication = useCallback(async () => {
-		setIsLoadingPublication(true); // Начинаем загрузку
+		setIsLoadingPublication(true);
 		try {
 			const response = await axios.get(`http://localhost:5000/api/publications/${id}`, {
 				withCredentials: true,
 			});
-			console.log('Publication loaded:', response.data); // Логирование для отладки
-			setPublication(response.data);
-			// Пересчитываем наличие комментария рецензента после загрузки
-			const reviewerCommentExists = response.data.comments.some(
+			console.log('Publication loaded:', response.data);
+			const fetchedPublication = response.data;
+			// Убедимся, что comments всегда массив
+			fetchedPublication.comments = fetchedPublication.comments || [];
+			setPublication(fetchedPublication);
+
+			const reviewerCommentExists = (fetchedPublication.comments || []).some(
 				(comment) =>
 					['admin', 'manager'].includes(comment.user.role) ||
-					comment.replies.some((reply) => ['admin', 'manager'].includes(reply.user.role))
+					(comment.replies && comment.replies.some((reply) => ['admin', 'manager'].includes(reply.user.role)))
 			);
 			setHasReviewerComment(reviewerCommentExists);
 			setError('');
@@ -150,12 +153,11 @@ function Publication() {
 				setError('Публикация не найдена.');
 			} else if (err.response && err.response.status === 403) {
 				setError('У вас нет прав для просмотра этой публикации.');
-			}
-			else {
+			} else {
 				setError('Не удалось загрузить публикацию. Попробуйте позже.');
 			}
 		} finally {
-			setIsLoadingPublication(false); // Завершаем загрузку
+			setIsLoadingPublication(false);
 		}
 	}, [id]); // Зависимость только от ID
 
@@ -255,12 +257,66 @@ function Publication() {
 
 
 	// Обработчик добавления комментария
-	const handleCommentAdded = useCallback(async () => {
-		// Просто перезагружаем данные публикации, чтобы получить обновленные комментарии
-		await fetchPublication();
-	}, [fetchPublication]); // Зависим от fetchPublication
+	const handleCommentAdded = useCallback((newCommentFromServerRaw) => {
+		// Убедимся, что у нового комментария есть массив replies
+		// и объект user, даже если API их не всегда возвращает идеально.
+		const newCommentFromServer = {
+			...newCommentFromServerRaw,
+			replies: newCommentFromServerRaw.replies || [],
+			// Если ваш API не возвращает user в ответе на создание коммента,
+			// вам может понадобиться запросить его отдельно или использовать данные текущего user.
+			// Здесь мы предполагаем, что API возвращает user или newCommentFromServerRaw.user уже есть.
+			user: newCommentFromServerRaw.user || (user ? { full_name: user.full_name, role: user.role, id: user.id } : { full_name: "Аноним", role: "user" })
+		};
 
-	// --- Отображение статусов (можно вынести в отдельный компонент или оставить здесь) ---
+		setPublication(prevPublication => {
+			if (!prevPublication) return null;
+
+			// Функция для рекурсивного добавления ответа в нужное место
+			const findAndAddReply = (commentsArray, replyToAdd) => {
+				return commentsArray.map(comment => {
+					if (comment.id === replyToAdd.parent_id) {
+						return {
+							...comment,
+							replies: [...(comment.replies || []), replyToAdd] // Добавляем в конец существующих replies
+						};
+					}
+					if (comment.replies && comment.replies.length > 0) {
+						return {
+							...comment,
+							replies: findAndAddReply(comment.replies, replyToAdd)
+						};
+					}
+					return comment;
+				});
+			};
+
+			let updatedComments;
+			if (newCommentFromServer.parent_id) {
+				// Это ответ на существующий комментарий
+				updatedComments = findAndAddReply(prevPublication.comments || [], newCommentFromServer);
+			} else {
+				// Это новый комментарий верхнего уровня
+				updatedComments = [...(prevPublication.comments || []), newCommentFromServer];
+			}
+
+			// Пересчитываем hasReviewerComment на основе обновленного списка комментариев
+			const newHasReviewerComment = updatedComments.some(
+				(comment) =>
+					['admin', 'manager'].includes(comment.user.role) ||
+					(comment.replies && comment.replies.some((reply) => ['admin', 'manager'].includes(reply.user.role)))
+			);
+			setHasReviewerComment(newHasReviewerComment); // Обновляем состояние
+
+			return {
+				...prevPublication,
+				comments: updatedComments
+			};
+		});
+	}, [user, setHasReviewerComment]); // Добавили user в зависимости, если используем его для заглушки
+
+
+
 	const renderStatus = (status, returnedForRevision) => {
 		let statusText = '';
 		let textColor = '#6E6E73'; // Default grey
@@ -287,7 +343,6 @@ function Publication() {
 			</Typography>
 		);
 	};
-
 	// Проверяем, является ли пользователь рецензентом (менеджер или админ)
 	const isReviewer = user?.role && ['admin', 'manager'].includes(user.role);
 

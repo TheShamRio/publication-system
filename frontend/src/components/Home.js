@@ -62,7 +62,7 @@ function Home() {
 		// ... (rest of the function remains the same)
 		if (!dateStr) return 'Неизвестное время';
 
-		const date = new Date(dateStr);
+		const date = new Date(dateStr + 'Z');
 		const now = new Date();
 		const diffMs = now - date;
 		const diffMinutes = Math.floor(diffMs / 60000);

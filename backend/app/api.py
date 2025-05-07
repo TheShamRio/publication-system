@@ -744,7 +744,7 @@ def update_publication(pub_id):
              publication.returned_at = None
              publication.return_comment = None
              action_type = new_status # Тип действия - сам статус
-
+					
         # Создаем запись истории только при смене статуса
         action = PublicationActionHistory(
              publication_id=publication.id,

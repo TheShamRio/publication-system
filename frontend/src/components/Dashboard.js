@@ -271,17 +271,14 @@ function Dashboard() {
 	const [newIsVak, setNewIsVak] = useState(false);
 	const [newIsWoS, setNewIsWoS] = useState(false);
 	const [newIsScopus, setNewIsScopus] = useState(false);
-	// Добавляем новые состояния для булевых флагов VAK/WoS/Scopus (редактирование)
 	const [editIsVak, setEditIsVak] = useState(false);
 	const [editIsWoS, setEditIsWoS] = useState(false);
 	const [editIsScopus, setEditIsScopus] = useState(false);
 	const [workForm, setWorkForm] = useState('Печатная');
 	const [editWorkForm, setEditWorkForm] = useState('Печатная');
-	// Добавляем состояния для управления блокировкой флагов в UI (создание)
 	const [disableNewVak, setDisableNewVak] = useState(false);
 	const [disableNewWoS, setDisableNewWoS] = useState(false);
 	const [disableNewScopus, setDisableNewScopus] = useState(false);
-	// Добавляем состояния для управления блокировкой флагов в UI (редактирование)
 	const [disableEditVak, setDisableEditVak] = useState(false);
 	const [disableEditWoS, setDisableEditWoS] = useState(false);
 	const [disableEditScopus, setDisableEditScopus] = useState(false);
@@ -290,7 +287,7 @@ function Dashboard() {
 	const [openSuccess, setOpenSuccess] = useState(false);
 	const [openDeleteDialog, setOpenDeleteDialog] = useState(false);
 	const [publicationToDelete, setPublicationToDelete] = useState(null);
-	const [planToDelete, setPlanToDelete] = useState(null); // Новое состояние для плана
+	const [planToDelete, setPlanToDelete] = useState(null);
 	const [openEditDialog, setOpenEditDialog] = useState(false);
 	const [editPublication, setEditPublication] = useState(null);
 	const [editTitle, setEditTitle] = useState('');
@@ -348,27 +345,18 @@ function Dashboard() {
 	const validStatuses = ['all', 'draft', 'needs_review', 'published'];
 	const [isTableLoading, setIsTableLoading] = useState(false);
 	const [attachFileError, setAttachFileError] = useState(''); // Новое состояние для ошибки прикрепления
-	// Добавляем состояния для управления диалогом удаления типа
 	const [openDeleteTypeDialog, setOpenDeleteTypeDialog] = useState(false);
 	const [typeToDelete, setTypeToDelete] = useState(null);
 	const [planIdForTypeDelete, setPlanIdForTypeDelete] = useState(null);
 	const [displayNameIdToDelete, setDisplayNameIdToDelete] = useState(null);
 	const [selectedDisplayNameId, setSelectedDisplayNameId] = useState('');
 	const [editSelectedDisplayNameId, setEditSelectedDisplayNameId] = useState('');
-
-	// Временное состояние для редактируемого плана
 	const [tempPlan, setTempPlan] = useState(null);
-
-	// Состояние для управления раскрытием аккордеонов
 	const [expandedPlanId, setExpandedPlanId] = useState(null);
 	const [publicationTypes, setPublicationTypes] = useState([]);
-	const validPublicationTypes = ['article', 'monograph', 'conference'];
-	const validPlanStatuses = ['planned', 'in_progress', 'completed'];
-
 	const [publicationHints, setPublicationHints] = useState({});
 	const [openHintsDialog, setOpenHintsDialog] = useState(false);
 	const [loadingHints, setLoadingHints] = useState(false);
-	// --- НОВЫЕ состояния для формы СОЗДАНИЯ ---
 	const [journalConferenceName, setJournalConferenceName] = useState('');
 	const [doi, setDoi] = useState('');
 	const [issn, setIssn] = useState('');
@@ -384,17 +372,15 @@ function Dashboard() {
 	const [circulation, setCirculation] = useState('');
 	const [classificationCode, setClassificationCode] = useState('');
 	const [notes, setNotes] = useState('');
-	// --- КОНЕЦ НОВЫХ состояний для формы СОЗДАНИЯ ---
-	const [exportStartDate, setExportStartDate] = useState(null); // Дата начала экспорта
-	const [exportEndDate, setExportEndDate] = useState(null); // Дата конца экспорта
-	// --- НОВЫЕ состояния для формы РЕДАКТИРОВАНИЯ ---
+	const [exportStartDate, setExportStartDate] = useState(null);
+	const [exportEndDate, setExportEndDate] = useState(null);
 	const [editJournalConferenceName, setEditJournalConferenceName] = useState('');
 	const [editDoi, setEditDoi] = useState('');
 	const [editIssn, setEditIssn] = useState('');
 	const [editIsbn, setEditIsbn] = useState('');
 	const [editQuartile, setEditQuartile] = useState('');
-	const [editVolume, setEditVolume] = useState('');                           // <- ДОБАВИТЬ
-	const [editNumber, setEditNumber] = useState('');                           // <- ДОБАВИТЬ
+	const [editVolume, setEditVolume] = useState('');
+	const [editNumber, setEditNumber] = useState('');
 	const [editPages, setEditPages] = useState('');
 	const [editDepartment, setEditDepartment] = useState('');
 	const [editPublisher, setEditPublisher] = useState('');
@@ -403,7 +389,6 @@ function Dashboard() {
 	const [editCirculation, setEditCirculation] = useState('');
 	const [editClassificationCode, setEditClassificationCode] = useState('');
 	const [editNotes, setEditNotes] = useState('');
-	// --- КОНЕЦ НОВЫХ состояний для формы РЕДАКТИРОВАНИЯ ---
 	const [titleError, setTitleError] = useState('');
 	const [yearError, setYearError] = useState('');
 	const [journalConferenceNameError, setJournalConferenceNameError] = useState('');
@@ -420,9 +405,7 @@ function Dashboard() {
 	const [departmentError, setDepartmentError] = useState('');
 	const [classificationCodeError, setClassificationCodeError] = useState('');
 	const [quartileError, setQuartileError] = useState('');
-	// Состояние ошибки файла (для проверки типа при выборе)
 	const [fileError, setFileError] = useState('');
-	// Ошибки формы редактирования
 	const [editTitleError, setEditTitleError] = useState('');
 	const [editYearError, setEditYearError] = useState('');
 	const [editJournalConferenceNameError, setEditJournalConferenceNameError] = useState('');
@@ -1469,7 +1452,7 @@ function Dashboard() {
 					'X-CSRFToken': csrfToken,
 				},
 			});
-			setSuccess(`Загружено ${response.data.message.split(' ')[1]} публикаций!`);
+			setSuccess(`Загружено ${response.data.added_count} публикаций!`);
 			setOpenSuccess(true);
 			setError('');
 			setFile(null);
@@ -5374,7 +5357,6 @@ function Dashboard() {
 					</Alert>
 				)}
 			</Collapse>
-			{/* ---- КОНЕЦ ЗАМЕНЕННОГО БЛОКА ---- */}
 
 		</Container >
 	);
