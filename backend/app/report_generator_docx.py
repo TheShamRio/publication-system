@@ -98,7 +98,7 @@ def generate_docx_report(user_id: int, start_date: Optional[datetime] = None, en
 
     # 4. Заголовок документа
     p1 = document.add_paragraph(); p1.add_run('Список').bold = True; p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    p2 = document.add_paragraph(); user_position = getattr(user, 'position', "доцента"); department_name = getattr(user, 'department', "кафедры ПМИ")
+    p2 = document.add_paragraph(); user_position = getattr(user, 'position', "(Должность)"); department_name = getattr(user, 'department', "кафедры ПМИ")
     p2.add_run(f"научных и учебно-методических работ {user_position} {department_name}"); p2.alignment = WD_ALIGN_PARAGRAPH.CENTER
     p3 = document.add_paragraph(); p3.add_run(user.full_name).bold = True; p3.alignment = WD_ALIGN_PARAGRAPH.CENTER
     if start_date or end_date:
@@ -265,7 +265,7 @@ def generate_docx_report(user_id: int, start_date: Optional[datetime] = None, en
     # 6. Подписи
     document.add_paragraph(); p_prepod = document.add_paragraph(); p_prepod.paragraph_format.space_before = Pt(12); p_prepod.paragraph_format.line_spacing = 1.0
     p_prepod.add_run("Подпись преподавателя" + "\t\t" + "____________________" + "\t" + f"{user_position}, {user.full_name}")
-    p_zavkaf = document.add_paragraph(); p_zavkaf.paragraph_format.line_spacing = 1.0; zavkaf_position = "заведующего кафедрой"; zavkaf_name = "Зайдуллин С.С."; # Заглушка
+    p_zavkaf = document.add_paragraph(); p_zavkaf.paragraph_format.line_spacing = 1.0; zavkaf_position = "заведующего кафедрой"; zavkaf_name = "(ФИО Заведующего)"; # Заглушка
     p_zavkaf.add_run(f"Подпись {zavkaf_position}" + "\t" + "____________________" + "\t" + f"{zavkaf_name}")
 
     # 7. Вторая таблица (шаблон)

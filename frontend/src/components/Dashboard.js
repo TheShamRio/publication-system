@@ -973,37 +973,43 @@ function Dashboard() {
 	const updateAnalytics = (publishedPublications, allPublications) => {
 		// Объект для типов публикаций
 		const types = {};
-		// Объект для статусов публикаций
-		const statuses = { draft: 0, needs_review: 0, published: 0 };
+		// Явно указываем, какие статусы мы хотим отслеживать и отображать с уникальными метками
+		const targetDisplayStatuses = {
+			draft: 0,
+			needs_review: 0,
+			published: 0
+		};
 
 		// Подсчёт типов для опубликованных публикаций
 		publishedPublications.forEach((pub) => {
-			// Используем display_name для группировки
 			const pubDisplayName = pub.type?.display_name || 'Неизвестный тип';
 			types[pubDisplayName] = (types[pubDisplayName] || 0) + 1;
 		});
 
 		// Подсчёт статусов для всех публикаций
 		allPublications.forEach((pub) => {
-			// Увеличиваем счётчик для соответствующего статуса
-			statuses[pub.status] = (statuses[pub.status] || 0) + 1;
+			// Увеличиваем счётчик ТОЛЬКО если текущий статус публикации 
+			// является одним из ключей в targetDisplayStatuses
+			if (pub.status in targetDisplayStatuses) {
+				targetDisplayStatuses[pub.status] = (targetDisplayStatuses[pub.status] || 0) + 1;
+			}
+			// Публикации с другими статусами (например, 'approved', 'rejected')
+			// не будут влиять на объект targetDisplayStatuses
 		});
 
 		// Сохраняем результаты в состояния
 		setPubTypes(types);
-		setPubStatuses(statuses);
+		setPubStatuses(targetDisplayStatuses); // Теперь pubStatuses будет содержать только 'draft', 'needs_review', 'published'
 
 		// Подсчёт динамики публикаций по годам (только опубликованные)
 		const yearlyAnalytics = publishedPublications.reduce((acc, pub) => {
 			acc[pub.year] = (acc[pub.year] || 0) + 1;
 			return acc;
 		}, {});
-		// Преобразуем в массив для сортировки
 		const analyticsData = Object.entries(yearlyAnalytics).map(([year, count]) => ({
 			year: parseInt(year),
 			count,
 		}));
-		// Сортируем по году
 		analyticsData.sort((a, b) => a.year - b.year);
 		setAnalytics(analyticsData);
 	};
