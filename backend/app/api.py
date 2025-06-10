@@ -675,7 +675,7 @@ def update_publication(pub_id):
     publication.publisher_location = data.get('publisher_location', publication.publisher_location)
     publication.classification_code = data.get('classification_code', publication.classification_code)
     publication.notes = data.get('notes', publication.notes)
-
+    publication.publication_url = data.get('publication_url', publication.publication_url)
     # Обновление числовых полей с обработкой None/пустой строки/ошибки
     printed_sheets_str = data.get('printed_sheets_volume')
     if printed_sheets_str is not None: # Только если ключ есть в данных

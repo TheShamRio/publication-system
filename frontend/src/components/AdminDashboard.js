@@ -167,6 +167,7 @@ function AdminDashboard() {
 	const [editCirculation, setEditCirculation] = useState('');
 	const [editClassificationCode, setEditClassificationCode] = useState('');
 	const [editNotes, setEditNotes] = useState('');
+	const [editPublicationUrl, setEditPublicationUrl] = useState('')
 	const [editMiddleName, setEditMiddleName] = useState('');
 	const [editNewPassword, setEditNewPassword] = useState('');
 	const [showEditPassword, setShowEditPassword] = useState(false);
@@ -504,6 +505,7 @@ function AdminDashboard() {
 			setEditCirculation(item.circulation != null ? String(item.circulation) : '');
 			setEditClassificationCode(item.classification_code || '');
 			setEditNotes(item.notes || '');
+			setEditPublicationUrl(item.publication_url || '');
 		}
 		setOpenEditDialog(true);
 	};
@@ -550,7 +552,7 @@ function AdminDashboard() {
 		setEditCirculation('');
 		setEditClassificationCode('');
 		setEditNotes('');
-
+		setEditPublicationUrl('');
 
 		// Сброс ошибок/успеха
 
@@ -670,6 +672,7 @@ function AdminDashboard() {
 					dataToSend.append('circulation', editCirculation || '');
 					dataToSend.append('classification_code', editClassificationCode || '');
 					dataToSend.append('notes', editNotes || '');
+					dataToSend.append('publication_url', editPublicationUrl || '');
 
 				} else {
 					// Если файла нет, используем обычный JSON объект
@@ -697,6 +700,7 @@ function AdminDashboard() {
 						circulation: editCirculation ? parseInt(editCirculation, 10) : null,
 						classification_code: editClassificationCode || null,
 						notes: editNotes || null,
+						publication_url: editPublicationUrl || null,
 					};
 				}
 
@@ -1719,7 +1723,15 @@ function AdminDashboard() {
 											</Grid>
 											<AppleTextField fullWidth label="Код по классификатору" value={editClassificationCode} onChange={(e) => setEditClassificationCode(e.target.value)} margin="normal" variant="outlined" />
 											<AppleTextField fullWidth label="Примечание" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} margin="normal" variant="outlined" multiline rows={2} />
-
+											<AppleTextField
+												fullWidth
+												label="Ссылка на публикацию (URL)"
+												value={editPublicationUrl}
+												onChange={(e) => setEditPublicationUrl(e.target.value)}
+												margin="normal"
+												variant="outlined"
+												type="url"
+											/>
 											{/* --- Поле для загрузки файла (без изменений) --- */}
 											<Box sx={{ mt: 2 }}>
 												<Typography variant="body2" sx={{ color: '#6E6E73', mb: 1 }}>

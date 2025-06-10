@@ -143,6 +143,7 @@ class Publication(db.Model):
     is_wos = db.Column(db.Boolean, default=False, nullable=False)
     is_scopus = db.Column(db.Boolean, default=False, nullable=False)  
     work_form = db.Column(db.String(50), nullable=True, default='Печатная') # Поле "Форма работы" 
+    publication_url = db.Column(db.Text, nullable=True)
     # --- КОНЕЦ НОВЫХ ПОЛЕЙ ---
 
     @property
@@ -197,6 +198,7 @@ class Publication(db.Model):
             'classification_code': self.classification_code,
             'notes': self.notes,
             'work_form': self.work_form,
+            'publication_url': self.publication_url,
         }
 
 

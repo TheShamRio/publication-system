@@ -10,7 +10,8 @@ import {
 	CardContent,
 	Box,
 	Pagination,
-	CircularProgress // Добавим индикатор загрузки
+	CircularProgress, // Добавим индикатор загрузки
+	Link
 } from '@mui/material';
 import { styled } from '@mui/system';
 import { Document, Page, pdfjs } from 'react-pdf';
@@ -473,6 +474,13 @@ function Publication() {
 					{publication.notes && (
 						<Typography variant="body1" sx={{ color: '#757575', mb: 2 }}> {/* Увеличил отступ */}
 							Примечание: {publication.notes}
+						</Typography>
+					)}
+					{publication.publication_url && (
+						<Typography variant="body1" sx={{ color: '#757575', mb: 1 }}>
+							Ссылка: <Link href={publication.publication_url} target="_blank" rel="noopener noreferrer" sx={{ color: '#0071E3' }}>
+								{publication.publication_url}
+							</Link>
 						</Typography>
 					)}
 					{/* --- КОНЕЦ ОТОБРАЖЕНИЯ НОВЫХ ПОЛЕЙ --- */}

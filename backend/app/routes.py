@@ -800,7 +800,6 @@ def manage_publication(pub_id):
             if 'classification_code' in data: publication.classification_code = data.get('classification_code')
             if 'notes' in data: publication.notes = data.get('notes')
 
-
             # Статус не меняем здесь! Если вернули на доработку, сбрасываем флаги
             if publication.status == 'returned_for_revision':
                 publication.returned_for_revision = False
@@ -916,6 +915,7 @@ def upload_file():
     circulation_str = request.form.get('circulation')
     classification_code = request.form.get('classification_code')
     notes = request.form.get('notes')
+    publication_url = request.form.get('publication_url')
     # --- Конец получения новых полей ---
     is_vak_str = request.form.get('is_vak', 'false') # Дефолтное значение - строка 'false'
     is_wos_str = request.form.get('is_wos', 'false')
@@ -1025,7 +1025,8 @@ def upload_file():
         printed_sheets_volume=printed_sheets_volume,
         circulation=circulation,
         classification_code=classification_code,
-        notes=notes
+        notes=notes,
+        publication_url=publication_url
     )
 
 

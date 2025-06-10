@@ -423,7 +423,8 @@ function Dashboard() {
 	const [editClassificationCodeError, setEditClassificationCodeError] = useState('');
 	const [editQuartileError, setEditQuartileError] = useState('');
 	const [editFileError, setEditFileError] = useState('');
-
+	const [publicationUrl, setPublicationUrl] = useState(''); // --- ДОБАВЬТЕ ЭТО ---
+	const [editPublicationUrl, setEditPublicationUrl] = useState(''); // --- ДОБАВЬТЕ ЭТО ---
 
 	const hintableFieldsForDisplay = [
 		{ field: 'display_name_id', label: 'Тип' },
@@ -1176,6 +1177,7 @@ function Dashboard() {
 		setVolume(''); setNumber(''); setPages(''); setDepartment(''); setPublisher('');
 		setPublisherLocation(''); setPrintedSheetsVolume(''); setCirculation('');
 		setClassificationCode(''); setNotes('');
+		setPublicationUrl('');
 		setNewIsVak(false); setNewIsWoS(false); setNewIsScopus(false);
 		setDisableNewVak(false); setDisableNewWoS(false); setDisableNewScopus(false);
 		// Сброс ВСЕХ ошибок
@@ -1313,7 +1315,7 @@ function Dashboard() {
 		formData.append('circulation', circulation.trim() || '');
 		formData.append('classification_code', classificationCode.trim() || '');
 		formData.append('notes', notes.trim() || '');
-
+		formData.append('publication_url', publicationUrl.trim() || '');
 		// Очистка состояний ошибок ПОСЛЕ успешной валидации и ПЕРЕД отправкой
 		setTitleError(''); setYearError(''); setJournalConferenceNameError('');
 		setDoiError(''); setIssnError(''); setIsbnError(''); setVolumeError('');
@@ -1517,6 +1519,7 @@ function Dashboard() {
 		setEditCirculation(publication?.circulation != null ? String(publication.circulation) : '');
 		setEditClassificationCode(publication?.classification_code || '');
 		setEditNotes(publication?.notes || '');
+		setEditPublicationUrl(publication?.publication_url || '');
 		setEditFile(null);
 
 		// --- Инициализация флагов и блокировок ---
@@ -1685,6 +1688,7 @@ function Dashboard() {
 			data.append('circulation', editCirculation.trim() || '');
 			data.append('classification_code', editClassificationCode.trim() || '');
 			data.append('notes', editNotes.trim() || '');
+			data.append('publication_url', editPublicationUrl.trim() || ''); // --- ДОБАВЬТЕ ЭТО ---
 			data.append('work_form', editWorkForm);
 			// headers['Content-Type'] НЕ устанавливаем для FormData
 		} else { // Если НОВЫЙ ФАЙЛ НЕ ПРИКРЕПЛЕН (обычное обновление данных)
@@ -1711,6 +1715,7 @@ function Dashboard() {
 				publisher_location: editPublisherLocation.trim() || null,
 				classification_code: editClassificationCode.trim() || null,
 				notes: editNotes.trim() || null,
+				publication_url: editPublicationUrl.trim() || null,
 				// Числовые поля (null если пусто или не число)
 				printed_sheets_volume: editPrintedSheetsVolume.trim() && !isNaN(parseFloat(editPrintedSheetsVolume.replace(',', '.'))) ? parseFloat(editPrintedSheetsVolume.replace(',', '.')) : null,
 				work_form: editWorkForm,
@@ -2095,6 +2100,7 @@ function Dashboard() {
 		setEditCirculation('');
 		setEditClassificationCode('');
 		setEditNotes('');
+		setEditPublicationUrl('');
 		setEditWorkForm('Печатная');
 		setEditIsVak(false);
 		setEditIsWoS(false);
@@ -3580,6 +3586,17 @@ function Dashboard() {
 												/>
 												{/* --- КОНЕЦ НОВЫХ ПОЛЕЙ --- */}
 
+
+												<AppleTextField
+													fullWidth
+													label="Ссылка на публикацию (URL)"
+													value={publicationUrl}
+													onChange={(e) => setPublicationUrl(e.target.value)}
+													margin="normal"
+													variant="outlined"
+													type="url"
+												/>
+
 												<Box sx={{ mt: 2 }}>
 													<input
 														type="file"
@@ -4921,6 +4938,16 @@ function Dashboard() {
 							multiline
 							rows={2}
 						// Нет ошибки
+						/>
+
+						<AppleTextField
+							fullWidth
+							label="Ссылка на публикацию (URL)"
+							value={editPublicationUrl}
+							onChange={(e) => setEditPublicationUrl(e.target.value)}
+							margin="normal"
+							variant="outlined"
+							type="url"
 						/>
 
 						{/* Блок выбора файла (редактирование) */}
