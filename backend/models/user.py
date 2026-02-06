@@ -1,0 +1,1 @@
+"""User of the application manages publications"""
