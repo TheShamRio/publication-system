@@ -1,11 +1,13 @@
-from pydantic import BaseSettings, AnyHttpUrl, PostgresDsn
+from typing import Optional
+from pydantic import AnyHttpUrl, PostgresDsn
+from pydantic_settings import BaseSettings
 
 
 class Settings(BaseSettings):
     # =========================
     # Database
     # =========================
-    DATABASE_URL: PostgresDsn
+    DATABASE_URL: str  # use str for asyncpg URLs like postgresql+asyncpg://
 
     # =========================
     # Keycloak
@@ -13,7 +15,6 @@ class Settings(BaseSettings):
     KEYCLOAK_URL: AnyHttpUrl
     KEYCLOAK_REALM: str
     KEYCLOAK_CLIENT_ID: str
-
     KEYCLOAK_ADMIN_USER: str
     KEYCLOAK_ADMIN_PASSWORD: str
 
@@ -29,11 +30,12 @@ class Settings(BaseSettings):
     # =========================
     # Logging (Kafka → ELK)
     # =========================
-    KAFKA_BOOTSTRAP_SERVERS: str
+    KAFKA_BOOTSTRAP_SERVERS: Optional[str] = None  # optional now
     LOG_TOPIC: str = "backend-logs"
 
     class Config:
         env_file = ".env"
+        env_file_encoding = "utf-8"
 
 
 settings = Settings()

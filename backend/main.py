@@ -1,4 +1,5 @@
 from fastapi import FastAPI, Depends, HTTPException, status, Request
+from api.rest.routes.publication_files import router as publication_files_router
 from fastapi.security import OAuth2AuthorizationCodeBearer
 from jose import jwt, JWTError
 import httpx
@@ -146,6 +147,7 @@ def require_role(role: str):
 # =====================================================
 # Routes
 # =====================================================
+app.include_router(publication_files_router)
 
 @app.get("/health")
 def health():
