@@ -1,5 +1,4 @@
-from typing import Optional
-from pydantic import AnyHttpUrl, PostgresDsn
+from pydantic import AnyHttpUrl
 from pydantic_settings import BaseSettings
 
 
@@ -27,11 +26,6 @@ class Settings(BaseSettings):
     MINIO_BUCKET: str
     MINIO_SECURE: bool = False
 
-    # =========================
-    # Logging (Kafka → ELK)
-    # =========================
-    KAFKA_BOOTSTRAP_SERVERS: Optional[str] = None  # optional now
-    LOG_TOPIC: str = "backend-logs"
 
     class Config:
         env_file = ".env"

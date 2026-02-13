@@ -1,7 +1,5 @@
-# app/services/minio_client.py
 from io import BytesIO
 import anyio
-from fastapi import UploadFile
 from minio import Minio
 from config.settings import settings
 
