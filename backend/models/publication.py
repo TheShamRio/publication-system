@@ -1,6 +1,8 @@
 from sqlalchemy import Integer, String, Text, DateTime, func
 from sqlalchemy.orm import Mapped, mapped_column
-from infrastructure.database import Base  # your DeclarativeBase
+
+from infrastructure.database import Base
+
 
 class Publication(Base):
     __tablename__ = "publications"
