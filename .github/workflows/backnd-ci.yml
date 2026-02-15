@@ -1,0 +1,29 @@
+name: Backend CI (uv)
+
+on:
+  push:
+    branches-ignore:
+      - '*temp*'
+  pull_request:
+    branches-ignore:
+      - '*temp*'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v3
+
+      - run: uv python install 3.12
+      - run: uv venv --python 3.12
+
+      - run: uv sync
+
+      - run: uv run pytest -v
