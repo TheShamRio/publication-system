@@ -27,3 +27,6 @@ dependencies = [
 dev = [
     "pytest>=9.0.2",
 ]
+
+[tool.ruff]
+ignore = ["F821"]

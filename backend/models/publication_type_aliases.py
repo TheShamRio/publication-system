@@ -21,7 +21,10 @@ class PublicationTypeAlias(Base):
         index=True
     )
 
-    publication_type = relationship(
-        "PublicationType",
+    publication_type: Mapped["PublicationType"] = relationship(
         back_populates="aliases"
+    )
+
+    publications: Mapped[list["Publication"]] = relationship(
+        back_populates="type_alias"
     )

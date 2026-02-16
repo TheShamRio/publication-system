@@ -23,13 +23,44 @@ class Publication(Base):
 
     status_id: Mapped[int] = mapped_column(ForeignKey("publication_statuses.id"), nullable=False)
     type_alias_id: Mapped[int] = mapped_column(ForeignKey("publication_type_aliases.id"), nullable=False)
-    department_id: Mapped[int] = mapped_column(ForeignKey("departments.id"), nullable=True)
     publisher_id: Mapped[int] = mapped_column(ForeignKey("publishers.id"), nullable=True)
     journal_id: Mapped[int] = mapped_column(ForeignKey("journals.id"), nullable=True)
 
+    status: Mapped["PublicationStatus"] = relationship(
+        back_populates="publications"
+    )
     status_history = relationship(
         "PublicationStatusTemp",
         back_populates="publication",
         cascade="all, delete-orphan",
         order_by="PublicationStatusTemp.date.desc()",
+    )
+    authors: Mapped[list["Author"]] = relationship(
+        secondary="author_publication",
+        back_populates="publications"
+    )
+
+    plan_entries: Mapped[list["PlanEntry"]] = relationship(
+        secondary="plan_entry_publications",
+        back_populates="publications",
+    )
+
+    publisher: Mapped["Publisher"] = relationship(
+        back_populates="publications"
+    )
+
+    comments: Mapped[list["PublicationComment"]] = relationship(
+        back_populates="publication",
+        cascade="all, delete-orphan",
+        order_by="PublicationComment.created_at.desc()",
+    )
+
+    journals: Mapped[list["Journal"]] = relationship(
+        secondary="journal_publications",
+        back_populates="publications",
+    )
+
+    tags: Mapped[list["Tags"]] = relationship(
+        secondary="publication_tags",
+        back_populates="publications",
     )

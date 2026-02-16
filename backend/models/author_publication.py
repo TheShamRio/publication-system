@@ -7,5 +7,12 @@ from infrastructure.database import Base
 class PublicationAuthor(Base):
     __tablename__ = "author_publication"
 
-    author_id: Mapped[int] = mapped_column(ForeignKey("authors.id"), primary_key=True)
-    publication_id: Mapped[int] = mapped_column(ForeignKey("publications.id"), primary_key=True)
+    author_id: Mapped[int] = mapped_column(
+        ForeignKey("authors.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+
+    publication_id: Mapped[int] = mapped_column(
+        ForeignKey("publications.id", ondelete="CASCADE"),
+        primary_key=True,
+    )

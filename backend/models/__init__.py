@@ -15,11 +15,10 @@ from .publication_type_aliases import PublicationTypeAlias
 from .publisher import Publisher
 from .tags import Tags
 from .tags_publication import TagsPublication
-from .department import Department
 from .journal_publication import JournalPublication
 from .journal import Journal
-
+from .university_department import UniversityDepartment
 
 __all__ = ["Author", "Publication", "Plan", "PlanComment", "PublicationComment", "PublicationAuthor", "JournalPublication",
     "PlanEntry", "PlanEntryPublication", "PlanStatus", "PlanStatusTemp", "PublicationStatus", "PublicationType",
-    "PublicationStatusTemp", "PublicationTypeAlias", "Publisher", "Tags", "TagsPublication", "Department", "Journal"]
+    "PublicationStatusTemp", "PublicationTypeAlias", "Publisher", "Tags", "TagsPublication", "UniversityDepartment", "Journal"]

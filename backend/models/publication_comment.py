@@ -2,7 +2,6 @@ from sqlalchemy import Integer, String, Text, DateTime, func, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from infrastructure.database import Base
-from models.publication import Publication
 
 
 class PublicationComment(Base):
@@ -16,5 +15,14 @@ class PublicationComment(Base):
     )
 
     publication_id = mapped_column(ForeignKey("publications.id"))
+    status_change_id: Mapped[int | None] = mapped_column(
+        ForeignKey("publication_status_temp.publication_id"),
+        nullable=True,
+        unique=True
+    )
 
-    publication: Mapped["Publication"] = relationship(back_populates="comments")
+    publication: Mapped["Publication"] = relationship(
+        back_populates="comments"
+    )
+    status_change: Mapped["PublicationStatusTemp"] = relationship(back_populates="comment")
+

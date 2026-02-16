@@ -16,8 +16,11 @@ class PublicationStatus(Base):
         index=True,
     )
 
-    publications = relationship(
-        "PublicationStatusTemp",
+    publications: Mapped[list["Publication"]] = relationship(
+        back_populates="status"
+    )
+
+    history_entries: Mapped[list["PublicationStatusTemp"]] = relationship(
         back_populates="status",
         cascade="all, delete-orphan",
     )

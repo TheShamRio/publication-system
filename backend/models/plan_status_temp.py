@@ -30,5 +30,10 @@ class PlanStatusTemp(Base):
         nullable=False,
     )
 
-    publication = relationship("Plan", back_populates="status_history")
-    status = relationship("PlanStatus", back_populates="plans")
+    plan: Mapped["Plan"] = relationship(
+        back_populates="status_history"
+    )
+
+    status: Mapped["PlanStatus"] = relationship(
+        back_populates="history_entries"
+    )

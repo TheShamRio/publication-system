@@ -2,7 +2,6 @@ from sqlalchemy import Integer, String, Text, DateTime, func, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from infrastructure.database import Base
-from models.plan import Plan
 
 
 class PlanComment(Base):
@@ -17,6 +16,4 @@ class PlanComment(Base):
     username: Mapped[str] = mapped_column(String(36), nullable=False)
     plan_id = mapped_column(ForeignKey("plans.id"))
     
-    
-
     plan: Mapped["Plan"] = relationship(back_populates="comments")

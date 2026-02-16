@@ -16,8 +16,7 @@ class PublicationType(Base):
         index=True,
     )
 
-    aliases = relationship(
-        "PublicationTypeAlias",
+    aliases: Mapped[list["PublicationTypeAlias"]] = relationship(
         back_populates="publication_type",
-        cascade="all, delete-orphan"
+        cascade="all, delete-orphan",
     )

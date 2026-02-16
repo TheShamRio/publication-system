@@ -1,5 +1,5 @@
 from sqlalchemy import Integer, ForeignKey, String, DateTime
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from infrastructure.database import Base
 
@@ -18,3 +18,9 @@ class Journal(Base):
     circulation: Mapped[int] = mapped_column(Integer, nullable=True)
 
     publisher_id: Mapped[int] = mapped_column(ForeignKey("publishers.id"))
+
+    publisher: Mapped["Publisher"] = relationship(back_populates="journals")
+    publications: Mapped[list["Publication"]] = relationship(
+        secondary="journal_publications",
+        back_populates="journals",
+    )

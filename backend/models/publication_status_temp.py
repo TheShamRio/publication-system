@@ -30,5 +30,16 @@ class PublicationStatusTemp(Base):
         nullable=False,
     )
 
-    publication = relationship("Publication", back_populates="status_history")
-    status = relationship("PublicationStatus", back_populates="publications")
+    publication: Mapped["Publication"] = relationship(
+        back_populates="status_history"
+    )
+
+    status: Mapped["PublicationStatus"] = relationship(
+        back_populates="publications"
+    )
+
+    comment: Mapped["PublicationComment"] = relationship(
+        back_populates="status_change",
+        uselist=False,
+        cascade="all, delete-orphan",
+    )
