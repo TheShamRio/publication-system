@@ -1,0 +1,99 @@
+{
+  "realm": "myrealm",
+  "enabled": true,
+  "roles": {
+    "realm": [
+      { "name": "admin" },
+      { "name": "manager" },
+      { "name": "user" }
+    ]
+  },
+  "clients": [
+    {
+      "clientId": "frontend",
+      "enabled": true,
+      "publicClient": true,
+      "redirectUris": ["http://localhost:3000/*"],
+      "webOrigins": ["http://localhost:3000"],
+      "protocol": "openid-connect",
+      "protocolMappers": [
+        {
+            "name": "firstName",
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-usermodel-property-mapper",
+            "consentRequired": false,
+            "config": {
+            "user.attribute": "firstName",
+            "claim.name": "firstName",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+            }
+        },
+        {
+            "name": "middleName",
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-usermodel-attribute-mapper",
+            "consentRequired": false,
+            "config": {
+            "user.attribute": "middleName",
+            "claim.name": "middleName",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+            }
+        },
+        {
+            "name": "thirdName",
+            "protocol": "openid-connect",
+            "protocolMapper": "oidc-usermodel-attribute-mapper",
+            "consentRequired": false,
+            "config": {
+            "user.attribute": "thirdName",
+            "claim.name": "thirdName",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true"
+            }
+        }
+        ]
+    },
+    {
+      "clientId": "backend",
+      "enabled": true,
+      "publicClient": false,
+      "secret": "backend-secret",
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect"
+    }
+  ],
+  "users": [
+  {
+    "username": "admin",
+    "enabled": true,
+    "firstName": "Alina",
+    "attributes": {
+      "middleName": ["Toronto"],
+      "thirdName": ["Kubrick"]
+    },
+    "credentials": [
+      { "type": "password", "value": "admin", "temporary": false }
+    ],
+    "realmRoles": ["admin"]
+  },
+  {
+    "username": "user",
+    "enabled": true,
+    "firstName": "Bob",
+    "attributes": {
+      "middleName": ["Kasper"],
+      "thirdName": ["Soroka"]
+    },
+    "credentials": [
+      { "type": "password", "value": "user", "temporary": false }
+    ],
+    "realmRoles": ["user"]
+  }
+  ]
+
+}
