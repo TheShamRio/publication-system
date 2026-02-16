@@ -1,5 +1,5 @@
 from sqlalchemy import Integer, String, Text, DateTime, func
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from infrastructure.database import Base
 
@@ -18,20 +18,13 @@ class Publication(Base):
         DateTime(timezone=True), server_default=func.now()
     )
 
-"""authors
-    - authorid
-    - name
-    - surname
-    - third_name
-    - email
-    - phone number
-    - ? userId
-"""
+    status_history = relationship(
+        "PublicationStatusTemp",
+        back_populates="publication",
+        cascade="all, delete-orphan",
+        order_by="PublicationStatusTemp.date.desc()",
+    )
 
-"""publication author
-    - authorid
-    - publicationId
-"""
 
 """publication metadata
     Id - UUID
@@ -58,46 +51,6 @@ class Publication(Base):
     publisherId (foreign key)
 """
 
-"""note
-    - id
-    - publication id
-    - text
-"""
-
-"""department
-    - id
-    - name
-"""
-
-"""publisher
-    - ID
-    - Title
-    - Location
-"""
-
-"""publication_index(vak, rinc, scopus, wos, none)
-    id
-    title
-"""
-
-
-"""
-publication status type
-    id - UUID
-    titile - string(черновик, требуется проверка, отправлено на доработку, опубликована)
-"""
-
-
-"""publication type
-    - id
-    - name
-"""
-
-"""display name
-    - id
-    - name
-    - publication type id (foreign key)
-"""
 
 """publication form
     - id

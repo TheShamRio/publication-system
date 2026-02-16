@@ -4,9 +4,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from infrastructure.database import Base
 
 
-class Publisher(Base):
-    __tablename__ = "publishers"
+class UniversityDepartment(Base):
+    __tablename__ = "university_department"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    name: Mapped[str] = mapped_column(String(255), nullable=False)
-    location: Mapped[str] = mapped_column(String(255), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
