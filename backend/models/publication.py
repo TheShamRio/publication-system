@@ -1,85 +1,66 @@
-"""authors
-    - authorid
-    - name
-    - surname
-    - third_name
-    - email
-    - phone number
-    - ? userId
-"""
+from sqlalchemy import Integer, String, Text, DateTime, func, Float, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-"""publication author
-    - authorid
-    - publicationId
-"""
-
-"""publication metadata
-    Id - UUID
-    UserID - who inserted to the db(foreign key)
-    Title - tile of publication
-    DateCreated - date of publication
-    PublicationFormId (foreign key)
-    DateUpdated - date of change
-    StatusId - foreign key
-    FileURI - URI where the publication is stored
-    JournalConferenceName
-    DOI
-    ISSN
-    ISBN
-    Quartile
-    VOLUME
-    Number - номер выпуска публикации
-    Pages - location in the journal
-    PrintedSheetsVolume - объем в печатных листах
-    Classification code
-    publication type alias id( foreign key)
-    Тираж
-    departmentId (foreign key)
-    publisherId (foreign key)
-"""
-
-"""note
-    - id
-    - publication id
-    - text
-"""
-
-"""department
-    - id
-    - name
-"""
-
-"""publisher
-    - ID
-    - Title
-    - Location
-"""
-
-"""publication_index(vak, rinc, scopus, wos, none)
-    id
-    title
-"""
+from infrastructure.database import Base
 
 
-"""
-publication status type
-    id - UUID
-    titile - string(черновик, требуется проверка, отправлено на доработку, опубликована)
-"""
+class Publication(Base):
+    __tablename__ = "publications"
 
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    username: Mapped[str] = mapped_column(String(36), nullable=True) # who inserted in the system
+    external_url: Mapped[str] = mapped_column(Text, nullable=True)
+    internal_url: Mapped[str] = mapped_column(Text, nullable=True)
+    doi: Mapped[str] = mapped_column(String(512), nullable=True)
+    printed_sheets_volume: Mapped[float] = mapped_column(Float, nullable=True)
+    classification_code: Mapped[str] = mapped_column(String(55))
+    notes: Mapped[str] = mapped_column(Text, nullable=True)
+    work_form: Mapped[str] = mapped_column(String(24), nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
 
-"""publication type
-    - id
-    - name
-"""
+    status_id: Mapped[int] = mapped_column(ForeignKey("publication_statuses.id"), nullable=False)
+    type_alias_id: Mapped[int] = mapped_column(ForeignKey("publication_type_aliases.id"), nullable=False)
+    publisher_id: Mapped[int] = mapped_column(ForeignKey("publishers.id"), nullable=True)
+    journal_id: Mapped[int] = mapped_column(ForeignKey("journals.id"), nullable=True)
 
-"""display name
-    - id
-    - name
-    - publication type id (foreign key)
-"""
+    status: Mapped["PublicationStatus"] = relationship(
+        back_populates="publications"
+    )
+    status_history = relationship(
+        "PublicationStatusTemp",
+        back_populates="publication",
+        cascade="all, delete-orphan",
+        order_by="PublicationStatusTemp.date.desc()",
+    )
+    authors: Mapped[list["Author"]] = relationship(
+        secondary="author_publication",
+        back_populates="publications"
+    )
 
-"""publication form
-    - id
-    - title
-"""
+    plan_entries: Mapped[list["PlanEntry"]] = relationship(
+        secondary="plan_entry_publications",
+        back_populates="publications",
+    )
+
+    publisher: Mapped["Publisher"] = relationship(
+        back_populates="publications"
+    )
+
+    comments: Mapped[list["PublicationComment"]] = relationship(
+        back_populates="publication",
+        cascade="all, delete-orphan",
+        order_by="PublicationComment.created_at.desc()",
+    )
+
+    journals: Mapped[list["Journal"]] = relationship(
+        secondary="journal_publications",
+        back_populates="publications",
+    )
+
+    tags: Mapped[list["Tags"]] = relationship(
+        secondary="publication_tags",
+        back_populates="publications",
+    )
