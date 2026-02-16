@@ -1,103 +1,66 @@
-from sqlalchemy import Integer, String, Text, DateTime, func
-from sqlalchemy.orm import Mapped, mapped_column
-from infrastructure.database import Base  # your DeclarativeBase
+from sqlalchemy import Integer, String, Text, DateTime, func, Float, ForeignKey
+from sqlalchemy.orm import Mapped, mapped_column, relationship
+
+from infrastructure.database import Base
+
 
 class Publication(Base):
     __tablename__ = "publications"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
     title: Mapped[str] = mapped_column(String(255), nullable=False)
-    author: Mapped[str] = mapped_column(String(255), nullable=False)
-    abstract: Mapped[str | None] = mapped_column(Text, nullable=True)
-    file_object_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    file_name: Mapped[str] = mapped_column(String(255), nullable=False)
-    content_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    username: Mapped[str] = mapped_column(String(36), nullable=True) # who inserted in the system
+    external_url: Mapped[str] = mapped_column(Text, nullable=True)
+    internal_url: Mapped[str] = mapped_column(Text, nullable=True)
+    doi: Mapped[str] = mapped_column(String(512), nullable=True)
+    printed_sheets_volume: Mapped[float] = mapped_column(Float, nullable=True)
+    classification_code: Mapped[str] = mapped_column(String(55))
+    notes: Mapped[str] = mapped_column(Text, nullable=True)
+    work_form: Mapped[str] = mapped_column(String(24), nullable=False)
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
 
-"""authors
-    - authorid
-    - name
-    - surname
-    - third_name
-    - email
-    - phone number
-    - ? userId
-"""
+    status_id: Mapped[int] = mapped_column(ForeignKey("publication_statuses.id"), nullable=False)
+    type_alias_id: Mapped[int] = mapped_column(ForeignKey("publication_type_aliases.id"), nullable=False)
+    publisher_id: Mapped[int] = mapped_column(ForeignKey("publishers.id"), nullable=True)
+    journal_id: Mapped[int] = mapped_column(ForeignKey("journals.id"), nullable=True)
 
-"""publication author
-    - authorid
-    - publicationId
-"""
+    status: Mapped["PublicationStatus"] = relationship(
+        back_populates="publications"
+    )
+    status_history = relationship(
+        "PublicationStatusTemp",
+        back_populates="publication",
+        cascade="all, delete-orphan",
+        order_by="PublicationStatusTemp.date.desc()",
+    )
+    authors: Mapped[list["Author"]] = relationship(
+        secondary="author_publication",
+        back_populates="publications"
+    )
 
-"""publication metadata
-    Id - UUID
-    UserID - who inserted to the db(foreign key)
-    Title - tile of publication
-    DateCreated - date of publication
-    PublicationFormId (foreign key)
-    DateUpdated - date of change
-    StatusId - foreign key
-    FileURI - URI where the publication is stored
-    JournalConferenceName
-    DOI
-    ISSN
-    ISBN
-    Quartile
-    VOLUME
-    Number - номер выпуска публикации
-    Pages - location in the journal
-    PrintedSheetsVolume - объем в печатных листах
-    Classification code
-    publication type alias id( foreign key)
-    Тираж
-    departmentId (foreign key)
-    publisherId (foreign key)
-"""
+    plan_entries: Mapped[list["PlanEntry"]] = relationship(
+        secondary="plan_entry_publications",
+        back_populates="publications",
+    )
 
-"""note
-    - id
-    - publication id
-    - text
-"""
+    publisher: Mapped["Publisher"] = relationship(
+        back_populates="publications"
+    )
 
-"""department
-    - id
-    - name
-"""
+    comments: Mapped[list["PublicationComment"]] = relationship(
+        back_populates="publication",
+        cascade="all, delete-orphan",
+        order_by="PublicationComment.created_at.desc()",
+    )
 
-"""publisher
-    - ID
-    - Title
-    - Location
-"""
+    journals: Mapped[list["Journal"]] = relationship(
+        secondary="journal_publications",
+        back_populates="publications",
+    )
 
-"""publication_index(vak, rinc, scopus, wos, none)
-    id
-    title
-"""
-
-
-"""
-publication status type
-    id - UUID
-    titile - string(черновик, требуется проверка, отправлено на доработку, опубликована)
-"""
-
-
-"""publication type
-    - id
-    - name
-"""
-
-"""display name
-    - id
-    - name
-    - publication type id (foreign key)
-"""
-
-"""publication form
-    - id
-    - title
-"""
+    tags: Mapped[list["Tags"]] = relationship(
+        secondary="publication_tags",
+        back_populates="publications",
+    )
