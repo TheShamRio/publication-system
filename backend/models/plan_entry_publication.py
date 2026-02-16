@@ -4,8 +4,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from infrastructure.database import Base
 
 
-class PublicationAuthor(Base):
-    __tablename__ = "author_publication"
+class PlanEntryPublication(Base):
+    __tablename__ = "plan_entry_publications"
 
-    author_id: Mapped[int] = mapped_column(ForeignKey("authors.id"), primary_key=True)
     publication_id: Mapped[int] = mapped_column(ForeignKey("publications.id"), primary_key=True)
+    plan_entry_id: Mapped[int] = mapped_column(ForeignKey("plans.id"), primary_key=True)

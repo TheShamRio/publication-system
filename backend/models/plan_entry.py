@@ -1,4 +1,4 @@
-from sqlalchemy import Integer, String
+from sqlalchemy import Integer, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column
 
 from infrastructure.database import Base
@@ -8,7 +8,7 @@ class PlanEntry(Base):
     __tablename__ = "plan_entries"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, index=True)
-    title: Mapped[str] = mapped_column(Integer, nullable=False)
-    status_id: Mapped[str] = mapped_column(Integer, nullable=False)
+    total_amount_planned: Mapped[int] = mapped_column(Integer, nullable=False)
 
-    user_id: Mapped[str] = mapped_column(String(36), nullable=True)
+    type_alias_id: Mapped[int] = mapped_column(ForeignKey("publication_type_aliases.id"), nullable=False)
+    plan_id: Mapped[int] = mapped_column(ForeignKey("plans.id"), nullable=False)

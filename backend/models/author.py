@@ -11,6 +11,5 @@ class Author(Base):
     first_name: Mapped[str] = mapped_column(String(255), nullable=False)
     middle_name: Mapped[str] = mapped_column(String(255), nullable=False)
     third_name: Mapped[str | None] = mapped_column(Text, nullable=True)
-    author_unique_string: Mapped[str] = mapped_column(String(255), nullable=False)
 
-    user_id: Mapped[str] = mapped_column(String(36), nullable=True)
+    username: Mapped[str] = mapped_column(String(36), nullable=True)
