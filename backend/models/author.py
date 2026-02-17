@@ -16,7 +16,7 @@ class Author(Base):
 
     department_id: Mapped[int] = mapped_column(
         ForeignKey("university_department.id"),
-        nullable=False,
+        nullable=True,
     )
 
     department: Mapped["UniversityDepartment"] = relationship(

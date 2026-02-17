@@ -29,8 +29,7 @@ class Publication(Base):
     status: Mapped["PublicationStatus"] = relationship(
         back_populates="publications"
     )
-    status_history = relationship(
-        "PublicationStatusTemp",
+    status_history: Mapped[list["PublicationStatusTemp"]] = relationship(
         back_populates="publication",
         cascade="all, delete-orphan",
         order_by="PublicationStatusTemp.date.desc()",
@@ -63,4 +62,8 @@ class Publication(Base):
     tags: Mapped[list["Tags"]] = relationship(
         secondary="publication_tags",
         back_populates="publications",
+    )
+
+    type_alias: Mapped["PublicationTypeAlias"] = relationship(
+        back_populates="publications"
     )

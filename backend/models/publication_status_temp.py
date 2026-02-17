@@ -35,7 +35,7 @@ class PublicationStatusTemp(Base):
     )
 
     status: Mapped["PublicationStatus"] = relationship(
-        back_populates="publications"
+        back_populates="history_entries"
     )
 
     comment: Mapped["PublicationComment"] = relationship(
