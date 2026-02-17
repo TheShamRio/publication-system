@@ -12,10 +12,10 @@ class Author(Base):
     middle_name: Mapped[str] = mapped_column(String(255), nullable=False)
     third_name: Mapped[str | None] = mapped_column(Text, nullable=True)
 
-    username: Mapped[str] = mapped_column(String(36), nullable=True)
+    username: Mapped[str] = mapped_column(String(36), nullable=True, unique=True)
 
     department_id: Mapped[int] = mapped_column(
-        ForeignKey("university_department.id"),
+        ForeignKey("university_department.id", ondelete="RESTRICT"),
         nullable=True,
     )
 

@@ -1,4 +1,4 @@
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, ConfigDict
 from pydantic_settings import BaseSettings
 
 
@@ -27,9 +27,10 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = False
 
 
-    class Config:
-        env_file = ".env"
-        env_file_encoding = "utf-8"
+    model_config = ConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8"
+    )
 
 
 settings = Settings()

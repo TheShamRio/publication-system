@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest_asyncio
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
 
 backend_root = Path(__file__).resolve().parent.parent
@@ -38,6 +39,7 @@ async def setup_db():
     Create all tables at the beginning of the test session and drop at the end.
     """
     async with engine.begin() as conn:
+        await conn.execute(text("PRAGMA foreign_keys=ON"))
         await conn.run_sync(Base.metadata.create_all)
     yield
     async with engine.begin() as conn:
