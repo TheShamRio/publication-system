@@ -14,5 +14,5 @@ class IAuthorRepository(Protocol):
     async def update(self, author: Author) -> Author:
         ...
 
-    async def delete(self, author_id: int) -> None:
+    async def delete(self, author: Author) -> None:
         ...
